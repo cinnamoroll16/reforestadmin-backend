@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   AppBar,
   Toolbar,
@@ -6,13 +5,31 @@ import {
   IconButton,
   Avatar,
   Badge,
+  Menu,
+  MenuItem,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
   Notifications as NotificationsIcon,
 } from '@mui/icons-material';
+import { useState } from 'react';
 
-function ReForestAppBar({ handleDrawerToggle }) {
+function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
+  const [anchorEl, setAnchorEl] = useState(null);
+
+  const handleMenuOpen = (event) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleMenuClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleLogout = () => {
+    handleMenuClose();
+    onLogout();
+  };
+
   return (
     <AppBar
       position="fixed"
@@ -39,9 +56,24 @@ function ReForestAppBar({ handleDrawerToggle }) {
             <NotificationsIcon />
           </Badge>
         </IconButton>
-        <IconButton color="inherit" sx={{ ml: 1 }}>
-          <Avatar sx={{ width: 32, height: 32 }}>A</Avatar>
+        <IconButton 
+          color="inherit" 
+          sx={{ ml: 1 }}
+          onClick={handleMenuOpen}
+        >
+          <Avatar sx={{ width: 32, height: 32 }}>
+            {user?.name ? user.name.charAt(0).toUpperCase() : 'A'}
+          </Avatar>
         </IconButton>
+        
+        <Menu
+          anchorEl={anchorEl}
+          open={Boolean(anchorEl)}
+          onClose={handleMenuClose}
+        >
+          <MenuItem disabled>{user?.email || 'user@example.com'}</MenuItem>
+          <MenuItem onClick={handleLogout}>Logout</MenuItem>
+        </Menu>
       </Toolbar>
     </AppBar>
   );
