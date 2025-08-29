@@ -15,30 +15,54 @@ import {
   Assignment as AssignmentIcon,
   Notifications as NotificationsIcon,
   Person as PersonIcon,
-  Nature as NatureIcon, // Changed from EcoIcon to NatureIcon
+  Nature as NatureIcon,
 } from '@mui/icons-material';
 
 function Navigation({ mobileOpen, handleDrawerToggle, isMobile }) {
   const navItems = [
-    { text: 'Home', icon: <HomeIcon />, path: '/' },
-    { text: 'View Sensor', icon: <SensorsIcon />, path: '/sensor' },
+    { text: 'Home', icon: <HomeIcon />, path: '/Dashboard' },
+    { text: 'View Sensor', icon: <SensorsIcon />, path: '/Sensor' },
     { text: 'Recommendation Logs', icon: <ListAltIcon />, path: '/recommendations' },
     { text: 'Task', icon: <AssignmentIcon />, path: '/tasks' },
     { text: 'Notification', icon: <NotificationsIcon />, path: '/notifications' },
     { text: 'My Profile', icon: <PersonIcon />, path: '/profile' },
   ];
 
+  const handleNavigation = (path) => {
+    window.location.href = path; // Use window.location for navigation
+    if (isMobile) {
+      handleDrawerToggle();
+    }
+  };
+
+  // Get current path for highlighting
+  const currentPath = window.location.pathname;
+
   const drawer = (
     <div>
       <Toolbar sx={{ backgroundColor: 'primary.main', color: 'white' }}>
-        <NatureIcon sx={{ mr: 2 }} /> {/* Changed from EcoIcon to NatureIcon */}
+        <NatureIcon sx={{ mr: 2 }} />
         <Typography variant="h6" noWrap component="div">
           ReForest
         </Typography>
       </Toolbar>
       <List>
         {navItems.map((item) => (
-          <ListItem button key={item.text}>
+          <ListItem 
+            button 
+            key={item.text}
+            onClick={() => handleNavigation(item.path)}
+            selected={currentPath === item.path}
+            sx={{
+              '&.Mui-selected': {
+                backgroundColor: 'primary.light',
+                color: 'white',
+                '&:hover': {
+                  backgroundColor: 'primary.main',
+                }
+              }
+            }}
+          >
             <ListItemIcon>{item.icon}</ListItemIcon>
             <ListItemText primary={item.text} />
           </ListItem>

@@ -1,21 +1,20 @@
 import { useState } from 'react';
 import { ThemeProvider } from '@mui/material/styles';
 import { CssBaseline, Box, useMediaQuery } from '@mui/material';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import theme from './theme/theme';
 import ReForestAppBar from './components/AppBar';
 import Navigation from './components/Navigation';
 import Dashboard from './components/Dashboard';
-import Login from './components/Login';
 import Register from './components/Register';
-import ForgotPassword from './components/ForgotPassword';
-import ResetPassword from './components/ResetPassword';
+import Login from './components/Login';
+import Sensor from './components/Sensor';
 
 function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState(null);
-  const [authView, setAuthView] = useState('login'); // 'login', 'register', 'forgot', 'reset'
-  const [resetToken, setResetToken] = useState(null);
+  const [authView, setAuthView] = useState('login'); // 'login', 'register', 'forgot'
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   
   const handleDrawerToggle = () => {
@@ -25,7 +24,6 @@ function App() {
   const handleLogin = (userData) => {
     setUser(userData);
     setIsAuthenticated(true);
-    setAuthView('login');
   };
 
   const handleLogout = () => {
@@ -45,17 +43,6 @@ function App() {
     setAuthView('forgot');
   };
 
-  const switchToResetPassword = (token) => {
-    setResetToken(token);
-    setAuthView('reset');
-  };
-
-  // In a real app, this would be triggered by a link in the email
-  // For demo purposes, we'll simulate it
-  const simulateEmailLink = () => {
-    switchToResetPassword('demo-reset-token-12345');
-  };
-
   if (!isAuthenticated) {
     return (
       <ThemeProvider theme={theme}>
@@ -63,42 +50,43 @@ function App() {
         {authView === 'login' ? (
           <Login 
             onLogin={handleLogin} 
-            onSwitchToRegister={switchToRegister} 
-            onSwitchToForgotPassword={switchToForgotPassword} 
+            onSwitchToRegister={switchToRegister}
+            onSwitchToForgotPassword={switchToForgotPassword}
           />
-        ) : authView === 'register' ? (
+        ) : (
           <Register onRegister={handleLogin} onSwitchToLogin={switchToLogin} />
-        ) : authView === 'forgot' ? (
-          <ForgotPassword 
-            onSwitchToLogin={switchToLogin} 
-            onSuccess={simulateEmailLink} 
-          />
-        ) : authView === 'reset' ? (
-          <ResetPassword 
-            onSwitchToLogin={switchToLogin} 
-            token={resetToken} 
-          />
-        ) : null}
+        )}
       </ThemeProvider>
     );
   }
 
   return (
     <ThemeProvider theme={theme}>
-      <Box sx={{ display: 'flex' }}>
-        <CssBaseline />
-        <ReForestAppBar 
-          handleDrawerToggle={handleDrawerToggle} 
-          user={user}
-          onLogout={handleLogout}
-        />
-        <Navigation 
-          mobileOpen={mobileOpen} 
-          handleDrawerToggle={handleDrawerToggle} 
-          isMobile={isMobile} 
-        />
-        <Dashboard />
-      </Box>
+      <Router> {/* Wrap everything with Router */}
+        <Box sx={{ display: 'flex' }}>
+          <CssBaseline />
+          <ReForestAppBar 
+            handleDrawerToggle={handleDrawerToggle} 
+            user={user}
+            onLogout={handleLogout}
+          />
+          <Navigation 
+            mobileOpen={mobileOpen} 
+            handleDrawerToggle={handleDrawerToggle} 
+            isMobile={isMobile}
+          />
+          <Box component="main" sx={{ flexGrow: 1, p: 3 }}>
+            <Routes>
+              <Route path="/" element={<Navigate to="/Dashboard" replace />} />
+              <Route path="/Dashboard" element={<Dashboard />} />
+              <Route path="/Sensor" element={<Sensor />} />
+              
+              {/* Add a catch-all route for undefined paths */}
+              <Route path="*" element={<Navigate to="/Dashboard" replace />} />
+            </Routes>
+          </Box>
+        </Box>
+      </Router>
     </ThemeProvider>
   );
 }
