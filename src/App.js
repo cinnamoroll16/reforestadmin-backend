@@ -1,92 +1,184 @@
-import { useState } from 'react';
-import { ThemeProvider } from '@mui/material/styles';
-import { CssBaseline, Box, useMediaQuery } from '@mui/material';
+// src/App.js
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import theme from './theme/theme';
-import ReForestAppBar from './components/AppBar';
-import Navigation from './components/Navigation';
-import Dashboard from './components/Dashboard';
-import Register from './components/Register';
-import Login from './components/Login';
-import Sensor from './components/Sensor';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
+import { AuthProvider } from './context/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
+import PublicRoute from './components/PublicRoute';
+
+// Import pages
+import Login from './pages/Login';
+import Registration from './pages/Registration';
+import Dashboard from './pages/Dashboard';
+// Uncomment these imports when you create these components:
+// import ForgotPassword from './pages/ForgotPassword';
+// import ResetPassword from './pages/ResetPassword';
+// import Profile from './pages/Profile';
+// import PlantingProjects from './pages/PlantingProjects';
+// import TreeInventory from './pages/TreeInventory';
+// import Reports from './pages/Reports';
+// import Settings from './pages/Settings';
+// import NotFound from './pages/NotFound';
+
+// Create temporary placeholder components for development
+const ForgotPassword = () => <div>Forgot Password Page - Under Construction</div>;
+const ResetPassword = () => <div>Reset Password Page - Under Construction</div>;
+const Profile = () => <div>Profile Page - Under Construction</div>;
+const PlantingProjects = () => <div>Planting Projects Page - Under Construction</div>;
+const TreeInventory = () => <div>Tree Inventory Page - Under Construction</div>;
+const Reports = () => <div>Reports Page - Under Construction</div>;
+const Settings = () => <div>Settings Page - Under Construction</div>;
+const NotFound = () => <div>404 - Page Not Found</div>;
+
+// Create theme
+const theme = createTheme({
+  palette: {
+    primary: {
+      main: '#2e7d32',
+      light: '#66bb6a',
+      dark: '#1b5e20',
+    },
+    secondary: {
+      main: '#4caf50',
+    },
+    background: {
+      default: '#f8f9fa',
+    },
+  },
+  typography: {
+    fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
+    h4: {
+      fontWeight: 600,
+    },
+    h5: {
+      fontWeight: 500,
+    },
+    button: {
+      textTransform: 'none',
+    },
+  },
+  shape: {
+    borderRadius: 12,
+  },
+  components: {
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          borderRadius: 12,
+          padding: '10px 24px',
+        },
+      },
+    },
+    MuiTextField: {
+      styleOverrides: {
+        root: {
+          '& .MuiOutlinedInput-root': {
+            borderRadius: 12,
+          },
+        },
+      },
+    },
+  },
+});
 
 function App() {
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState(null);
-  const [authView, setAuthView] = useState('login'); // 'login', 'register', 'forgot'
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  
-  const handleDrawerToggle = () => {
-    setMobileOpen(!mobileOpen);
-  };
-
-  const handleLogin = (userData) => {
-    setUser(userData);
-    setIsAuthenticated(true);
-  };
-
-  const handleLogout = () => {
-    setUser(null);
-    setIsAuthenticated(false);
-  };
-
-  const switchToRegister = () => {
-    setAuthView('register');
-  };
-
-  const switchToLogin = () => {
-    setAuthView('login');
-  };
-
-  const switchToForgotPassword = () => {
-    setAuthView('forgot');
-  };
-
-  if (!isAuthenticated) {
-    return (
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        {authView === 'login' ? (
-          <Login 
-            onLogin={handleLogin} 
-            onSwitchToRegister={switchToRegister}
-            onSwitchToForgotPassword={switchToForgotPassword}
-          />
-        ) : (
-          <Register onRegister={handleLogin} onSwitchToLogin={switchToLogin} />
-        )}
-      </ThemeProvider>
-    );
-  }
-
   return (
     <ThemeProvider theme={theme}>
-      <Router> {/* Wrap everything with Router */}
-        <Box sx={{ display: 'flex' }}>
-          <CssBaseline />
-          <ReForestAppBar 
-            handleDrawerToggle={handleDrawerToggle} 
-            user={user}
-            onLogout={handleLogout}
-          />
-          <Navigation 
-            mobileOpen={mobileOpen} 
-            handleDrawerToggle={handleDrawerToggle} 
-            isMobile={isMobile}
-          />
-          <Box component="main" sx={{ flexGrow: 1, p: 3 }}>
-            <Routes>
-              <Route path="/" element={<Navigate to="/Dashboard" replace />} />
-              <Route path="/Dashboard" element={<Dashboard />} />
-              <Route path="/Sensor" element={<Sensor />} />
-              
-              {/* Add a catch-all route for undefined paths */}
-              <Route path="*" element={<Navigate to="/Dashboard" replace />} />
-            </Routes>
-          </Box>
-        </Box>
-      </Router>
+      <CssBaseline />
+      <AuthProvider>
+        <Router>
+          <Routes>
+            {/* Public Routes */}
+            <Route 
+              path="/login" 
+              element={
+                <PublicRoute>
+                  <Login />
+                </PublicRoute>
+              } 
+            />
+            <Route 
+              path="/register" 
+              element={
+                <PublicRoute>
+                  <Registration />
+                </PublicRoute>
+              } 
+            />
+            <Route 
+              path="/forgot-password" 
+              element={
+                <PublicRoute>
+                  <ForgotPassword />
+                </PublicRoute>
+              } 
+            />
+            <Route 
+              path="/reset-password/:token" 
+              element={
+                <PublicRoute>
+                  <ResetPassword />
+                </PublicRoute>
+              } 
+            />
+
+            {/* Protected Routes */}
+            <Route 
+              path="/dashboard" 
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/profile" 
+              element={
+                <ProtectedRoute>
+                  <Profile />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/projects" 
+              element={
+                <ProtectedRoute>
+                  <PlantingProjects />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/inventory" 
+              element={
+                <ProtectedRoute>
+                  <TreeInventory />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/reports" 
+              element={
+                <ProtectedRoute>
+                  <Reports />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/settings" 
+              element={
+                <ProtectedRoute>
+                  <Settings />
+                </ProtectedRoute>
+              } 
+            />
+
+            {/* Default Redirects */}
+            <Route path="/" element={<Navigate to="/login" replace />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Router>
+      </AuthProvider>
     </ThemeProvider>
   );
 }
