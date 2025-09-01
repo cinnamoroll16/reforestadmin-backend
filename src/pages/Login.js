@@ -15,7 +15,7 @@ import {
 } from '@mui/material';
 import { Visibility, VisibilityOff, Email, Lock } from '@mui/icons-material';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext.js';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -36,12 +36,20 @@ const Login = () => {
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    const result = await login(formData.email, formData.password);
-    if (result.success) navigate('/dashboard');
-    setLoading(false);
-  };
+  e.preventDefault();
+  setLoading(true);
+  setError(''); // Clear previous errors
+  
+  const result = await login(formData.email, formData.password);
+  
+  if (result.success) {
+    navigate('/dashboard');
+  } else {
+    setError(result.error);
+  }
+  
+  setLoading(false);
+};
 
   return (
     <Box

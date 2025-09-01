@@ -3,14 +3,16 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
-import { AuthProvider } from './context/AuthContext';
-import ProtectedRoute from './components/ProtectedRoute';
-import PublicRoute from './components/PublicRoute';
+import { AuthProvider } from './context/AuthContext.js';
+import ProtectedRoute from './components/ProtectedRoute.js';
+import PublicRoute from './components/PublicRoute.js';
+
 
 // Import pages
-import Login from './pages/Login';
-import Registration from './pages/Registration';
-import Dashboard from './pages/Dashboard';
+import Login from './pages/Login.js';
+import Registration from './pages/Registration.js';
+import Dashboard from './pages/Dashboard.js';
+import Profile from './pages/Profile.js';
 // Uncomment these imports when you create these components:
 // import ForgotPassword from './pages/ForgotPassword';
 // import ResetPassword from './pages/ResetPassword';
@@ -24,7 +26,6 @@ import Dashboard from './pages/Dashboard';
 // Create temporary placeholder components for development
 const ForgotPassword = () => <div>Forgot Password Page - Under Construction</div>;
 const ResetPassword = () => <div>Reset Password Page - Under Construction</div>;
-const Profile = () => <div>Profile Page - Under Construction</div>;
 const PlantingProjects = () => <div>Planting Projects Page - Under Construction</div>;
 const TreeInventory = () => <div>Tree Inventory Page - Under Construction</div>;
 const Reports = () => <div>Reports Page - Under Construction</div>;

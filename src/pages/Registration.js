@@ -1,5 +1,6 @@
 // src/pages/Registration.js
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Paper,
   TextField,
@@ -30,7 +31,13 @@ import {
 } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 
+// ✅ Firebase imports
+import { auth, db } from '../firebase.js'; // make sure firebase.js exports these
+import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
+
 const Registration = () => {
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -44,6 +51,7 @@ const Registration = () => {
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [serverError, setServerError] = useState('');
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -74,55 +82,64 @@ const Registration = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const v = validateForm();
-    if (Object.keys(v).length === 0) {
+    setServerError('');
+    const validationErrors = validateForm();
+
+    if (Object.keys(validationErrors).length === 0) {
       setLoading(true);
-      // Simulate API call
-      setTimeout(() => {
-        console.log('Form submitted:', formData);
+
+      try {
+        // ✅ Create user in Firebase Auth
+        const userCredential = await createUserWithEmailAndPassword(
+          auth,
+          formData.email,
+          formData.password
+        );
+        const user = userCredential.user;
+
+        // ✅ Update display name in Auth profile
+        await updateProfile(user, {
+          displayName: formData.name,
+        });
+
+        // ✅ Save user data in Firestore
+        await setDoc(doc(db, 'users', user.uid), {
+          uid: user.uid,
+          name: formData.name,
+          email: formData.email,
+          role: formData.role,
+          createdAt: new Date(),
+          status: 'active',
+        });
+
         setSubmitted(true);
         setFormData({ name: '', email: '', password: '', confirmPassword: '', role: '' });
         setAcceptedTerms(false);
-        setLoading(false);
-      }, 1500);
+
+        // Redirect after success
+        setTimeout(() => {
+          navigate('/login');
+        }, 2000);
+      } catch (err) {
+        setServerError(err.message);
+      }
+
+      setLoading(false);
     } else {
-      setErrors(v);
+      setErrors(validationErrors);
     }
   };
 
   const roleOptions = [
-    {
-      value: 'planter',
-      label: 'Planter',
-      description: 'Plant trees and track progress',
-      icon: <Nature sx={{ fontSize: 20, color: '#2e7d32' }} />
-    },
-    {
-      value: 'officer',
-      label: 'DENR Officer',
-      description: 'Monitor and verify plantations',
-      icon: <Security sx={{ fontSize: 20, color: '#2e7d32' }} />
-    },
-    {
-      value: 'stakeholder',
-      label: 'Stakeholder',
-      description: 'Support and fund initiatives',
-      icon: <Business sx={{ fontSize: 20, color: '#2e7d32' }} />
-    }
+    { value: 'planter', label: 'Planter', description: 'Plant trees and track progress', icon: <Nature sx={{ fontSize: 20, color: '#2e7d32' }} /> },
+    { value: 'officer', label: 'DENR Officer', description: 'Monitor and verify plantations', icon: <Security sx={{ fontSize: 20, color: '#2e7d32' }} /> },
+    { value: 'stakeholder', label: 'Stakeholder', description: 'Support and fund initiatives', icon: <Business sx={{ fontSize: 20, color: '#2e7d32' }} /> }
   ];
 
   return (
-    <Box
-      sx={{ 
-        minHeight: '100vh', 
-        display: 'flex',
-        width: '100%',
-        margin: 0,
-        padding: 0,
-      }}
-    >
-      <Grid container sx={{ flex: 1, minHeight: '100vh', margin: 0 }}>
-        {/* Left Panel (Background Image) */}
+    <Box sx={{ minHeight: '100vh', display: 'flex', width: '100%', m: 0, p: 0 }}>
+      <Grid container sx={{ flex: 1, minHeight: '100vh', m: 0 }}>
+        {/* Left Panel */}
         <Grid
           item
           xs={12}
@@ -141,10 +158,7 @@ const Registration = () => {
           <Box
             sx={{
               position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
+              top: 0, left: 0, right: 0, bottom: 0,
               backgroundImage: 'url(/images/loginImage.png)',
               backgroundSize: 'cover',
               backgroundPosition: 'center',
@@ -152,29 +166,17 @@ const Registration = () => {
               '&::before': {
                 content: '""',
                 position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
+                top: 0, left: 0, right: 0, bottom: 0,
                 backgroundColor: 'rgba(0, 0, 0, 0.4)',
                 zIndex: 1,
               }
             }}
           />
-          
-          <Box
-            sx={{
-              position: 'relative',
-              zIndex: 2,
-              color: '#fff',
-              textAlign: 'center',
-              p: 4,
-            }}
-          >
+          <Box sx={{ position: 'relative', zIndex: 2, color: '#fff', textAlign: 'center', p: 4 }}>
             <Typography
               variant="h2"
               fontWeight="700"
-              sx={{ 
+              sx={{
                 textShadow: '3px 3px 8px rgba(0,0,0,0.7)',
                 mb: 2,
                 fontSize: { xs: '2.5rem', md: '3.5rem' }
@@ -184,7 +186,7 @@ const Registration = () => {
             </Typography>
             <Typography
               variant="h5"
-              sx={{ 
+              sx={{
                 textShadow: '2px 2px 6px rgba(0,0,0,0.7)',
                 opacity: 0.9,
                 fontWeight: 400,
@@ -197,7 +199,7 @@ const Registration = () => {
           </Box>
         </Grid>
 
-        {/* Right Panel (Registration Form) */}
+        {/* Right Panel */}
         <Grid
           item
           xs={12}
@@ -209,7 +211,6 @@ const Registration = () => {
             bgcolor: '#f8f9fa',
             p: { xs: 2, md: 3 },
             minHeight: '100vh',
-            margin: 0,
             width: '100%',
             flex: 1,
           }}
@@ -225,7 +226,6 @@ const Registration = () => {
               alignItems: 'center',
               borderRadius: 3,
               bgcolor: '#ffffff',
-              margin: 0,
             }}
           >
             <Typography 
@@ -247,23 +247,20 @@ const Registration = () => {
             </Typography>
 
             {submitted && (
-              <Alert 
-                severity="success" 
-                sx={{ 
-                  mb: 2, 
-                  width: '100%',
-                  borderRadius: 1
-                }}
-              >
+              <Alert severity="success" sx={{ mb: 2, width: '100%', borderRadius: 1 }}>
                 Account created successfully! You can now log in.
               </Alert>
             )}
 
-            <Box
-              component="form"
-              onSubmit={handleSubmit}
-              sx={{ width: '100%' }}
-            >
+            {serverError && (
+              <Alert severity="error" sx={{ mb: 2, width: '100%', borderRadius: 1 }}>
+                {serverError}
+              </Alert>
+            )}
+
+            {/* Form */}
+            <Box component="form" onSubmit={handleSubmit} sx={{ width: '100%' }}>
+              {/* Name */}
               <TextField
                 fullWidth
                 required
@@ -271,7 +268,6 @@ const Registration = () => {
                 label="Full Name"
                 name="name"
                 autoComplete="name"
-                autoFocus
                 value={formData.name}
                 onChange={handleChange}
                 error={!!errors.name}
@@ -283,14 +279,10 @@ const Registration = () => {
                     </InputAdornment>
                   ),
                 }}
-                sx={{ 
-                  mb: 2,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 1.5,
-                  }
-                }}
+                sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
               />
 
+              {/* Email */}
               <TextField
                 fullWidth
                 required
@@ -310,14 +302,10 @@ const Registration = () => {
                     </InputAdornment>
                   ),
                 }}
-                sx={{ 
-                  mb: 2,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 1.5,
-                  }
-                }}
+                sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
               />
 
+              {/* Password */}
               <TextField
                 fullWidth
                 required
@@ -349,14 +337,10 @@ const Registration = () => {
                     </InputAdornment>
                   ),
                 }}
-                sx={{ 
-                  mb: 2,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 1.5,
-                  }
-                }}
+                sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
               />
 
+              {/* Confirm Password */}
               <TextField
                 fullWidth
                 required
@@ -387,24 +371,11 @@ const Registration = () => {
                     </InputAdornment>
                   ),
                 }}
-                sx={{ 
-                  mb: 2,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 1.5,
-                  }
-                }}
+                sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
               />
 
-              <FormControl 
-                fullWidth 
-                error={!!errors.role} 
-                sx={{ 
-                  mb: 2,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 1.5,
-                  }
-                }}
-              >
+              {/* Role Selection */}
+              <FormControl fullWidth error={!!errors.role} sx={{ mb: 2 }}>
                 <InputLabel id="role-label">Select Your Role</InputLabel>
                 <Select
                   labelId="role-label"
@@ -436,6 +407,7 @@ const Registration = () => {
                 )}
               </FormControl>
 
+              {/* Terms */}
               <FormControlLabel
                 sx={{ mb: 2, alignItems: 'flex-start' }}
                 control={
@@ -443,31 +415,16 @@ const Registration = () => {
                     checked={acceptedTerms}
                     onChange={(e) => setAcceptedTerms(e.target.checked)}
                     color="primary"
-                    sx={{ mt: -0.5 }}
                   />
                 }
                 label={
                   <Typography variant="body2" sx={{ mt: 0.5 }}>
                     I agree to the{' '}
-                    <Link 
-                      href="#" 
-                      sx={{ 
-                        color: '#2e7d32',
-                        textDecoration: 'none',
-                        '&:hover': { textDecoration: 'underline' }
-                      }}
-                    >
+                    <Link href="#" sx={{ color: '#2e7d32', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>
                       Terms of Service
-                    </Link>
-                    {' '}and{' '}
-                    <Link 
-                      href="#" 
-                      sx={{ 
-                        color: '#2e7d32',
-                        textDecoration: 'none',
-                        '&:hover': { textDecoration: 'underline' }
-                      }}
-                    >
+                    </Link>{' '}
+                    and{' '}
+                    <Link href="#" sx={{ color: '#2e7d32', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>
                       Privacy Policy
                     </Link>
                   </Typography>
@@ -479,6 +436,7 @@ const Registration = () => {
                 </Typography>
               )}
 
+              {/* Submit */}
               <Button
                 type="submit"
                 fullWidth
@@ -494,10 +452,7 @@ const Registration = () => {
                   fontSize: '16px',
                   fontWeight: 600,
                   boxShadow: 2,
-                  '&:hover': {
-                    backgroundColor: '#1b5e20',
-                    boxShadow: 4,
-                  }
+                  '&:hover': { backgroundColor: '#1b5e20', boxShadow: 4 },
                 }}
               >
                 {loading ? 'Creating Account...' : 'Create Account'}
@@ -506,18 +461,7 @@ const Registration = () => {
               <Box sx={{ textAlign: 'center', mt: 2 }}>
                 <Typography variant="body2" color="text.secondary">
                   Already have an account?{' '}
-                  <Link 
-                    component={RouterLink} 
-                    to="/login"
-                    sx={{ 
-                      color: '#2e7d32',
-                      textDecoration: 'none',
-                      fontWeight: 600,
-                      '&:hover': {
-                        textDecoration: 'underline'
-                      }
-                    }}
-                  >
+                  <Link component={RouterLink} to="/login" sx={{ color: '#2e7d32', textDecoration: 'none', fontWeight: 600, '&:hover': { textDecoration: 'underline' } }}>
                     Sign in
                   </Link>
                 </Typography>
