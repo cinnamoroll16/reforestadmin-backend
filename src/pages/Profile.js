@@ -356,7 +356,8 @@ const Profile = () => {
                     </Grid>
                   </Grid>
                 </Grid>
-
+                <Divider sx={{ my: 4 }} />
+ 
                 {/* Account Settings Section */}
                 <Grid item xs={12} md={6}>
                   <Typography variant="h6" gutterBottom fontWeight="bold">

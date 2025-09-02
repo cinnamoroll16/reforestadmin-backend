@@ -13,10 +13,13 @@ import Login from './pages/Login.js';
 import Registration from './pages/Registration.js';
 import Dashboard from './pages/Dashboard.js';
 import Profile from './pages/Profile.js';
+import Sensor from './pages/Sensor.js';
+import Recommendations from './pages/Recommendations.js';
+import Tasks from './pages/Task.js';
+import Notification from './pages/Notification.js';
 // Uncomment these imports when you create these components:
 // import ForgotPassword from './pages/ForgotPassword';
 // import ResetPassword from './pages/ResetPassword';
-// import Profile from './pages/Profile';
 // import PlantingProjects from './pages/PlantingProjects';
 // import TreeInventory from './pages/TreeInventory';
 // import Reports from './pages/Reports';
@@ -142,34 +145,34 @@ function App() {
               } 
             />
             <Route 
-              path="/projects" 
+              path="/sensor" 
               element={
                 <ProtectedRoute>
-                  <PlantingProjects />
+                  <Sensor />
                 </ProtectedRoute>
               } 
             />
             <Route 
-              path="/inventory" 
+              path="/recommendations" 
               element={
                 <ProtectedRoute>
-                  <TreeInventory />
+                  <Recommendations />
                 </ProtectedRoute>
               } 
             />
             <Route 
-              path="/reports" 
+              path="/tasks" 
               element={
                 <ProtectedRoute>
-                  <Reports />
+                  <Tasks />
                 </ProtectedRoute>
               } 
             />
             <Route 
-              path="/settings" 
+              path="/notification" 
               element={
                 <ProtectedRoute>
-                  <Settings />
+                  <Notification />
                 </ProtectedRoute>
               } 
             />
