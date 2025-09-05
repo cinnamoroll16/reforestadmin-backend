@@ -9,8 +9,6 @@ import {
   IconButton,
   Tabs,
   Tab,
-  AppBar,
-  Toolbar,
   Badge,
   Grid,
   useMediaQuery,
@@ -29,7 +27,8 @@ import {
   DialogContent,
   DialogActions,
   TextField,
-  MenuItem
+  alpha,
+  Toolbar
 } from '@mui/material';
 import {
   Notifications as NotificationsIcon,
@@ -39,14 +38,16 @@ import {
   Refresh as RefreshIcon,
   CheckCircle as CheckCircleIcon,
   Delete as DeleteIcon,
-  Email as EmailIcon,
   CalendarToday as CalendarIcon,
-  LocationOn as LocationIcon
+  LocationOn as LocationIcon,
+  Person as PersonIcon,
+  Park as TreeIcon
 } from '@mui/icons-material';
-import { DataGrid } from '@mui/x-data-grid';
 import ReForestAppBar from './AppBar.js';
 import Navigation from './Navigation.js';
 import { auth } from '../firebase.js';
+
+const drawerWidth = 240;
 
 // Mock data for demonstration
 const mockNotifications = [
@@ -111,14 +112,13 @@ const Notification = () => {
   const [openDialog, setOpenDialog] = useState(false);
   const [alert, setAlert] = useState({ open: false, message: '', severity: 'success' });
   const [mobileOpen, setMobileOpen] = useState(false);
+  
+  const user = auth.currentUser;
+  const handleLogout = () => auth.signOut();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
-      
-    const user = auth.currentUser;
-    const handleLogout = () => auth.signOut();
-    
-    const theme = useTheme();
-    const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-    
+  
   useEffect(() => {
     // Simulate API call
     setTimeout(() => {
@@ -277,275 +277,320 @@ const Notification = () => {
   const unreadCount = notifications.filter(notif => notif.status === 'unread').length;
 
   return (
-    <Box sx={{ display: 'flex' }}>
-              {/* App Bar */}
-              <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={user} onLogout={handleLogout} />
+    <Box sx={{ display: 'flex', bgcolor: '#f8fafc', minHeight: '100vh' }}>
+      {/* App Bar */}
+      <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={user} onLogout={handleLogout} />
+
+      {/* Side Navigation */}
+      <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
+
+      {/* Main Content */}
+      <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - ${drawerWidth}px)` } }}>
+        <Toolbar /> {/* Spacing for app bar */}
         
-              {/* Side Navigation */}
-              <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
-        
-    <Box sx={{ flexGrow: 1, p: 3 }}>
-      {/* Alert */}
-      {alert.open && (
-        <Alert
-          severity={alert.severity}
-          onClose={() => setAlert({ ...alert, open: false })}
-          sx={{ mb: 2 }}
-        >
-          {alert.message}
-        </Alert>
-      )}
-
-      <AppBar position="static" color="default" elevation={1} sx={{ mb: 3 }}>
-        <Toolbar>
-          <Badge badgeContent={unreadCount} color="error">
-            <NotificationsIcon sx={{ mr: 2 }} />
-          </Badge>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-            Notification Center
-          </Typography>
-          <IconButton color="inherit" onClick={handleRefresh} disabled={loading}>
-            <RefreshIcon />
-          </IconButton>
-        </Toolbar>
-      </AppBar>
-
-      {/* Tabs */}
-      <Paper sx={{ mb: 3 }}>
-        <Tabs
-          value={tabValue}
-          onChange={handleTabChange}
-          variant="scrollable"
-          scrollButtons="auto"
-        >
-          <Tab label="All Notifications" />
-          <Tab label={
-            <Badge badgeContent={unreadCount} color="error">
-              Unread
-            </Badge>
-          } />
-          <Tab label="Planting Requests" />
-          <Tab label="Alerts & Reminders" />
-        </Tabs>
-      </Paper>
-
-      {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-          <CircularProgress />
-        </Box>
-      ) : filteredNotifications.length === 0 ? (
-        <Paper sx={{ p: 3, textAlign: 'center' }}>
-          <Typography color="text.secondary">
-            No notifications found
-          </Typography>
-        </Paper>
-      ) : (
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={6}>
-            <Paper>
-              <Typography variant="h6" sx={{ p: 2, bgcolor: 'primary.main', color: 'white' }}>
-                Notifications List
-              </Typography>
-              <List sx={{ maxHeight: 600, overflow: 'auto' }}>
-                {filteredNotifications.map((notification, index) => (
-                  <React.Fragment key={notification.notif_id}>
-                    <ListItem 
-                      button 
-                      onClick={() => handleViewDetails(notification)}
-                      sx={{
-                        bgcolor: notification.status === 'unread' ? 'action.hover' : 'transparent',
-                        '&:hover': { bgcolor: 'action.selected' }
-                      }}
-                    >
-                      <ListItemIcon>
-                        {getNotificationIcon(notification.notification_type)}
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={notification.notif_message}
-                        secondary={formatDate(notification.notif_timestamp)}
-                        primaryTypographyProps={{
-                          fontWeight: notification.status === 'unread' ? 'bold' : 'normal'
-                        }}
-                      />
-                      <ListItemSecondaryAction>
-                        <IconButton
-                          edge="end"
-                          onClick={() => handleMarkAsRead(notification.notif_id)}
-                          disabled={notification.status === 'read'}
-                        >
-                          <CheckCircleIcon />
-                        </IconButton>
-                        <IconButton
-                          edge="end"
-                          onClick={() => handleDeleteNotification(notification.notif_id)}
-                          sx={{ ml: 1 }}
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </ListItemSecondaryAction>
-                    </ListItem>
-                    {index < filteredNotifications.length - 1 && <Divider />}
-                  </React.Fragment>
-                ))}
-              </List>
-            </Paper>
-          </Grid>
-
-          <Grid item xs={12} md={6}>
-            <Paper sx={{ p: 2 }}>
-              <Typography variant="h6" gutterBottom>
-                Notification Statistics
-              </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <Card>
-                    <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color="primary">
-                        {notifications.length}
-                      </Typography>
-                      <Typography variant="body2">Total Notifications</Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-                <Grid item xs={6}>
-                  <Card>
-                    <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color="error">
-                        {unreadCount}
-                      </Typography>
-                      <Typography variant="body2">Unread</Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-                <Grid item xs={12}>
-                  <Card>
-                    <CardContent>
-                      <Typography variant="h6" gutterBottom>
-                        By Type
-                      </Typography>
-                      {Object.entries(
-                        notifications.reduce((acc, notif) => {
-                          acc[notif.notification_type] = (acc[notif.notification_type] || 0) + 1;
-                          return acc;
-                        }, {})
-                      ).map(([type, count]) => (
-                        <Box key={type} sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                          <Chip
-                            label={type}
-                            size="small"
-                            color={getNotificationColor(type)}
-                            variant="outlined"
-                          />
-                          <Typography>{count}</Typography>
-                        </Box>
-                      ))}
-                    </CardContent>
-                  </Card>
-                </Grid>
-              </Grid>
-            </Paper>
-          </Grid>
-        </Grid>
-      )}
-
-      {/* Notification Details Dialog */}
-      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="md" fullWidth>
-        <DialogTitle>
-          Notification Details
-          {selectedNotification && (
-            <Chip
-              label={selectedNotification.notification_type}
-              color={getNotificationColor(selectedNotification.notification_type)}
-              size="small"
-              sx={{ ml: 2 }}
-            />
+        <Box sx={{ width: '100%' }}>
+          {/* Alert */}
+          {alert.open && (
+            <Alert
+              severity={alert.severity}
+              onClose={() => setAlert({ ...alert, open: false })}
+              sx={{ mb: 3, borderRadius: 2 }}
+            >
+              {alert.message}
+            </Alert>
           )}
-        </DialogTitle>
-        <DialogContent>
-          {selectedNotification && (
-            <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid item xs={12}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Message
-                </Typography>
-                <Typography variant="body1" paragraph>
-                  {selectedNotification.notif_message}
-                </Typography>
-              </Grid>
 
-              <Grid item xs={6}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  User ID
-                </Typography>
-                <Typography variant="body1">{selectedNotification.user_id}</Typography>
-              </Grid>
+          {/* Header */}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+            <Typography variant="h4" sx={{ color: '#2e7d32', fontWeight: 600 }}>
+              Notification Center
+            </Typography>
+            <Button 
+              variant="outlined" 
+              startIcon={<RefreshIcon />} 
+              onClick={handleRefresh}
+              disabled={loading}
+              size="small"
+            >
+              Refresh
+            </Button>
+          </Box>
 
-              <Grid item xs={6}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Timestamp
-                </Typography>
-                <Typography variant="body1">
-                  {formatDate(selectedNotification.notif_timestamp)}
-                </Typography>
-              </Grid>
+          {/* Tabs */}
+          <Paper sx={{ mb: 3, borderRadius: 2, boxShadow: 2 }}>
+            <Tabs
+              value={tabValue}
+              onChange={handleTabChange}
+              variant="scrollable"
+              scrollButtons="auto"
+              sx={{
+                '& .MuiTab-root': {
+                  minHeight: 60,
+                }
+              }}
+            >
+              <Tab label="All Notifications" />
+              <Tab label={
+                <Badge badgeContent={unreadCount} color="error">
+                  Unread
+                </Badge>
+              } />
+              <Tab label="Planting Requests" />
+              <Tab label="Alerts & Reminders" />
+            </Tabs>
+          </Paper>
 
-              {selectedNotification.location && (
-                <Grid item xs={12}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <LocationIcon color="action" />
-                    <Typography variant="body2">{selectedNotification.location}</Typography>
-                  </Box>
-                </Grid>
-              )}
-
-              {selectedNotification.proposed_date && (
-                <Grid item xs={12}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <CalendarIcon color="action" />
-                    <Typography variant="body2">
-                      Proposed Date: {new Date(selectedNotification.proposed_date).toLocaleDateString()}
+          {loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+              <CircularProgress />
+            </Box>
+          ) : filteredNotifications.length === 0 ? (
+            <Paper sx={{ p: 3, textAlign: 'center', borderRadius: 2 }}>
+              <Typography color="text.secondary">
+                No notifications found
+              </Typography>
+            </Paper>
+          ) : (
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={8}>
+                <Paper sx={{ borderRadius: 2, boxShadow: 2, overflow: 'hidden' }}>
+                  <Box sx={{ bgcolor: 'primary.main', color: 'white', p: 2 }}>
+                    <Typography variant="h6">
+                      Notifications List
                     </Typography>
                   </Box>
-                </Grid>
-              )}
+                  <List sx={{ maxHeight: 600, overflow: 'auto' }}>
+                    {filteredNotifications.map((notification, index) => (
+                      <React.Fragment key={notification.notif_id}>
+                        <ListItem 
+                          button 
+                          onClick={() => handleViewDetails(notification)}
+                          sx={{
+                            bgcolor: notification.status === 'unread' ? alpha(theme.palette.info.main, 0.1) : 'transparent',
+                            '&:hover': { bgcolor: 'action.selected' },
+                            py: 2
+                          }}
+                        >
+                          <ListItemIcon>
+                            {getNotificationIcon(notification.notification_type)}
+                          </ListItemIcon>
+                          <ListItemText
+                            primary={notification.notif_message}
+                            secondary={formatDate(notification.notif_timestamp)}
+                            primaryTypographyProps={{
+                              fontWeight: notification.status === 'unread' ? 'bold' : 'normal',
+                              color: notification.status === 'unread' ? 'text.primary' : 'text.secondary'
+                            }}
+                            secondaryTypographyProps={{
+                              sx: { mt: 0.5 }
+                            }}
+                          />
+                          <ListItemSecondaryAction>
+                            <IconButton
+                              edge="end"
+                              onClick={() => handleMarkAsRead(notification.notif_id)}
+                              disabled={notification.status === 'read'}
+                              size="small"
+                              sx={{ mr: 1 }}
+                            >
+                              <CheckCircleIcon />
+                            </IconButton>
+                            <IconButton
+                              edge="end"
+                              onClick={() => handleDeleteNotification(notification.notif_id)}
+                              size="small"
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          </ListItemSecondaryAction>
+                        </ListItem>
+                        {index < filteredNotifications.length - 1 && <Divider />}
+                      </React.Fragment>
+                    ))}
+                  </List>
+                </Paper>
+              </Grid>
 
-              {selectedNotification.tree_species && (
-                <Grid item xs={12}>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Tree Species
+              <Grid item xs={12} md={4}>
+                <Paper sx={{ p: 3, borderRadius: 2, boxShadow: 2 }}>
+                  <Typography variant="h6" gutterBottom sx={{ color: 'primary.main', mb: 3 }}>
+                    Notification Statistics
                   </Typography>
-                  <Typography variant="body1">{selectedNotification.tree_species}</Typography>
-                </Grid>
-              )}
-
-              {selectedNotification.planter_name && (
-                <Grid item xs={12}>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Planter Name
-                  </Typography>
-                  <Typography variant="body1">{selectedNotification.planter_name}</Typography>
-                </Grid>
-              )}
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={6} md={12}>
+                      <Card sx={{ borderRadius: 2, mb: 2 }}>
+                        <CardContent sx={{ textAlign: 'center' }}>
+                          <Typography variant="h4" color="primary" fontWeight="bold">
+                            {notifications.length}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">Total Notifications</Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={12}>
+                      <Card sx={{ borderRadius: 2, mb: 2 }}>
+                        <CardContent sx={{ textAlign: 'center' }}>
+                          <Typography variant="h4" color="error" fontWeight="bold">
+                            {unreadCount}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">Unread</Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                    <Grid item xs={12}>
+                      <Card sx={{ borderRadius: 2 }}>
+                        <CardContent>
+                          <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
+                            By Type
+                          </Typography>
+                          {Object.entries(
+                            notifications.reduce((acc, notif) => {
+                              acc[notif.notification_type] = (acc[notif.notification_type] || 0) + 1;
+                              return acc;
+                            }, {})
+                          ).map(([type, count]) => (
+                            <Box key={type} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                              <Chip
+                                label={type.replace('_', ' ')}
+                                size="small"
+                                color={getNotificationColor(type)}
+                                variant="outlined"
+                                sx={{ textTransform: 'capitalize' }}
+                              />
+                              <Typography variant="body2" fontWeight="bold">
+                                {count}
+                              </Typography>
+                            </Box>
+                          ))}
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  </Grid>
+                </Paper>
+              </Grid>
             </Grid>
           )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenDialog(false)} color="inherit">
-            Close
-          </Button>
-          {selectedNotification?.notification_type === 'planting_request' && (
-            <>
-              <Button onClick={handleRejectRequest} color="error">
+
+          {/* Notification Details Dialog */}
+          <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="md" fullWidth PaperProps={{ sx: { borderRadius: 2 } }}>
+            <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <NotificationsIcon />
+                Notification Details
+                {selectedNotification && (
+                  <Chip
+                    label={selectedNotification.notification_type.replace('_', ' ')}
+                    color={getNotificationColor(selectedNotification.notification_type)}
+                    size="small"
+                    sx={{ ml: 2, textTransform: 'capitalize', color: 'white' }}
+                  />
+                )}
+              </Box>
+            </DialogTitle>
+            <DialogContent>
+              {selectedNotification && (
+                <Grid container spacing={2} sx={{ mt: 1 }}>
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                      Message
+                    </Typography>
+                    <Typography variant="body1" paragraph sx={{ p: 1.5, bgcolor: 'grey.50', borderRadius: 1 }}>
+                      {selectedNotification.notif_message}
+                    </Typography>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                      <PersonIcon color="action" fontSize="small" />
+                      <Typography variant="subtitle2" color="text.secondary">
+                        User ID:
+                      </Typography>
+                    </Box>
+                    <Typography variant="body1">{selectedNotification.user_id}</Typography>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                      <CalendarIcon color="action" fontSize="small" />
+                      <Typography variant="subtitle2" color="text.secondary">
+                        Timestamp:
+                      </Typography>
+                    </Box>
+                    <Typography variant="body1">
+                      {formatDate(selectedNotification.notif_timestamp)}
+                    </Typography>
+                  </Grid>
+
+                  {selectedNotification.location && (
+                    <Grid item xs={12}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                        <LocationIcon color="action" fontSize="small" />
+                        <Typography variant="subtitle2" color="text.secondary">
+                          Location:
+                        </Typography>
+                      </Box>
+                      <Typography variant="body1">{selectedNotification.location}</Typography>
+                    </Grid>
+                  )}
+
+                  {selectedNotification.proposed_date && (
+                    <Grid item xs={12} sm={6}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                        <CalendarIcon color="action" fontSize="small" />
+                        <Typography variant="subtitle2" color="text.secondary">
+                          Proposed Date:
+                        </Typography>
+                      </Box>
+                      <Typography variant="body1">
+                        {new Date(selectedNotification.proposed_date).toLocaleDateString()}
+                      </Typography>
+                    </Grid>
+                  )}
+
+                  {selectedNotification.tree_species && (
+                    <Grid item xs={12} sm={6}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                        <TreeIcon color="action" fontSize="small" />
+                        <Typography variant="subtitle2" color="text.secondary">
+                          Tree Species:
+                        </Typography>
+                      </Box>
+                      <Typography variant="body1">{selectedNotification.tree_species}</Typography>
+                    </Grid>
+                  )}
+
+                  {selectedNotification.planter_name && (
+                    <Grid item xs={12}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                        <PersonIcon color="action" fontSize="small" />
+                        <Typography variant="subtitle2" color="text.secondary">
+                          Planter Name:
+                        </Typography>
+                      </Box>
+                      <Typography variant="body1">{selectedNotification.planter_name}</Typography>
+                    </Grid>
+                  )}
+                </Grid>
+              )}
+            </DialogContent>
+            <DialogActions sx={{ p: 2 }}>
+              <Button onClick={() => setOpenDialog(false)} color="inherit">
+                Close
+              </Button>
+              {selectedNotification?.notification_type === 'planting_request' && (
+                <>
+                  <Button onClick={handleRejectRequest} color="error">
                 Reject
-              </Button>
-              <Button onClick={handleApproveRequest} variant="contained" color="success">
+                  </Button>
+                  <Button onClick={handleApproveRequest} variant="contained" sx={{ bgcolor: '#2e7d32' }}>
                 Approve Request
-              </Button>
-            </>
-          )}
-        </DialogActions>
-      </Dialog>
-    </Box>
+                  </Button>
+                </>
+              )}
+            </DialogActions>
+          </Dialog>
+        </Box>
+      </Box>
     </Box>
   );
 };
