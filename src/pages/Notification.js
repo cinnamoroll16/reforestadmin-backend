@@ -285,7 +285,7 @@ const Notification = () => {
       <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
 
       {/* Main Content */}
-      <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - ${drawerWidth}px)` } }}>
+      <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - ${drawerWidth}px)` }, minWidth: 0 }}>
         <Toolbar /> {/* Spacing for app bar */}
         
         <Box sx={{ width: '100%' }}>
@@ -352,7 +352,7 @@ const Notification = () => {
             </Paper>
           ) : (
             <Grid container spacing={3}>
-              <Grid item xs={12} md={8}>
+              <Grid item xs={12} md={9}>
                 <Paper sx={{ borderRadius: 2, boxShadow: 2, overflow: 'hidden' }}>
                   <Box sx={{ bgcolor: 'primary.main', color: 'white', p: 2 }}>
                     <Typography variant="h6">
@@ -411,7 +411,7 @@ const Notification = () => {
                 </Paper>
               </Grid>
 
-              <Grid item xs={12} md={4}>
+              <Grid item xs={12} md={3}>
                 <Paper sx={{ p: 3, borderRadius: 2, boxShadow: 2 }}>
                   <Typography variant="h6" gutterBottom sx={{ color: 'primary.main', mb: 3 }}>
                     Notification Statistics

@@ -10,7 +10,7 @@ import {
 } from "firebase/auth";
 import { Box, CircularProgress, Typography } from '@mui/material';
 import { doc, setDoc, getDoc, updateDoc } from "firebase/firestore";
-import { auth, db } from "../firebase.js";  // ✅ make sure to include .js
+import { auth, firestore } from "../firebase.js";  // ✅ make sure to include .js
 
 const AuthContext = createContext();
 
@@ -33,7 +33,7 @@ export const AuthProvider = ({ children }) => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         try {
-          const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+          const userDoc = await getDoc(doc(firestore, "users", firebaseUser.uid));
           if (userDoc.exists()) {
             setUserProfile(userDoc.data());
           }
@@ -63,11 +63,11 @@ export const AuthProvider = ({ children }) => {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
 
-      await updateDoc(doc(db, "users", firebaseUser.uid), {
+      await updateDoc(doc(firestore, "users", firebaseUser.uid), {
         lastLogin: new Date()
       });
 
-      const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+      const userDoc = await getDoc(doc(firestore, "users", firebaseUser.uid));
       if (userDoc.exists()) {
         setUserProfile(userDoc.data());
       }
@@ -99,7 +99,7 @@ export const AuthProvider = ({ children }) => {
         displayName: userData.name
       });
 
-      await setDoc(doc(db, "users", firebaseUser.uid), {
+      await setDoc(doc(firestore, "users", firebaseUser.uid), {
         name: userData.name,
         email: userData.email,
         role: userData.role,
@@ -156,12 +156,12 @@ export const AuthProvider = ({ children }) => {
           displayName: profileData.name
         });
 
-        await updateDoc(doc(db, "users", auth.currentUser.uid), {
+        await updateDoc(doc(firestore, "users", auth.currentUser.uid), {
           ...profileData,
           updatedAt: new Date()
         });
 
-        const userDoc = await getDoc(doc(db, "users", auth.currentUser.uid));
+        const userDoc = await getDoc(doc(firestore, "users", auth.currentUser.uid));
         if (userDoc.exists()) {
           setUserProfile(userDoc.data());
         }

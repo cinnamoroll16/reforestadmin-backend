@@ -32,7 +32,7 @@ import {
 import { Link as RouterLink } from 'react-router-dom';
 
 // ✅ Firebase imports
-import { auth, db } from '../firebase.js'; // make sure firebase.js exports these
+import { auth, firestore } from '../firebase.js'; // make sure firebase.js exports these
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 
@@ -103,7 +103,7 @@ const Registration = () => {
         });
 
         // ✅ Save user data in Firestore
-        await setDoc(doc(db, 'users', user.uid), {
+        await setDoc(doc(firestore, 'users', user.uid), {
           uid: user.uid,
           name: formData.name,
           email: formData.email,

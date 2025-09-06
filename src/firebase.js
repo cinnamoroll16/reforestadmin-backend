@@ -1,10 +1,12 @@
 // src/firebase.js
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
+import { getDatabase } from "firebase/database";
 import { getFirestore } from "firebase/firestore";
 const firebaseConfig = {
   apiKey: "AIzaSyDXkFx3Zk8FyJrYSiNvEaA7kEpjKqWsZng",
   authDomain: "reforestadmin.firebaseapp.com",
+  databaseURL: "https://reforestadmin-default-rtdb.asia-southeast1.firebasedatabase.app/",
   projectId: "reforestadmin",
   storageBucket: "reforestadmin.firebasestorage.app",
   messagingSenderId: "871660781866",
@@ -13,7 +15,9 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const firestore = getFirestore(app);   // ✅ Firestore
+export const rtdb = getDatabase(app);         // ✅ Realtime Database
 
 export default app;

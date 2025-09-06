@@ -36,7 +36,7 @@ import {
 } from "@mui/icons-material";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth, db } from "../firebase.js";
+import { auth, firestore } from "../firebase.js";
 import ReForestAppBar from "./AppBar.js";
 import Navigation from "./Navigation.js";
 import { useAuth } from '../context/AuthContext.js';
@@ -77,7 +77,7 @@ const Profile = () => {
       return;
     }
 
-    const docRef = doc(db, "users", user.uid);
+    const docRef = doc(firestore, "users", user.uid);
     
     // Using onSnapshot for real-time updates
     const unsubscribe = onSnapshot(
@@ -154,7 +154,7 @@ const Profile = () => {
     setError(null);
 
     try {
-      const docRef = doc(db, "users", user.uid);
+      const docRef = doc(firestore, "users", user.uid);
       const dataToSave = {
         accountSettings: {
           ...accountSettings,
@@ -182,7 +182,7 @@ const Profile = () => {
     setError(null);
 
     try {
-      const docRef = doc(db, "users", user.uid);
+      const docRef = doc(firestore, "users", user.uid);
       const dataToSave = {
         personalInfo: {
           ...personalInfo,
