@@ -14,10 +14,12 @@ import {
   Notifications as NotificationsIcon,
 } from '@mui/icons-material';
 import { useState } from 'react';
+import { useNavigate } from "react-router-dom";
 
 function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
   const [anchorEl, setAnchorEl] = useState(null);
-
+  const navigate = useNavigate();
+  
   const handleMenuOpen = (event) => {
     setAnchorEl(event.currentTarget);
   };
@@ -29,6 +31,11 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
   const handleLogout = () => {
     handleMenuClose();
     onLogout();
+  };
+
+  // Navigate to notifications page
+  const handleNotificationClick = () => {
+    navigate("/notifications");
   };
 
   return (
@@ -52,15 +59,24 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
         <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
           Admin Dashboard
         </Typography>
-        <IconButton color="inherit">
-          <Badge badgeContent={4} color="secondary">
+        
+        {/* Notifications Icon - Click to navigate to notifications page */}
+        <IconButton 
+          color="inherit" 
+          onClick={handleNotificationClick}
+          aria-label="notifications"
+        >
+          <Badge badgeContent={1} color="secondary">
             <NotificationsIcon />
           </Badge>
         </IconButton>
+        
+        {/* Avatar Icon - Click to open user menu */}
         <IconButton 
           color="inherit" 
           sx={{ ml: 1 }}
           onClick={handleMenuOpen}
+          aria-label="user menu"
         >
           <Avatar sx={{ width: 32, height: 32 }}>
             {user?.name ? user.name.charAt(0).toUpperCase() : 'A'}
