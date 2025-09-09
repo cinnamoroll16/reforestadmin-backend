@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Paper,
@@ -42,8 +43,8 @@ import {
 import { useTheme, useMediaQuery } from '@mui/material';
 import ReForestAppBar from './AppBar.js';
 import Navigation from './Navigation.js';
-import { auth, rtdb } from '../firebase.js';
-import { ref, onValue } from 'firebase/database';
+import { auth, firestore } from "../firebase.js";
+import { collection, onSnapshot, doc, getDocs, query, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
 
 const drawerWidth = 240;
 
@@ -57,6 +58,7 @@ function Recommendations() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
   
   const user = auth.currentUser;
   const handleLogout = () => auth.signOut();
@@ -64,75 +66,156 @@ function Recommendations() {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
 
-  // Calculate average confidence score from seedlings
-  const calculateConfidenceScore = (seedlings) => {
-    if (!seedlings || seedlings.length === 0) return 0;
-    const totalScore = seedlings.reduce((sum, seedling) => sum + (seedling.confidenceScore * 100), 0);
-    return Math.round(totalScore / seedlings.length);
-  };
-
-  // Generate status based on confidence score (since status is not in your JSON)
+  // Generate status based on confidence score
   const generateStatus = (confidenceScore) => {
-    if (confidenceScore >= 85) return 'Approved';
-    if (confidenceScore >= 70) return 'Pending';
-    if (confidenceScore >= 50) return 'Under Review';
+    const score = typeof confidenceScore === 'string' ? parseFloat(confidenceScore) : confidenceScore;
+    const scorePercent = score > 1 ? score : score * 100;
+    
+    if (scorePercent >= 85) return 'Approved';
+    if (scorePercent >= 70) return 'Pending';
+    if (scorePercent >= 50) return 'Under Review';
     return 'Needs Review';
   };
 
-  // ✅ Fetch recommendations from Firebase
+  // Fetch seedling details for a specific recommendation
+  const fetchSeedlingsForRecommendation = async (recoId) => {
+    try {
+      const seedlingsSnapshot = await getDocs(
+        collection(firestore, 'Recommendation', recoId, 'seedlings')
+      );
+      
+      const seedlings = [];
+      seedlingsSnapshot.forEach((doc) => {
+        const data = doc.data();
+        seedlings.push({
+          seedling_id: doc.id,
+          commonName: data.seedling_commonName || 'Unknown',
+          scientificName: data.seedling_scientificName || 'Unknown',
+          prefMoisture: parseFloat(data.seedling_preMoisture) || 0,
+          prefpH: parseFloat(data.seedling_prePH) || 0,
+          prefTemp: parseFloat(data.seedling_preTemp) || 0,
+          isNative: data.seedling_isNative === 'true' || false,
+          confidenceScore: 0.8 + (Math.random() * 0.2) // Default confidence for individual seedlings
+        });
+      });
+      
+      return seedlings;
+    } catch (error) {
+      console.error(`Error fetching seedlings for recommendation ${recoId}:`, error);
+      return [];
+    }
+  };
+
+  // Handle implementing recommendation (creating planting task)
+  const handleImplementRecommendation = async (reco) => {
+    try {
+      // Create a new planting task document
+      const taskData = {
+        user_id: user?.uid || 'USER001', // Use actual user ID or fallback
+        reco_id: reco.reco_id,
+        location_id: reco.inventory_Id || 'LOC001', // Using inventory_Id as location_id fallback
+        task_status: 'Assigned',
+        task_date: serverTimestamp(), // Use server timestamp
+        created_at: serverTimestamp(),
+        recommendation_data: {
+          sensorData_id: reco.sensorData_id,
+          confidenceScore: reco.reco_confidenceScore,
+          seedlingCount: reco.seedlingCount
+        }
+      };
+
+      // Add document to PlantingTask collection
+      const docRef = await addDoc(collection(firestore, 'PlantingTask'), taskData);
+      
+      console.log('Planting task created with ID:', docRef.id);
+      
+      // Navigate to Task.js page
+      navigate('/tasks');
+      
+    } catch (error) {
+      console.error('Error creating planting task:', error);
+      alert('Failed to create planting task. Please try again.');
+    }
+  };
+
+  // Fetch recommendations from Firestore
   useEffect(() => {
     setLoading(true);
-    const recoRef = ref(rtdb, 'recommendations');
     
-    const unsubscribe = onValue(recoRef, (snap) => {
-      const data = snap.val() || {};
-      console.log("Raw recommendations data:", data); // Debug log
+    // Listen to the "Recommendation" collection
+    const q = query(
+      collection(firestore, 'Recommendation'),
+      orderBy('reco_generatedDATE', 'desc')
+    );
+    
+    const unsubscribe = onSnapshot(
+      q,
+      async (snapshot) => {
+        const docs = snapshot.docs;
+        console.log("Raw recommendations data:", docs.map(doc => ({ id: doc.id, data: doc.data() })));
 
-      if (Object.keys(data).length === 0) {
-        console.log("No recommendations found in database");
+        if (docs.length === 0) {
+          console.log("No recommendations found in database");
+          setRecommendations([]);
+          setLoading(false);
+          return;
+        }
+
+        // Process each recommendation document
+        const recoPromises = docs.map(async (docSnapshot) => {
+          const data = docSnapshot.data();
+          const docId = docSnapshot.id;
+          
+          console.log(`Processing recommendation ${docId}:`, data);
+          
+          // Fetch seedlings for this recommendation
+          const seedlings = await fetchSeedlingsForRecommendation(docId);
+          
+          // Parse confidence score
+          const confidenceScore = typeof data.reco_confidenceScore === 'string' 
+            ? parseFloat(data.reco_confidenceScore) 
+            : data.reco_confidenceScore || 0.85;
+          
+          const confidencePercentage = confidenceScore > 1 ? confidenceScore : Math.round(confidenceScore * 100);
+          const status = generateStatus(confidenceScore);
+
+          return {
+            id: docId,
+            reco_id: docId,
+            sensorData_id: data.sensorData_id || 'N/A',
+            inventory_Id: data.inventory_id || 'N/A',
+            reco_confidenceScore: confidencePercentage,
+            reco_generatedAt: data.reco_generatedDATE || new Date().toISOString(),
+            status: status,
+            
+            // Environmental conditions (default values)
+            soilConditions: 'Optimal for selected species',
+            rainfall: 'Adequate',
+            temperature: 'Within preferred range',
+            
+            // Seedling data
+            recommendedSeedlings: seedlings,
+            seedlingCount: seedlings.length
+          };
+        });
+
+        try {
+          const recoArray = await Promise.all(recoPromises);
+          console.log("Processed recommendations array:", recoArray);
+          setRecommendations(recoArray);
+        } catch (error) {
+          console.error("Error processing recommendations:", error);
+          setRecommendations([]);
+        } finally {
+          setLoading(false);
+        }
+      },
+      (error) => {
+        console.error("Error fetching recommendations:", error);
         setRecommendations([]);
         setLoading(false);
-        return;
       }
-
-      const recoArray = Object.entries(data).map(([id, reco]) => {
-        console.log(`Processing recommendation ${id}:`, reco); // Debug log
-        
-        const seedlings = reco.recommendedSeedlings || [];
-        const avgConfidence = calculateConfidenceScore(seedlings);
-        const status = generateStatus(avgConfidence);
-
-        return {
-          id,
-          reco_id: reco.reco_id || id,
-          sensorData_id: reco.sensorData_id || 'N/A',
-          inventory_Id: reco.inventory_id || 'N/A', // Note: using inventory_id from your JSON
-          reco_confidenceScore: avgConfidence,
-          reco_generatedAt: reco.reco_generateDATETIME || '', // Using your JSON field name
-          status: status, // Generated based on confidence
-          
-          // Default values for fields not in your JSON
-          soilConditions: 'Optimal for selected species',
-          rainfall: 'Adequate',
-          temperature: 'Within preferred range',
-          
-          // Seedling IDs for quick display
-          seedling_Id1: seedlings[0]?.seeding_id || 'N/A',
-          seedling_Id2: seedlings[1]?.seeding_id || 'N/A',
-          seedling_Id3: seedlings[2]?.seeding_id || 'N/A',
-          
-          // Full seedling data
-          recommendedSeedlings: seedlings
-        };
-      });
-
-      console.log("Processed recommendations array:", recoArray); // Debug log
-      setRecommendations(recoArray);
-      setLoading(false);
-    }, (error) => {
-      console.error("Error fetching recommendations:", error);
-      setLoading(false);
-    });
+    );
 
     return () => unsubscribe();
   }, []);
@@ -200,9 +283,14 @@ function Recommendations() {
         <Box sx={{ width: '100%' }}>
           {/* Header */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-            <Typography variant="h4" sx={{ color: '#2e7d32', fontWeight: 600 }}>
-              Planting Recommendations
-            </Typography>
+            <Box>
+              <Typography variant="h4" sx={{ color: '#2e7d32', fontWeight: 600 }}>
+                Planting Recommendations
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                {recommendations.length} recommendation{recommendations.length !== 1 ? 's' : ''} generated by ML algorithm
+              </Typography>
+            </Box>
             <Button variant="contained" startIcon={<AddIcon />} sx={{ backgroundColor: '#2e7d32' }}>
               Generate New
             </Button>
@@ -269,7 +357,7 @@ function Recommendations() {
                 <CardContent>
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <Box sx={{ bgcolor: alpha(theme.palette.success.main, 0.2), p: 1.5, borderRadius: 2, mr: 2 }}>
-                      <AlgorithmIcon color="success" />
+                      <CheckCircleIcon color="success" />
                     </Box>
                     <Box>
                       <Typography variant="h5" fontWeight="bold">
@@ -327,7 +415,7 @@ function Recommendations() {
           ) : (
             <>
               {/* Recommendations Table */}
-              <Paper sx={{ width: '100%', mb: 2, borderRadius: 2, overflow: 'hidden' }}>
+              <Paper sx={{ width: '100%', mb: 2, borderRadius: 2, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
                 <TableContainer>
                   <Table>
                     <TableHead>
@@ -335,7 +423,7 @@ function Recommendations() {
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Recommendation ID</Typography></TableCell>
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Sensor ID</Typography></TableCell>
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Inventory ID</Typography></TableCell>
-                        <TableCell><Typography variant="subtitle2" fontWeight="bold">Seedlings</Typography></TableCell>
+                        <TableCell><Typography variant="subtitle2" fontWeight="bold">Seedlings Count</Typography></TableCell>
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Confidence</Typography></TableCell>
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Generated</Typography></TableCell>
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Status</Typography></TableCell>
@@ -344,7 +432,7 @@ function Recommendations() {
                     </TableHead>
                     <TableBody>
                       {filteredRecommendations.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((reco) => (
-                        <TableRow key={reco.id} hover>
+                        <TableRow key={reco.id} hover sx={{ '&:hover': { bgcolor: 'rgba(46, 125, 50, 0.04)' } }}>
                           <TableCell>
                             <Typography variant="body2" fontWeight="medium">{reco.reco_id}</Typography>
                           </TableCell>
@@ -355,11 +443,11 @@ function Recommendations() {
                             <Typography variant="body2">{reco.inventory_Id}</Typography>
                           </TableCell>
                           <TableCell>
-                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                              {reco.seedling_Id1 !== 'N/A' && <Chip size="small" label={reco.seedling_Id1} variant="outlined" />}
-                              {reco.seedling_Id2 !== 'N/A' && <Chip size="small" label={reco.seedling_Id2} variant="outlined" />}
-                              {reco.seedling_Id3 !== 'N/A' && <Chip size="small" label={reco.seedling_Id3} variant="outlined" />}
-                            </Box>
+                            <Chip 
+                              label={`${reco.seedlingCount} seedlings`} 
+                              color="primary" 
+                              variant="outlined"
+                            />
                           </TableCell>
                           <TableCell>
                             <Box sx={{ width: '100%' }}>
@@ -369,12 +457,20 @@ function Recommendations() {
                                 color={getConfidenceColor(reco.reco_confidenceScore)}
                                 sx={{ height: 8, borderRadius: 4 }}
                               />
-                              <Typography variant="body2" sx={{ mt: 0.5 }}>{reco.reco_confidenceScore}%</Typography>
+                              <Typography variant="body2" sx={{ mt: 0.5, textAlign: 'center' }}>
+                                {reco.reco_confidenceScore}%
+                              </Typography>
                             </Box>
                           </TableCell>
                           <TableCell>
                             <Typography variant="body2">
-                              {reco.reco_generatedAt ? new Date(reco.reco_generatedAt).toLocaleDateString() : 'N/A'}
+                              {reco.reco_generatedAt 
+                                ? new Date(reco.reco_generatedAt).toLocaleDateString('en-US', {
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric'
+                                  })
+                                : 'N/A'}
                             </Typography>
                           </TableCell>
                           <TableCell>
@@ -386,8 +482,14 @@ function Recommendations() {
                                 <ViewIcon />
                               </IconButton>
                             </Tooltip>
-                            <Tooltip title="Execute">
-                              <IconButton color="primary" size="small"><ExecuteIcon /></IconButton>
+                            <Tooltip title="Implement Recommendation">
+                              <IconButton 
+                                color="primary" 
+                                size="small"
+                                onClick={() => handleImplementRecommendation(reco)}
+                              >
+                                <ExecuteIcon />
+                              </IconButton>
                             </Tooltip>
                           </TableCell>
                         </TableRow>
@@ -426,7 +528,11 @@ function Recommendations() {
                     <Typography variant="subtitle2" gutterBottom>Source Data</Typography>
                     <Typography variant="body2">Sensor: {selectedReco.sensorData_id}</Typography>
                     <Typography variant="body2">Inventory: {selectedReco.inventory_Id}</Typography>
-                    <Typography variant="body2">Generated: {selectedReco.reco_generatedAt ? new Date(selectedReco.reco_generatedAt).toLocaleString() : 'N/A'}</Typography>
+                    <Typography variant="body2">
+                      Generated: {selectedReco.reco_generatedAt 
+                        ? new Date(selectedReco.reco_generatedAt).toLocaleString() 
+                        : 'N/A'}
+                    </Typography>
                   </Grid>
                   <Grid item xs={12} md={6}>
                     <Typography variant="subtitle2" gutterBottom>Environmental Conditions</Typography>
@@ -435,10 +541,10 @@ function Recommendations() {
                     <Typography variant="body2">Temperature: {selectedReco.temperature}</Typography>
                   </Grid>
                   <Grid item xs={12}>
-                    <Typography variant="subtitle2" gutterBottom>Recommended Seedlings</Typography>
+                    <Typography variant="subtitle2" gutterBottom>Recommended Seedlings ({selectedReco.recommendedSeedlings.length})</Typography>
                     <Grid container spacing={2}>
-                      {selectedReco.recommendedSeedlings?.map((seedling, idx) => (
-                        <Grid item xs={12} sm={6} md={4} key={seedling.seeding_id}>
+                      {selectedReco.recommendedSeedlings.map((seedling, idx) => (
+                        <Grid item xs={12} sm={6} md={4} key={seedling.seedling_id}>
                           <Card variant="outlined" sx={{ p: 2, height: '100%' }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                               <Avatar sx={{ bgcolor: 'primary.main', mr: 1, width: 32, height: 32 }}>
@@ -503,7 +609,16 @@ function Recommendations() {
             </DialogContent>
             <DialogActions sx={{ p: 2 }}>
               <Button onClick={handleCloseDialog}>Close</Button>
-              <Button variant="contained" onClick={handleCloseDialog}>Implement</Button>
+              <Button 
+                variant="contained" 
+                onClick={() => {
+                  handleImplementRecommendation(selectedReco);
+                  handleCloseDialog();
+                }} 
+                sx={{ bgcolor: '#2e7d32' }}
+              >
+                Implement
+              </Button>
             </DialogActions>
           </Dialog>
         </Box>
