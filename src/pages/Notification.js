@@ -1,280 +1,211 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Box,
-  Paper,
-  Typography,
-  Card,
-  CardContent,
-  Chip,
-  IconButton,
-  Tabs,
-  Tab,
-  Badge,
-  Grid,
-  useMediaQuery,
-  useTheme,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
-  ListItemSecondaryAction,
-  Divider,
-  Alert,
-  CircularProgress,
-  Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  alpha,
-  Toolbar
+  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer,
+  TableHead, TableRow, Button, Chip, Dialog, DialogTitle, DialogContent,
+  DialogActions, TextField, Grid, Card, CardContent, Alert, IconButton,
+  Badge, useMediaQuery, useTheme
 } from '@mui/material';
-import {
-  Notifications as NotificationsIcon,
-  Warning as WarningIcon,
-  Info as InfoIcon,
-  Assignment as AssignmentIcon,
-  Refresh as RefreshIcon,
-  CheckCircle as CheckCircleIcon,
-  Delete as DeleteIcon,
-  CalendarToday as CalendarIcon,
-  LocationOn as LocationIcon,
-  Person as PersonIcon,
-  Park as TreeIcon
-} from '@mui/icons-material';
+import { 
+  collection, getDocs, doc, updateDoc, addDoc,
+  query, where, onSnapshot, orderBy, Timestamp
+} from 'firebase/firestore';
+import { auth, firestore } from "../firebase.js";
 import ReForestAppBar from './AppBar.js';
 import Navigation from './Navigation.js';
-import { auth } from '../firebase.js';
+import NotificationsIcon from '@mui/icons-material/Notifications';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import CancelIcon from '@mui/icons-material/Cancel';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 
-const drawerWidth = 240;
-
-// Mock data for demonstration
-const mockNotifications = [
-  {
-    notif_id: 'N001',
-    user_id: 'user123',
-    notif_message: 'New planting request from John Doe for North Forest Reserve',
-    notif_timestamp: '2024-03-15T10:30:00',
-    notification_type: 'planting_request',
-    status: 'unread',
-    location: 'North Forest Reserve',
-    proposed_date: '2024-03-25',
-    tree_species: 'Oak',
-    planter_name: 'John Doe'
-  },
-  {
-    notif_id: 'N002',
-    user_id: 'admin001',
-    notif_message: 'System maintenance scheduled for tomorrow at 2:00 AM',
-    notif_timestamp: '2024-03-15T09:15:00',
-    notification_type: 'system_update',
-    status: 'read'
-  },
-  {
-    notif_id: 'N003',
-    user_id: 'officer456',
-    notif_message: 'Reminder: Your planting task at South Park is due in 3 days',
-    notif_timestamp: '2024-03-15T08:45:00',
-    notification_type: 'reminder',
-    status: 'unread',
-    task_id: 'T002',
-    due_date: '2024-03-18'
-  },
-  {
-    notif_id: 'N004',
-    user_id: 'user789',
-    notif_message: 'Weather alert: Heavy rain expected in East Region tomorrow',
-    notif_timestamp: '2024-03-14T16:20:00',
-    notification_type: 'alert',
-    status: 'read',
-    severity: 'high',
-    affected_area: 'East Region'
-  },
-  {
-    notif_id: 'N005',
-    user_id: 'user123',
-    notif_message: 'Your planting request has been approved and assigned to Officer Brown',
-    notif_timestamp: '2024-03-14T14:30:00',
-    notification_type: 'approval',
-    status: 'read',
-    task_id: 'T001',
-    assigned_officer: 'Officer Brown'
-  }
-];
-
-const Notification = () => {
-  const [notifications, setNotifications] = useState([]);
-  const [filteredNotifications, setFilteredNotifications] = useState([]);
-  const [tabValue, setTabValue] = useState(0);
+const NotificationPanel = () => {
+  const [plantingRequests, setPlantingRequests] = useState([]);
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
+  const [rejectionDialogOpen, setRejectionDialogOpen] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState('');
   const [loading, setLoading] = useState(true);
-  const [selectedNotification, setSelectedNotification] = useState(null);
-  const [openDialog, setOpenDialog] = useState(false);
-  const [alert, setAlert] = useState({ open: false, message: '', severity: 'success' });
   const [mobileOpen, setMobileOpen] = useState(false);
-  
-  const user = auth.currentUser;
-  const handleLogout = () => auth.signOut();
+  const [user, setUser] = useState({ name: 'Admin User', role: 'Administrator' });
+
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
-  
+
+  const handleDrawerToggle = () => {
+    setMobileOpen(!mobileOpen);
+  };
+
+  const handleLogout = () => {
+    console.log('Logout clicked');
+  };
+
+  // Fetch planting requests from Firestore
   useEffect(() => {
-    // Simulate API call
-    setTimeout(() => {
-      setNotifications(mockNotifications);
-      setFilteredNotifications(mockNotifications);
-      setLoading(false);
-    }, 1000);
+    const fetchPlantingRequests = async () => {
+      try {
+        console.log("Fetching planting requests...");
+        
+        // Query for ALL planting requests first to see what we have
+        const requestsQuery = query(
+          collection(firestore, 'PlantingRequest')
+        );
+        
+        const unsubscribe = onSnapshot(requestsQuery, 
+          (snapshot) => {
+            console.log("Received snapshot with", snapshot.docs.length, "documents");
+            
+            // Log all documents to see what fields they have
+            snapshot.docs.forEach(doc => {
+              console.log("Document ID:", doc.id, "Data:", doc.data());
+            });
+            
+            // Get all documents and filter manually to see what's happening
+            const allRequests = snapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data()
+            }));
+            
+            console.log("All requests:", allRequests);
+            
+            // Filter for pending requests manually
+            const pendingRequests = allRequests.filter(req => 
+              req.request_status === 'pending' || 
+              req.status === 'pending' || // Check for alternative field names
+              !req.request_status // Include if status field is missing
+            );
+            
+            console.log("Pending requests:", pendingRequests);
+            
+            setPlantingRequests(pendingRequests);
+            setLoading(false);
+          },
+          (error) => {
+            console.error('Error in snapshot listener:', error);
+            setLoading(false);
+          }
+        );
+
+        return () => unsubscribe();
+      } catch (error) {
+        console.error('Error setting up planting requests query:', error);
+        setLoading(false);
+      }
+    };
+
+    fetchPlantingRequests();
   }, []);
 
-  useEffect(() => {
-    filterNotifications();
-  }, [tabValue, notifications]);
+  const handleViewDetails = (request) => {
+    setSelectedRequest(request);
+    setDetailDialogOpen(true);
+  };
 
-  const filterNotifications = () => {
-    let filtered = notifications;
-    
-    switch (tabValue) {
-      case 1: // Unread
-        filtered = notifications.filter(notif => notif.status === 'unread');
-        break;
-      case 2: // Planting Requests
-        filtered = notifications.filter(notif => notif.notification_type === 'planting_request');
-        break;
-      case 3: // Alerts
-        filtered = notifications.filter(notif => 
-          notif.notification_type === 'alert' || notif.notification_type === 'reminder'
-        );
-        break;
-      default: // All
-        filtered = notifications;
+  const handleApprove = (request) => {
+    setSelectedRequest(request);
+    setApprovalDialogOpen(true);
+  };
+
+  const handleReject = (request) => {
+    setSelectedRequest(request);
+    setRejectionDialogOpen(true);
+  };
+
+  const confirmApprove = async () => {
+    try {
+      // Update the request status to approved
+      const requestRef = doc(firestore, 'PlantingRequest', selectedRequest.id);
+      await updateDoc(requestRef, {
+        request_status: 'approved',
+        request_remarks: rejectionReason || 'Request approved by administrator'
+      });
+
+      setApprovalDialogOpen(false);
+      setSelectedRequest(null);
+      setRejectionReason('');
+      alert('Request approved successfully!');
+    } catch (error) {
+      console.error('Error approving request:', error);
+      alert('Error approving request: ' + error.message);
     }
+  };
+
+  const confirmReject = async () => {
+    try {
+      // Update the request status to rejected
+      const requestRef = doc(firestore, 'PlantingRequest', selectedRequest.id);
+      await updateDoc(requestRef, {
+        request_status: 'rejected',
+        request_remarks: rejectionReason || 'Request rejected by administrator'
+      });
+
+      setRejectionDialogOpen(false);
+      setRejectionReason('');
+      setSelectedRequest(null);
+      alert('Request rejected successfully!');
+    } catch (error) {
+      console.error('Error rejecting request:', error);
+      alert('Error rejecting request: ' + error.message);
+    }
+  };
+
+  const getStatusColor = (status) => {
+    if (!status) return 'default';
     
-    setFilteredNotifications(filtered);
+    switch (status.toLowerCase()) {
+      case 'pending': return 'warning';
+      case 'approved': return 'success';
+      case 'rejected': return 'error';
+      case 'completed': return 'info';
+      default: return 'default';
+    }
   };
 
-  const handleTabChange = (event, newValue) => {
-    setTabValue(newValue);
+  const formatDate = (date) => {
+    if (!date) return 'N/A';
+    
+    try {
+      if (date instanceof Timestamp) {
+        return date.toDate().toLocaleDateString();
+      }
+      if (typeof date === 'string') {
+        // Handle both "2023-11-10" format and "September 20, 2023 at 12:00:00 AM UTC+8" format
+        if (date.includes('September') || date.includes('UTC')) {
+          return new Date(date).toLocaleDateString();
+        } else {
+          return new Date(date + 'T00:00:00').toLocaleDateString();
+        }
+      }
+      if (date.toDate) {
+        return date.toDate().toLocaleDateString();
+      }
+      return 'Invalid Date';
+    } catch (error) {
+      console.error('Error formatting date:', error, date);
+      return 'Invalid Date';
+    }
   };
 
-  const handleMarkAsRead = (notifId) => {
-    const updatedNotifications = notifications.map(notif =>
-      notif.notif_id === notifId ? { ...notif, status: 'read' } : notif
+  const getStatusText = (request) => {
+    return request.request_status || request.status || 'unknown';
+  };
+
+  const pendingCount = plantingRequests.filter(req => 
+    (req.request_status === 'pending' || req.status === 'pending') && 
+    req.request_status !== 'approved' && 
+    req.request_status !== 'rejected'
+  ).length;
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', bgcolor: '#f8fafc', minHeight: '100vh' }}>
+        <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={user} onLogout={handleLogout} />
+        <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
+        <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - 240px)` }, ml: { md: '240px' }, mt: '64px' }}>
+          <Typography>Loading planting requests...</Typography>
+        </Box>
+      </Box>
     );
-    setNotifications(updatedNotifications);
-    setAlert({
-      open: true,
-      message: 'Notification marked as read',
-      severity: 'success'
-    });
-  };
-
-  const handleDeleteNotification = (notifId) => {
-    const updatedNotifications = notifications.filter(notif => notif.notif_id !== notifId);
-    setNotifications(updatedNotifications);
-    setAlert({
-      open: true,
-      message: 'Notification deleted',
-      severity: 'info'
-    });
-  };
-
-  const handleViewDetails = (notification) => {
-    setSelectedNotification(notification);
-    setOpenDialog(true);
-    // Mark as read when viewing details
-    if (notification.status === 'unread') {
-      handleMarkAsRead(notification.notif_id);
-    }
-  };
-
-  const handleRefresh = () => {
-    setLoading(true);
-    setTimeout(() => {
-      setNotifications(mockNotifications);
-      setLoading(false);
-      setAlert({
-        open: true,
-        message: 'Notifications refreshed',
-        severity: 'info'
-      });
-    }, 800);
-  };
-
-  const handleApproveRequest = () => {
-    if (selectedNotification) {
-      const updatedNotifications = notifications.map(notif =>
-        notif.notif_id === selectedNotification.notif_id
-          ? { ...notif, status: 'read' }
-          : notif
-      );
-      setNotifications(updatedNotifications);
-      setOpenDialog(false);
-      setAlert({
-        open: true,
-        message: 'Planting request approved successfully',
-        severity: 'success'
-      });
-    }
-  };
-
-  const handleRejectRequest = () => {
-    if (selectedNotification) {
-      const updatedNotifications = notifications.map(notif =>
-        notif.notif_id === selectedNotification.notif_id
-          ? { ...notif, status: 'read' }
-          : notif
-      );
-      setNotifications(updatedNotifications);
-      setOpenDialog(false);
-      setAlert({
-        open: true,
-        message: 'Planting request rejected',
-        severity: 'warning'
-      });
-    }
-  };
-
-  const getNotificationIcon = (type) => {
-    switch (type) {
-      case 'alert':
-        return <WarningIcon color="error" />;
-      case 'reminder':
-        return <InfoIcon color="warning" />;
-      case 'planting_request':
-        return <AssignmentIcon color="primary" />;
-      case 'system_update':
-        return <InfoIcon color="info" />;
-      case 'approval':
-        return <CheckCircleIcon color="success" />;
-      default:
-        return <NotificationsIcon />;
-    }
-  };
-
-  const getNotificationColor = (type) => {
-    switch (type) {
-      case 'alert':
-        return 'error';
-      case 'reminder':
-        return 'warning';
-      case 'planting_request':
-        return 'primary';
-      case 'system_update':
-        return 'info';
-      case 'approval':
-        return 'success';
-      default:
-        return 'default';
-    }
-  };
-
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleString();
-  };
-
-  const unreadCount = notifications.filter(notif => notif.status === 'unread').length;
+  }
 
   return (
     <Box sx={{ display: 'flex', bgcolor: '#f8fafc', minHeight: '100vh' }}>
@@ -285,314 +216,231 @@ const Notification = () => {
       <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
 
       {/* Main Content */}
-      <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - ${drawerWidth}px)` }, minWidth: 0 }}>
-        <Toolbar /> {/* Spacing for app bar */}
-        
-        <Box sx={{ width: '100%' }}>
-          {/* Alert */}
-          {alert.open && (
-            <Alert
-              severity={alert.severity}
-              onClose={() => setAlert({ ...alert, open: false })}
-              sx={{ mb: 3, borderRadius: 2 }}
-            >
-              {alert.message}
-            </Alert>
-          )}
-
-          {/* Header */}
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-            <Typography variant="h4" sx={{ color: '#2e7d32', fontWeight: 600 }}>
-              Notification Center
-            </Typography>
-            <Button 
-              variant="outlined" 
-              startIcon={<RefreshIcon />} 
-              onClick={handleRefresh}
-              disabled={loading}
-              size="small"
-            >
-              Refresh
-            </Button>
-          </Box>
-
-          {/* Tabs */}
-          <Paper sx={{ mb: 3, borderRadius: 2, boxShadow: 2 }}>
-            <Tabs
-              value={tabValue}
-              onChange={handleTabChange}
-              variant="scrollable"
-              scrollButtons="auto"
-              sx={{
-                '& .MuiTab-root': {
-                  minHeight: 60,
-                }
-              }}
-            >
-              <Tab label="All Notifications" />
-              <Tab label={
-                <Badge badgeContent={unreadCount} color="error">
-                  Unread
-                </Badge>
-              } />
-              <Tab label="Planting Requests" />
-              <Tab label="Alerts & Reminders" />
-            </Tabs>
-          </Paper>
-
-          {loading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-              <CircularProgress />
-            </Box>
-          ) : filteredNotifications.length === 0 ? (
-            <Paper sx={{ p: 3, textAlign: 'center', borderRadius: 2 }}>
-              <Typography color="text.secondary">
-                No notifications found
-              </Typography>
-            </Paper>
-          ) : (
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={9}>
-                <Paper sx={{ borderRadius: 2, boxShadow: 2, overflow: 'hidden' }}>
-                  <Box sx={{ bgcolor: 'primary.main', color: 'white', p: 2 }}>
-                    <Typography variant="h6">
-                      Notifications List
-                    </Typography>
-                  </Box>
-                  <List sx={{ maxHeight: 600, overflow: 'auto' }}>
-                    {filteredNotifications.map((notification, index) => (
-                      <React.Fragment key={notification.notif_id}>
-                        <ListItem 
-                          button 
-                          onClick={() => handleViewDetails(notification)}
-                          sx={{
-                            bgcolor: notification.status === 'unread' ? alpha(theme.palette.info.main, 0.1) : 'transparent',
-                            '&:hover': { bgcolor: 'action.selected' },
-                            py: 2
-                          }}
-                        >
-                          <ListItemIcon>
-                            {getNotificationIcon(notification.notification_type)}
-                          </ListItemIcon>
-                          <ListItemText
-                            primary={notification.notif_message}
-                            secondary={formatDate(notification.notif_timestamp)}
-                            primaryTypographyProps={{
-                              fontWeight: notification.status === 'unread' ? 'bold' : 'normal',
-                              color: notification.status === 'unread' ? 'text.primary' : 'text.secondary'
-                            }}
-                            secondaryTypographyProps={{
-                              sx: { mt: 0.5 }
-                            }}
-                          />
-                          <ListItemSecondaryAction>
-                            <IconButton
-                              edge="end"
-                              onClick={() => handleMarkAsRead(notification.notif_id)}
-                              disabled={notification.status === 'read'}
-                              size="small"
-                              sx={{ mr: 1 }}
-                            >
-                              <CheckCircleIcon />
-                            </IconButton>
-                            <IconButton
-                              edge="end"
-                              onClick={() => handleDeleteNotification(notification.notif_id)}
-                              size="small"
-                            >
-                              <DeleteIcon />
-                            </IconButton>
-                          </ListItemSecondaryAction>
-                        </ListItem>
-                        {index < filteredNotifications.length - 1 && <Divider />}
-                      </React.Fragment>
-                    ))}
-                  </List>
-                </Paper>
-              </Grid>
-
-              <Grid item xs={12} md={3}>
-                <Paper sx={{ p: 3, borderRadius: 2, boxShadow: 2 }}>
-                  <Typography variant="h6" gutterBottom sx={{ color: 'primary.main', mb: 3 }}>
-                    Notification Statistics
-                  </Typography>
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} sm={6} md={12}>
-                      <Card sx={{ borderRadius: 2, mb: 2 }}>
-                        <CardContent sx={{ textAlign: 'center' }}>
-                          <Typography variant="h4" color="primary" fontWeight="bold">
-                            {notifications.length}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">Total Notifications</Typography>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                    <Grid item xs={12} sm={6} md={12}>
-                      <Card sx={{ borderRadius: 2, mb: 2 }}>
-                        <CardContent sx={{ textAlign: 'center' }}>
-                          <Typography variant="h4" color="error" fontWeight="bold">
-                            {unreadCount}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">Unread</Typography>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                    <Grid item xs={12}>
-                      <Card sx={{ borderRadius: 2 }}>
-                        <CardContent>
-                          <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
-                            By Type
-                          </Typography>
-                          {Object.entries(
-                            notifications.reduce((acc, notif) => {
-                              acc[notif.notification_type] = (acc[notif.notification_type] || 0) + 1;
-                              return acc;
-                            }, {})
-                          ).map(([type, count]) => (
-                            <Box key={type} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-                              <Chip
-                                label={type.replace('_', ' ')}
-                                size="small"
-                                color={getNotificationColor(type)}
-                                variant="outlined"
-                                sx={{ textTransform: 'capitalize' }}
-                              />
-                              <Typography variant="body2" fontWeight="bold">
-                                {count}
-                              </Typography>
-                            </Box>
-                          ))}
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  </Grid>
-                </Paper>
-              </Grid>
-            </Grid>
-          )}
-
-          {/* Notification Details Dialog */}
-          <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="md" fullWidth PaperProps={{ sx: { borderRadius: 2 } }}>
-            <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <NotificationsIcon />
-                Notification Details
-                {selectedNotification && (
-                  <Chip
-                    label={selectedNotification.notification_type.replace('_', ' ')}
-                    color={getNotificationColor(selectedNotification.notification_type)}
-                    size="small"
-                    sx={{ ml: 2, textTransform: 'capitalize', color: 'white' }}
-                  />
-                )}
-              </Box>
-            </DialogTitle>
-            <DialogContent>
-              {selectedNotification && (
-                <Grid container spacing={2} sx={{ mt: 1 }}>
-                  <Grid item xs={12}>
-                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                      Message
-                    </Typography>
-                    <Typography variant="body1" paragraph sx={{ p: 1.5, bgcolor: 'grey.50', borderRadius: 1 }}>
-                      {selectedNotification.notif_message}
-                    </Typography>
-                  </Grid>
-
-                  <Grid item xs={12} sm={6}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                      <PersonIcon color="action" fontSize="small" />
-                      <Typography variant="subtitle2" color="text.secondary">
-                        User ID:
-                      </Typography>
-                    </Box>
-                    <Typography variant="body1">{selectedNotification.user_id}</Typography>
-                  </Grid>
-
-                  <Grid item xs={12} sm={6}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                      <CalendarIcon color="action" fontSize="small" />
-                      <Typography variant="subtitle2" color="text.secondary">
-                        Timestamp:
-                      </Typography>
-                    </Box>
-                    <Typography variant="body1">
-                      {formatDate(selectedNotification.notif_timestamp)}
-                    </Typography>
-                  </Grid>
-
-                  {selectedNotification.location && (
-                    <Grid item xs={12}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                        <LocationIcon color="action" fontSize="small" />
-                        <Typography variant="subtitle2" color="text.secondary">
-                          Location:
-                        </Typography>
-                      </Box>
-                      <Typography variant="body1">{selectedNotification.location}</Typography>
-                    </Grid>
-                  )}
-
-                  {selectedNotification.proposed_date && (
-                    <Grid item xs={12} sm={6}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                        <CalendarIcon color="action" fontSize="small" />
-                        <Typography variant="subtitle2" color="text.secondary">
-                          Proposed Date:
-                        </Typography>
-                      </Box>
-                      <Typography variant="body1">
-                        {new Date(selectedNotification.proposed_date).toLocaleDateString()}
-                      </Typography>
-                    </Grid>
-                  )}
-
-                  {selectedNotification.tree_species && (
-                    <Grid item xs={12} sm={6}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                        <TreeIcon color="action" fontSize="small" />
-                        <Typography variant="subtitle2" color="text.secondary">
-                          Tree Species:
-                        </Typography>
-                      </Box>
-                      <Typography variant="body1">{selectedNotification.tree_species}</Typography>
-                    </Grid>
-                  )}
-
-                  {selectedNotification.planter_name && (
-                    <Grid item xs={12}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                        <PersonIcon color="action" fontSize="small" />
-                        <Typography variant="subtitle2" color="text.secondary">
-                          Planter Name:
-                        </Typography>
-                      </Box>
-                      <Typography variant="body1">{selectedNotification.planter_name}</Typography>
-                    </Grid>
-                  )}
-                </Grid>
-              )}
-            </DialogContent>
-            <DialogActions sx={{ p: 2 }}>
-              <Button onClick={() => setOpenDialog(false)} color="inherit">
-                Close
-              </Button>
-              {selectedNotification?.notification_type === 'planting_request' && (
-                <>
-                  <Button onClick={handleRejectRequest} color="error">
-                Reject
-                  </Button>
-                  <Button onClick={handleApproveRequest} variant="contained" sx={{ bgcolor: '#2e7d32' }}>
-                Approve Request
-                  </Button>
-                </>
-              )}
-            </DialogActions>
-          </Dialog>
+      <Box 
+        component="main" 
+        sx={{ 
+          flexGrow: 1, 
+          p: 3, 
+          width: { md: `calc(100% - 240px)` },
+          ml: { md: '240px' },
+          mt: '64px'
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+          <Badge badgeContent={pendingCount} color="error" sx={{ mr: 2 }}>
+            <NotificationsIcon color="action" fontSize="large" />
+          </Badge>
+          <Typography variant="h4">
+            Notification Panel
+          </Typography>
         </Box>
+        
+        <Typography variant="body1" color="textSecondary" paragraph>
+          Review and respond to planting requests from planters. Monitor pending approvals and take action to coordinate reforestation activities.
+        </Typography>
+
+        {/* Debug information - remove in production */}
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Debug: Found {plantingRequests.length} requests. Check console for details.
+        </Alert>
+
+        {plantingRequests.length === 0 ? (
+          <Alert severity="info" sx={{ mt: 2 }}>
+            No planting requests found. All requests have been processed.
+          </Alert>
+        ) : (
+          <Paper sx={{ width: '100%', mb: 2, overflow: 'hidden' }}>
+            <TableContainer sx={{ maxHeight: 600 }}>
+              <Table stickyHeader>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Request ID</TableCell>
+                    <TableCell>Planter ID</TableCell>
+                    <TableCell>Location</TableCell>
+                    <TableCell>Preferred Date</TableCell>
+                    <TableCell>Request Date</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell align="center">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {plantingRequests.map((request) => {
+                    const status = getStatusText(request);
+                    const isPending = status === 'pending';
+                    
+                    return (
+                      <TableRow 
+                        key={request.id} 
+                        sx={{ 
+                          '&:last-child td, &:last-child th': { border: 0 },
+                          bgcolor: isPending ? '#fffde7' : 'inherit'
+                        }}
+                      >
+                        <TableCell component="th" scope="row">
+                          {request.request_id || request.id}
+                        </TableCell>
+                        <TableCell>{request.user_id}</TableCell>
+                        <TableCell>{request.location_id}</TableCell>
+                        <TableCell>{formatDate(request.preferred_date)}</TableCell>
+                        <TableCell>{formatDate(request.request_date)}</TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={status} 
+                            color={getStatusColor(status)} 
+                            size="small" 
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <IconButton 
+                            color="info" 
+                            onClick={() => handleViewDetails(request)}
+                            title="View details"
+                          >
+                            <VisibilityIcon />
+                          </IconButton>
+                          {isPending && (
+                            <>
+                              <IconButton 
+                                color="success" 
+                                onClick={() => handleApprove(request)}
+                                title="Approve request"
+                              >
+                                <CheckCircleIcon />
+                              </IconButton>
+                              <IconButton 
+                                color="error" 
+                                onClick={() => handleReject(request)}
+                                title="Reject request"
+                              >
+                                <CancelIcon />
+                              </IconButton>
+                            </>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+        )}
+
+        {/* Request Details Dialog */}
+        <Dialog open={detailDialogOpen} onClose={() => setDetailDialogOpen(false)} maxWidth="md" fullWidth>
+          <DialogTitle>
+            Planting Request Details
+          </DialogTitle>
+          <DialogContent>
+            {selectedRequest && (
+              <Grid container spacing={2} sx={{ mt: 1 }}>
+                <Grid item xs={12} sm={6}>
+                  <Card variant="outlined">
+                    <CardContent>
+                      <Typography variant="subtitle2" color="textSecondary">Request ID</Typography>
+                      <Typography variant="body1" gutterBottom>{selectedRequest.request_id || selectedRequest.id}</Typography>
+                      
+                      <Typography variant="subtitle2" color="textSecondary">Planter ID</Typography>
+                      <Typography variant="body1" gutterBottom>{selectedRequest.user_id}</Typography>
+                      
+                      <Typography variant="subtitle2" color="textSecondary">Location</Typography>
+                      <Typography variant="body1" gutterBottom>{selectedRequest.location_id}</Typography>
+                    </CardContent>
+                  </Card>
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <Card variant="outlined">
+                    <CardContent>
+                      <Typography variant="subtitle2" color="textSecondary">Preferred Date</Typography>
+                      <Typography variant="body1" gutterBottom>{formatDate(selectedRequest.preferred_date)}</Typography>
+                      
+                      <Typography variant="subtitle2" color="textSecondary">Request Date</Typography>
+                      <Typography variant="body1" gutterBottom>{formatDate(selectedRequest.request_date)}</Typography>
+                      
+                      <Typography variant="subtitle2" color="textSecondary">Status</Typography>
+                      <Chip 
+                        label={getStatusText(selectedRequest)} 
+                        color={getStatusColor(getStatusText(selectedRequest))} 
+                        size="small" 
+                      />
+                    </CardContent>
+                  </Card>
+                </Grid>
+                <Grid item xs={12}>
+                  <Typography variant="subtitle2" color="textSecondary">Remarks</Typography>
+                  <Typography variant="body1">
+                    {selectedRequest.request_remarks || 'No remarks provided'}
+                  </Typography>
+                </Grid>
+                <Grid item xs={12}>
+                  <Typography variant="subtitle2" color="textSecondary">Document ID</Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    {selectedRequest.id}
+                  </Typography>
+                </Grid>
+              </Grid>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setDetailDialogOpen(false)}>Close</Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Approval Confirmation Dialog */}
+        <Dialog open={approvalDialogOpen} onClose={() => setApprovalDialogOpen(false)}>
+          <DialogTitle>Confirm Approval</DialogTitle>
+          <DialogContent>
+            <Typography>
+              Are you sure you want to approve this planting request from {selectedRequest?.user_id}?
+            </Typography>
+            <TextField
+              autoFocus
+              margin="dense"
+              label="Approval Notes (Optional)"
+              fullWidth
+              variant="outlined"
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+              sx={{ mt: 2 }}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setApprovalDialogOpen(false)}>Cancel</Button>
+            <Button onClick={confirmApprove} color="success" variant="contained">
+              Approve
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Rejection Dialog */}
+        <Dialog open={rejectionDialogOpen} onClose={() => setRejectionDialogOpen(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>Reject Planting Request</DialogTitle>
+          <DialogContent>
+            <Typography gutterBottom>
+              Please provide a reason for rejecting this request from {selectedRequest?.user_id}:
+            </Typography>
+            <TextField
+              autoFocus
+              margin="dense"
+              label="Rejection Reason"
+              fullWidth
+              variant="outlined"
+              multiline
+              rows={3}
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setRejectionDialogOpen(false)}>Cancel</Button>
+            <Button onClick={confirmReject} color="error" variant="contained">
+              Reject Request
+            </Button>
+          </DialogActions>
+        </Dialog>
       </Box>
     </Box>
   );
 };
 
-export default Notification;
+export default NotificationPanel;
