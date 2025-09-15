@@ -1,4 +1,4 @@
-// src/pages/Profile.js
+// src/pages/AdminProfile.js
 import React, { useState, useEffect } from "react";
 import {
   Container,
@@ -21,37 +21,36 @@ import {
   Toolbar,
   useMediaQuery,
   useTheme,
-  Card,
-  CardContent,
-  IconButton,
+  Switch,
+  FormControlLabel,
+  Stack,
 } from "@mui/material";
-import { 
+import {
   Save as SaveIcon,
-  Language as LanguageIcon,
-  Schedule as ScheduleIcon,
-  Description as DescriptionIcon,
-  Share as ShareIcon,
-  Star as StarIcon,
-  Help as HelpIcon,
+  AdminPanelSettings as AdminIcon,
+  Person as PersonIcon,
+  Settings as SettingsIcon,
+  Security as SecurityIcon,
+  Dashboard as DashboardIcon,
 } from "@mui/icons-material";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
-import { onAuthStateChanged } from "firebase/auth";
 import { auth, firestore } from "../firebase.js";
 import ReForestAppBar from "./AppBar.js";
 import Navigation from "./Navigation.js";
 import { useAuth } from '../context/AuthContext.js';
 
-const Profile = () => {
+const AdminProfile = () => {
   const { user, logout } = useAuth();
-  const [personalInfo, setPersonalInfo] = useState({
+  const [profile, setProfile] = useState({
     firstName: "",
     lastName: "",
     email: "",
     phone: "",
-  });
-  const [accountSettings, setAccountSettings] = useState({
+    department: "",
     language: "english",
     timezone: "eastern",
+    emailAlerts: true,
+    systemMaintenance: false,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -70,65 +69,54 @@ const Profile = () => {
     logout();
   };
 
-  // Fetch user profile data with real-time updates
+  // Load admin profile
   useEffect(() => {
     if (!user) {
       setLoading(false);
       return;
     }
 
-    const docRef = doc(firestore, "users", user.uid);
+    const docRef = doc(firestore, "admins", user.uid);
     
-    // Using onSnapshot for real-time updates
     const unsubscribe = onSnapshot(
       docRef,
       (docSnap) => {
         if (docSnap.exists()) {
           const data = docSnap.data();
-          
-          // Set personal info with fallbacks to auth data
-          setPersonalInfo({
-            firstName: data.personalInfo?.firstName || user.name || "",
-            lastName: data.personalInfo?.lastName || "",
-            email: data.personalInfo?.email || user.email || "",
-            phone: data.personalInfo?.phone || "",
-          });
-          
-          // Set account settings with defaults
-          setAccountSettings({
-            language: data.accountSettings?.language || "english",
-            timezone: data.accountSettings?.timezone || "eastern",
+          setProfile({
+            firstName: data.firstName || "",
+            lastName: data.lastName || "",
+            email: data.email || user.email || "",
+            phone: data.phone || "",
+            department: data.department || "",
+            language: data.language || "english",
+            timezone: data.timezone || "eastern",
+            emailAlerts: data.emailAlerts ?? true,
+            systemMaintenance: data.systemMaintenance ?? false,
           });
         } else {
-          // If document doesn't exist, create it with basic info
-          const initialData = {
-            personalInfo: {
-              firstName: user.name || "",
-              lastName: "",
-              email: user.email || "",
-              phone: "",
-            },
-            accountSettings: {
-              language: "english",
-              timezone: "eastern",
-            },
+          // Initialize new admin profile
+          const newProfile = {
+            firstName: user.displayName?.split(' ')[0] || "",
+            lastName: user.displayName?.split(' ')[1] || "",
+            email: user.email || "",
+            phone: "",
+            department: "",
+            language: "english",
+            timezone: "eastern",
+            emailAlerts: true,
+            systemMaintenance: false,
+            role: "admin",
             createdAt: new Date().toISOString(),
           };
           
-          setPersonalInfo(initialData.personalInfo);
-          setAccountSettings(initialData.accountSettings);
-          
-          // Create the document
-          setDoc(docRef, initialData, { merge: true }).catch((error) => {
-            console.error("Error creating initial profile:", error);
-            setError("Failed to initialize profile");
-          });
+          setProfile(newProfile);
+          setDoc(docRef, newProfile, { merge: true }).catch(console.error);
         }
         setLoading(false);
       },
       (error) => {
-        console.error("Error fetching profile:", error);
-        setError("Failed to load profile data");
+        setError("Failed to load admin profile");
         setLoading(false);
       }
     );
@@ -136,410 +124,309 @@ const Profile = () => {
     return () => unsubscribe();
   }, [user]);
 
-  const handlePersonalInfoChange = (field, value) => {
-    setPersonalInfo({ ...personalInfo, [field]: value });
+  const handleChange = (field, value) => {
+    setProfile(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleAccountSettingsChange = (field, value) => {
-    setAccountSettings({ ...accountSettings, [field]: value });
-  };
-
-  const handleUpdateSettings = async () => {
-    if (!user) {
-      setError("You must be logged in to update settings");
-      return;
-    }
+  const handleSave = async () => {
+    if (!user) return;
 
     setSaving(true);
     setError(null);
 
     try {
-      const docRef = doc(firestore, "users", user.uid);
-      const dataToSave = {
-        accountSettings: {
-          ...accountSettings,
-          updatedAt: new Date().toISOString(),
-        },
-      };
-
-      await setDoc(docRef, dataToSave, { merge: true });
+      const docRef = doc(firestore, "admins", user.uid);
+      await setDoc(docRef, {
+        ...profile,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+      
       setSuccess(true);
     } catch (error) {
-      console.error("Error updating settings:", error);
-      setError("Failed to update settings. Please try again.");
+      setError("Failed to save profile");
     } finally {
       setSaving(false);
     }
   };
 
-  const handleSaveChanges = async () => {
-    if (!user) {
-      setError("You must be logged in to save changes");
-      return;
-    }
+  if (loading) {
+    return (
+      <Box sx={{ display: "flex" }}>
+        <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={user} onLogout={handleLogout} />
+        <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
+        <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - 240px)` } }}>
+          <Toolbar />
+          <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+            <CircularProgress size={40} />
+            <Typography variant="h6" sx={{ ml: 2 }}>Loading...</Typography>
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
 
-    setSaving(true);
-    setError(null);
-
-    try {
-      const docRef = doc(firestore, "users", user.uid);
-      const dataToSave = {
-        personalInfo: {
-          ...personalInfo,
-          updatedAt: new Date().toISOString(),
-        },
-        accountSettings: {
-          ...accountSettings,
-          updatedAt: new Date().toISOString(),
-        },
-      };
-
-      await setDoc(docRef, dataToSave, { merge: true });
-      setSuccess(true);
-    } catch (error) {
-      console.error("Error saving profile:", error);
-      setError("Failed to save profile. Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCloseSnackbar = () => {
-    setSuccess(false);
-    setError(null);
-  };
+  if (!user) {
+    return (
+      <Box sx={{ display: "flex" }}>
+        <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={user} onLogout={handleLogout} />
+        <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
+        <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - 240px)` } }}>
+          <Toolbar />
+          <Alert severity="warning">Please log in to access admin profile.</Alert>
+        </Box>
+      </Box>
+    );
+  }
 
   return (
-    <Box sx={{ display: "flex" }}>
-      {/* Top App Bar */}
-      <ReForestAppBar
-        handleDrawerToggle={handleDrawerToggle}
-        user={user}
-        onLogout={handleLogout}
-      />
+    <Box sx={{ display: "flex", bgcolor: "#fafafa", minHeight: "100vh" }}>
+      <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={user} onLogout={handleLogout} />
+      <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
 
-      {/* Side Navigation */}
-      <Navigation
-        mobileOpen={mobileOpen}
-        handleDrawerToggle={handleDrawerToggle}
-        isMobile={isMobile}
-      />
-
-      {/* Main Content */}
-      <Box
-        component="main"
-        sx={{
-          flexGrow: 1,
-          p: 3,
-          width: { md: `calc(100% - 240px)` },
-        }}
-      >
-        <Toolbar /> {/* Push content below AppBar */}
+      <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - 240px)` } }}>
+        <Toolbar />
         
-        {loading ? (
-          <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-            <CircularProgress />
-            <Typography variant="h6" sx={{ ml: 2 }}>
-              Loading profile...
-            </Typography>
-          </Box>
-        ) : !user ? (
-          <Alert severity="warning">
-            Please log in to view your profile.
-          </Alert>
-        ) : (
-          <Container maxWidth="lg">
-            <Paper elevation={2} sx={{ p: 3, borderRadius: 2 }}>
-              {/* Profile Header */}
-              <Box sx={{ display: "flex", alignItems: "center", mb: 3 }}>
-                <Avatar 
-                  sx={{ 
-                    width: 64, 
-                    height: 64, 
-                    mr: 2,
-                    bgcolor: 'primary.main',
-                    fontSize: '1.5rem'
-                  }}
-                  src={user?.photoURL}
-                >
-                  {personalInfo.firstName?.charAt(0)?.toUpperCase() || 
-                   user.email?.charAt(0)?.toUpperCase() || 'U'}
-                </Avatar>
-                <Box>
-                  <Typography variant="h5" fontWeight="bold">
-                    {personalInfo.firstName || personalInfo.lastName 
-                      ? `${personalInfo.firstName} ${personalInfo.lastName}`.trim()
-                      : user.email || 'User'
-                    }
-                  </Typography>
-                  <Box sx={{ display: "flex", alignItems: "center", mt: 0.5 }}>
-                    <Chip
-                      label="User"
-                      size="small"
-                      color="primary"
-                      variant="outlined"
-                      sx={{ mr: 1 }}
-                    />
-                    <Typography variant="body2" color="text.secondary">
-                      ● Member since: {user.metadata?.creationTime 
-                        ? new Date(user.metadata.creationTime).toLocaleDateString()
-                        : 'Unknown'
-                      }
-                    </Typography>
-                  </Box>
+        <Container maxWidth="lg">
+          {/* Profile Header */}
+          <Paper sx={{ p: 3, mb: 3, borderRadius: 1 }}>
+            <Box sx={{ display: "flex", alignItems: "center" }}>
+              <Avatar 
+                sx={{ 
+                  width: 60, 
+                  height: 60, 
+                  mr: 3,
+                  bgcolor: 'primary.main',
+                  fontSize: '1.25rem',
+                  fontWeight: 600
+                }}
+              >
+                {profile.firstName?.[0]?.toUpperCase() || profile.email?.[0]?.toUpperCase() || 'A'}
+              </Avatar>
+              <Box>
+                <Typography variant="h5" fontWeight="600" sx={{ mb: 0.5 }}>
+                  {profile.firstName && profile.lastName 
+                    ? `${profile.firstName} ${profile.lastName}`
+                    : profile.email || 'Administrator'
+                  }
+                </Typography>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Chip
+                    icon={<AdminIcon />}
+                    label="System Administrator"
+                    color="primary"
+                    size="small"
+                    sx={{ fontWeight: 500 }}
+                  />
+                  {profile.department && (
+                    <Chip label={profile.department} variant="outlined" size="small" />
+                  )}
                 </Box>
               </Box>
+            </Box>
+          </Paper>
 
-              <Divider sx={{ mb: 3 }} />
+          {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
 
-              {/* Error Alert */}
-              {error && (
-                <Alert severity="error" sx={{ mb: 3 }}>
-                  {error}
+          {/* Main Content */}
+          <Grid container spacing={3}>
+            {/* Personal Information */}
+            <Grid item xs={12} lg={6}>
+              <Paper sx={{ p: 3, height: "fit-content" }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                  <PersonIcon sx={{ mr: 1.5, color: 'primary.main' }} />
+                  <Typography variant="h6" fontWeight="600">Personal Information</Typography>
+                </Box>
+                
+                <Stack spacing={2.5}>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <TextField
+                      label="First Name"
+                      value={profile.firstName}
+                      onChange={(e) => handleChange("firstName", e.target.value)}
+                      size="small"
+                      sx={{ flex: 1 }}
+                    />
+                    <TextField
+                      label="Last Name"
+                      value={profile.lastName}
+                      onChange={(e) => handleChange("lastName", e.target.value)}
+                      size="small"
+                      sx={{ flex: 1 }}
+                    />
+                  </Box>
+                  
+                  <TextField
+                    label="Email Address"
+                    type="email"
+                    value={profile.email}
+                    onChange={(e) => handleChange("email", e.target.value)}
+                    size="small"
+                    helperText="Primary admin email for system access"
+                  />
+                  
+                  <TextField
+                    label="Phone Number"
+                    value={profile.phone}
+                    onChange={(e) => handleChange("phone", e.target.value)}
+                    placeholder="(555) 123-4567"
+                    size="small"
+                  />
+                  
+                  <FormControl size="small">
+                    <InputLabel>Department</InputLabel>
+                    <Select
+                      value={profile.department}
+                      label="Department"
+                      onChange={(e) => handleChange('department', e.target.value)}
+                    >
+                      <MenuItem value="">Select Department</MenuItem>
+                      <MenuItem value="Information Technology">Information Technology</MenuItem>
+                      <MenuItem value="Human Resources">Human Resources</MenuItem>
+                      <MenuItem value="Finance">Finance</MenuItem>
+                      <MenuItem value="Operations">Operations</MenuItem>
+                      <MenuItem value="Management">Management</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Stack>
+              </Paper>
+            </Grid>
+
+            {/* System Settings */}
+            <Grid item xs={12} lg={6}>
+              <Paper sx={{ p: 3, height: "fit-content", mb: 3 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                  <SettingsIcon sx={{ mr: 1.5, color: 'primary.main' }} />
+                  <Typography variant="h6" fontWeight="600">Account Settings</Typography>
+                </Box>
+                
+                <Stack spacing={2.5}>
+                  <FormControl size="small">
+                    <InputLabel>Language</InputLabel>
+                    <Select
+                      value={profile.language}
+                      label="Language"
+                      onChange={(e) => handleChange('language', e.target.value)}
+                    >
+                      <MenuItem value="english">English</MenuItem>
+                      <MenuItem value="spanish">Spanish</MenuItem>
+                      <MenuItem value="french">French</MenuItem>
+                      <MenuItem value="german">German</MenuItem>
+                    </Select>
+                  </FormControl>
+                  
+                  <FormControl size="small">
+                    <InputLabel>Timezone</InputLabel>
+                    <Select
+                      value={profile.timezone}
+                      label="Timezone"
+                      onChange={(e) => handleChange('timezone', e.target.value)}
+                    >
+                      <MenuItem value="eastern">Eastern Time (ET)</MenuItem>
+                      <MenuItem value="central">Central Time (CT)</MenuItem>
+                      <MenuItem value="mountain">Mountain Time (MT)</MenuItem>
+                      <MenuItem value="pacific">Pacific Time (PT)</MenuItem>
+                      <MenuItem value="utc">Coordinated Universal Time (UTC)</MenuItem>
+                    </Select>
+                  </FormControl>
+                  
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={profile.emailAlerts}
+                        onChange={(e) => handleChange('emailAlerts', e.target.checked)}
+                        size="small"
+                      />
+                    }
+                    label="Email alerts and notifications"
+                  />
+                </Stack>
+              </Paper>
+
+              {/* Admin Controls */}
+              <Paper sx={{ p: 3 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                  <SecurityIcon sx={{ mr: 1.5, color: 'warning.main' }} />
+                  <Typography variant="h6" fontWeight="600">System Controls</Typography>
+                </Box>
+                
+                <Alert severity="warning" sx={{ mb: 2, fontSize: '0.875rem' }}>
+                  These settings affect all system users
                 </Alert>
-              )}
+                
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={profile.systemMaintenance}
+                      onChange={(e) => handleChange('systemMaintenance', e.target.checked)}
+                      color="warning"
+                    />
+                  }
+                  label="Enable maintenance mode"
+                />
+                <Typography variant="body2" color="text.secondary" sx={{ ml: 4, mt: 0.5 }}>
+                  Displays maintenance notice to all users
+                </Typography>
+              </Paper>
+            </Grid>
 
-              {/* Forms */}
-              <Grid container spacing={4}>
-                {/* Personal Information */}
-                <Grid item xs={12} md={6}>
-                  <Typography variant="h6" gutterBottom fontWeight="bold">
-                    Personal Information
-                  </Typography>
-                  <Grid container spacing={2} sx={{ mb: 3 }}>
-                    <Grid item xs={6}>
-                      <TextField
-                        fullWidth
-                        label="First Name"
-                        value={personalInfo.firstName}
-                        onChange={(e) =>
-                          handlePersonalInfoChange("firstName", e.target.value)
-                        }
-                        variant="outlined"
-                      />
-                    </Grid>
-                    <Grid item xs={6}>
-                      <TextField
-                        fullWidth
-                        label="Last Name"
-                        value={personalInfo.lastName}
-                        onChange={(e) =>
-                          handlePersonalInfoChange("lastName", e.target.value)
-                        }
-                        variant="outlined"
-                      />
-                    </Grid>
-                    <Grid item xs={12}>
-                      <TextField
-                        fullWidth
-                        label="Email"
-                        type="email"
-                        value={personalInfo.email}
-                        onChange={(e) =>
-                          handlePersonalInfoChange("email", e.target.value)
-                        }
-                        variant="outlined"
-                        helperText="This is your login email"
-                      />
-                    </Grid>
-                    <Grid item xs={12}>
-                      <TextField
-                        fullWidth
-                        label="Phone"
-                        value={personalInfo.phone}
-                        onChange={(e) =>
-                          handlePersonalInfoChange("phone", e.target.value)
-                        }
-                        variant="outlined"
-                        placeholder="+1 (555) 123-4567"
-                      />
-                    </Grid>
-                  </Grid>
-                </Grid>
-                <Divider sx={{ my: 4 }} />
- 
-                {/* Account Settings Section */}
-                <Grid item xs={12} md={6}>
-                  <Typography variant="h6" gutterBottom fontWeight="bold">
-                    Account Settings
-                  </Typography>
-                  <Grid container spacing={2} sx={{ mb: 3 }}>
-                    <Grid item xs={12}>
-                      <FormControl fullWidth>
-                        <InputLabel>Language Preference</InputLabel>
-                        <Select
-                          value={accountSettings.language}
-                          label="Language Preference"
-                          onChange={(e) =>
-                            handleAccountSettingsChange('language', e.target.value)
-                          }
-                          startAdornment={
-                            <LanguageIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                          }
-                        >
-                          <MenuItem value="english">English</MenuItem>
-                          <MenuItem value="spanish">Spanish</MenuItem>
-                          <MenuItem value="french">French</MenuItem>
-                          <MenuItem value="german">German</MenuItem>
-                        </Select>
-                      </FormControl>
-                    </Grid>
-                    <Grid item xs={12}>
-                      <FormControl fullWidth>
-                        <InputLabel>Timezone</InputLabel>
-                        <Select
-                          value={accountSettings.timezone}
-                          label="Timezone"
-                          onChange={(e) =>
-                            handleAccountSettingsChange('timezone', e.target.value)
-                          }
-                          startAdornment={
-                            <ScheduleIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                          }
-                        >
-                          <MenuItem value="eastern">Eastern Time (ET)</MenuItem>
-                          <MenuItem value="central">Central Time (CT)</MenuItem>
-                          <MenuItem value="mountain">Mountain Time (MT)</MenuItem>
-                          <MenuItem value="pacific">Pacific Time (PT)</MenuItem>
-                        </Select>
-                      </FormControl>
-                    </Grid>
-                  </Grid>
-                  <Button
-                    variant="outlined"
-                    onClick={handleUpdateSettings}
-                    sx={{ borderRadius: 2 }}
-                  >
-                    Update Settings
+            {/* Quick Actions */}
+            <Grid item xs={12}>
+              <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" fontWeight="600" sx={{ mb: 2 }}>Quick Actions</Typography>
+                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                  <Button variant="outlined" startIcon={<DashboardIcon />} size="small">
+                    View Dashboard
                   </Button>
-                </Grid>
-              </Grid>
+                  <Button variant="outlined" startIcon={<PersonIcon />} size="small">
+                    Manage Users
+                  </Button>
+                  <Button variant="outlined" startIcon={<SecurityIcon />} size="small">
+                    Security Logs
+                  </Button>
+                </Box>
+              </Paper>
+            </Grid>
+          </Grid>
 
-              <Divider sx={{ my: 4 }} />
-
-              {/* Quick Actions Section */}
-              <Typography variant="h6" gutterBottom fontWeight="bold">
-                Quick Actions
-              </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={6} sm={3}>
-                  <Card
-                    variant="outlined"
-                    sx={{
-                      textAlign: 'center',
-                      cursor: 'pointer',
-                      borderRadius: 2,
-                    }}
-                  >
-                    <CardContent>
-                      <IconButton color="primary">
-                        <DescriptionIcon />
-                      </IconButton>
-                      <Typography variant="body2">Terms & Policies</Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-                <Grid item xs={6} sm={3}>
-                  <Card
-                    variant="outlined"
-                    sx={{
-                      textAlign: 'center',
-                      cursor: 'pointer',
-                      borderRadius: 2,
-                    }}
-                  >
-                    <CardContent>
-                      <IconButton color="primary">
-                        <ShareIcon />
-                      </IconButton>
-                      <Typography variant="body2">Share App</Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-                <Grid item xs={6} sm={3}>
-                  <Card
-                    variant="outlined"
-                    sx={{
-                      textAlign: 'center',
-                      cursor: 'pointer',
-                      borderRadius: 2,
-                    }}
-                  >
-                    <CardContent>
-                      <IconButton color="primary">
-                        <StarIcon />
-                      </IconButton>
-                      <Typography variant="body2">Rate Us</Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-                <Grid item xs={6} sm={3}>
-                  <Card
-                    variant="outlined"
-                    sx={{
-                      textAlign: 'center',
-                      cursor: 'pointer',
-                      borderRadius: 2,
-                    }}
-                  >
-                    <CardContent>
-                      <IconButton color="primary">
-                        <HelpIcon />
-                      </IconButton>
-                      <Typography variant="body2">Help Center</Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              </Grid>
-
-              <Divider sx={{ my: 4 }} />
-
-              {/* Save Button */}
-              <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
-                <Button
-                  variant="contained"
-                  size="large"
-                  startIcon={saving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-                  onClick={handleSaveChanges}
-                  disabled={saving}
-                  sx={{ 
-                    borderRadius: 2,
-                    px: 3,
-                    py: 1.5,
-                  }}
-                >
-                  {saving ? "Saving..." : "Save Changes"}
-                </Button>
-              </Box>
-            </Paper>
-
-            {/* Success/Error Snackbar */}
-            <Snackbar
-              open={success}
-              autoHideDuration={4000}
-              onClose={handleCloseSnackbar}
-              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+          {/* Save Button */}
+          <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 3 }}>
+            <Button
+              variant="contained"
+              startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <SaveIcon />}
+              onClick={handleSave}
+              disabled={saving}
+              sx={{ px: 3, py: 1 }}
             >
-              <Alert onClose={handleCloseSnackbar} severity="success" sx={{ width: '100%' }}>
-                Profile saved successfully!
-              </Alert>
-            </Snackbar>
+              {saving ? "Saving..." : "Save Changes"}
+            </Button>
+          </Box>
 
-            <Snackbar
-              open={!!error}
-              autoHideDuration={6000}
-              onClose={handleCloseSnackbar}
-              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-            >
-              <Alert onClose={handleCloseSnackbar} severity="error" sx={{ width: '100%' }}>
-                {error}
-              </Alert>
-            </Snackbar>
-          </Container>
-        )}
+          {/* Notifications */}
+          <Snackbar
+            open={success}
+            autoHideDuration={3000}
+            onClose={() => setSuccess(false)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+          >
+            <Alert severity="success" onClose={() => setSuccess(false)}>
+              Profile updated successfully
+            </Alert>
+          </Snackbar>
+
+          <Snackbar
+            open={!!error}
+            autoHideDuration={5000}
+            onClose={() => setError(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+          >
+            <Alert severity="error" onClose={() => setError(null)}>
+              {error}
+            </Alert>
+          </Snackbar>
+        </Container>
       </Box>
     </Box>
   );
 };
 
-export default Profile;
+export default AdminProfile;
