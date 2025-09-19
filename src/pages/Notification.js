@@ -8,8 +8,8 @@ import {
   Tabs, Tab, List, ListItem, ListItemIcon, ListItemText, ListItemSecondaryAction, Tooltip,
 } from '@mui/material';
 import { 
-  collection, getDocs, doc, updateDoc, addDoc,
-  query, where, onSnapshot, orderBy, Timestamp
+  collection, getDocs, doc, updateDoc, addDoc, deleteDoc,
+  query, where, onSnapshot, orderBy, Timestamp, serverTimestamp
 } from 'firebase/firestore';
 import { ref, onValue } from 'firebase/database';
 import { auth, firestore, rtdb } from "../firebase.js";
@@ -27,14 +27,234 @@ import SensorsIcon from '@mui/icons-material/Sensors';
 import WarningIcon from '@mui/icons-material/Warning';
 import NewReleasesIcon from '@mui/icons-material/NewReleases';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import DeleteIcon from '@mui/icons-material/Delete';
+
 const drawerWidth = 240;
+
+// =============================================================================
+// NOTIFICATION HELPER FUNCTIONS
+// =============================================================================
+
+// Function to create notification when plant request is submitted
+export const createPlantRequestNotification = async (plantRequestData, plantRequestId) => {
+  try {
+    const notificationData = {
+      type: 'plant_request',
+      title: 'New Planting Request',
+      message: `New planting request from ${plantRequestData.userEmail || 'user'} at ${plantRequestData.location_name || 'location'}`,
+      data: {
+        plantRequestId: plantRequestId,
+        userId: plantRequestData.user_id,
+        locationId: plantRequestData.location_id,
+        preferredDate: plantRequestData.preferred_date
+      },
+      targetRole: 'admin',
+      read: false,
+      resolved: false,
+      priority: 'medium',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+
+    const docRef = await addDoc(collection(firestore, 'Notifications'), notificationData);
+    console.log('Notification created with ID:', docRef.id);
+    return docRef.id;
+  } catch (error) {
+    console.error('Error creating notification:', error);
+    throw error;
+  }
+};
+
+// Function to create sensor alert notifications
+export const createSensorAlertNotification = async (alertData) => {
+  try {
+    const notificationData = {
+      type: 'sensor_alert',
+      title: `Sensor Alert - ${alertData.severity.toUpperCase()}`,
+      message: alertData.message,
+      data: {
+        sensorId: alertData.sensorId,
+        parameter: alertData.parameter,
+        value: alertData.value,
+        severity: alertData.severity,
+        alertType: alertData.type
+      },
+      targetRole: 'admin',
+      read: false,
+      resolved: false,
+      priority: alertData.severity === 'high' ? 'high' : alertData.severity === 'medium' ? 'medium' : 'low',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+
+    const docRef = await addDoc(collection(firestore, 'Notifications'), notificationData);
+    return docRef.id;
+  } catch (error) {
+    console.error('Error creating sensor alert notification:', error);
+    throw error;
+  }
+};
+
+// Function to mark notification as read
+export const markNotificationAsRead = async (notificationId) => {
+  try {
+    const notificationRef = doc(firestore, 'Notifications', notificationId);
+    await updateDoc(notificationRef, {
+      read: true,
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error marking notification as read:', error);
+    throw error;
+  }
+};
+
+// Function to mark notification as resolved
+export const markNotificationAsResolved = async (notificationId) => {
+  try {
+    const notificationRef = doc(firestore, 'Notifications', notificationId);
+    await updateDoc(notificationRef, {
+      resolved: true,
+      resolvedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Error marking notification as resolved:', error);
+    throw error;
+  }
+};
+
+// Enhanced approval function that also manages notifications
+export const approveRequestWithNotification = async (plantRequest, approvalNotes = '') => {
+  try {
+    // 1. Update the plant request
+    const requestRef = doc(firestore, 'PlantingRequest', plantRequest.id);
+    await updateDoc(requestRef, {
+      request_status: 'approved',
+      request_remarks: approvalNotes || 'Request approved by administrator',
+      approved_at: serverTimestamp()
+    });
+
+    // 2. Create planting record
+    const plantingRecordData = {
+      record_id: `REC-${Date.now()}`,
+      user_id: plantRequest.user_id,
+      location_id: plantRequest.location_id,
+      seedling_id: null,
+      record_datePlanted: new Date(),
+      created_at: serverTimestamp(),
+      status: 'planted',
+      request_id: plantRequest.id
+    };
+    await addDoc(collection(firestore, 'PlantingRecord'), plantingRecordData);
+
+    // 3. Mark related notification as resolved
+    const notificationsQuery = query(
+      collection(firestore, 'Notifications'),
+      where('type', '==', 'plant_request'),
+      where('data.plantRequestId', '==', plantRequest.id),
+      where('resolved', '==', false)
+    );
+    
+    const notificationSnapshot = await getDocs(notificationsQuery);
+    const updatePromises = notificationSnapshot.docs.map(doc => 
+      updateDoc(doc.ref, {
+        resolved: true,
+        resolvedAt: serverTimestamp(),
+        resolutionType: 'approved'
+      })
+    );
+    await Promise.all(updatePromises);
+
+    // 4. Create approval notification for the user
+    await addDoc(collection(firestore, 'Notifications'), {
+      type: 'request_approved',
+      title: 'Planting Request Approved',
+      message: `Your planting request has been approved. You can now proceed with planting.`,
+      data: {
+        plantRequestId: plantRequest.id,
+        approvalNotes: approvalNotes
+      },
+      targetUserId: plantRequest.user_id,
+      read: false,
+      resolved: false,
+      priority: 'medium',
+      createdAt: serverTimestamp()
+    });
+
+    return { success: true, message: 'Request approved successfully!' };
+  } catch (error) {
+    console.error('Error approving request:', error);
+    throw error;
+  }
+};
+
+// Enhanced rejection function
+export const rejectRequestWithNotification = async (plantRequest, rejectionReason) => {
+  try {
+    // 1. Update the plant request
+    const requestRef = doc(firestore, 'PlantingRequest', plantRequest.id);
+    await updateDoc(requestRef, {
+      request_status: 'rejected',
+      request_remarks: rejectionReason,
+      rejected_at: serverTimestamp()
+    });
+
+    // 2. Mark related notification as resolved
+    const notificationsQuery = query(
+      collection(firestore, 'Notifications'),
+      where('type', '==', 'plant_request'),
+      where('data.plantRequestId', '==', plantRequest.id),
+      where('resolved', '==', false)
+    );
+    
+    const notificationSnapshot = await getDocs(notificationsQuery);
+    const updatePromises = notificationSnapshot.docs.map(doc => 
+      updateDoc(doc.ref, {
+        resolved: true,
+        resolvedAt: serverTimestamp(),
+        resolutionType: 'rejected'
+      })
+    );
+    await Promise.all(updatePromises);
+
+    // 3. Create rejection notification for the user
+    await addDoc(collection(firestore, 'Notifications'), {
+      type: 'request_rejected',
+      title: 'Planting Request Rejected',
+      message: `Your planting request has been rejected. Reason: ${rejectionReason}`,
+      data: {
+        plantRequestId: plantRequest.id,
+        rejectionReason: rejectionReason
+      },
+      targetUserId: plantRequest.user_id,
+      read: false,
+      resolved: false,
+      priority: 'high',
+      createdAt: serverTimestamp()
+    });
+
+    return { success: true, message: 'Request rejected successfully!' };
+  } catch (error) {
+    console.error('Error rejecting request:', error);
+    throw error;
+  }
+};
+
+// =============================================================================
+// MAIN COMPONENT
+// =============================================================================
+
 const NotificationPanel = () => {
   const [plantingRequests, setPlantingRequests] = useState([]);
   const [sensorAlerts, setSensorAlerts] = useState([]);
+  const [notifications, setNotifications] = useState([]);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [selectedAlert, setSelectedAlert] = useState(null);
+  const [selectedNotification, setSelectedNotification] = useState(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [alertDialogOpen, setAlertDialogOpen] = useState(false);
+  const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
   const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
   const [rejectionDialogOpen, setRejectionDialogOpen] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
@@ -60,7 +280,28 @@ const NotificationPanel = () => {
     setActiveTab(newValue);
   };
 
-  // Fetch all necessary data
+  // Helper function to avoid duplicate sensor notifications
+  const createSensorAlertNotificationIfNew = async (alertData) => {
+    try {
+      const existingQuery = query(
+        collection(firestore, 'Notifications'),
+        where('type', '==', 'sensor_alert'),
+        where('data.sensorId', '==', alertData.sensorId),
+        where('data.parameter', '==', alertData.parameter || ''),
+        where('resolved', '==', false)
+      );
+      
+      const existingSnapshot = await getDocs(existingQuery);
+      
+      if (existingSnapshot.empty) {
+        await createSensorAlertNotification(alertData);
+      }
+    } catch (error) {
+      console.error('Error checking for existing sensor notification:', error);
+    }
+  };
+
+  // Enhanced useEffect with notifications
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -69,14 +310,13 @@ const NotificationPanel = () => {
           collection(firestore, 'PlantingRequest')
         );
         
-        const unsubscribe = onSnapshot(requestsQuery, 
+        const unsubscribeRequests = onSnapshot(requestsQuery, 
           (snapshot) => {
             const allRequests = snapshot.docs.map(doc => ({
               id: doc.id,
               ...doc.data()
             }));
             
-            // Filter for pending requests manually
             const pendingRequests = allRequests.filter(req => 
               req.request_status === 'pending' || 
               req.status === 'pending' ||
@@ -91,6 +331,24 @@ const NotificationPanel = () => {
             setLoading(false);
           }
         );
+
+        // Add notifications listener
+        const notificationsQuery = query(
+          collection(firestore, 'Notifications'),
+          where('targetRole', '==', 'admin'),
+          where('resolved', '==', false),
+          orderBy('createdAt', 'desc')
+        );
+
+        const unsubscribeNotifications = onSnapshot(notificationsQuery, (snapshot) => {
+          const notificationData = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            timestamp: doc.data().createdAt?.toDate() || new Date()
+          }));
+          
+          setNotifications(notificationData);
+        });
 
         // Fetch users for planter names
         const usersSnapshot = await getDocs(collection(firestore, 'users'));
@@ -115,11 +373,17 @@ const NotificationPanel = () => {
             const sensorsData = snapshot.val();
             const alerts = generateSensorAlerts(sensorsData);
             setSensorAlerts(alerts);
+            
+            // Create notifications for new sensor alerts
+            alerts.forEach(alert => {
+              createSensorAlertNotificationIfNew(alert);
+            });
           }
         });
 
         return () => {
-          unsubscribe();
+          unsubscribeRequests();
+          unsubscribeNotifications();
           sensorUnsubscribe();
         };
       } catch (error) {
@@ -138,22 +402,17 @@ const NotificationPanel = () => {
     
     if (!sensorsData || !sensorsData.sensors) return alerts;
 
-    // Check each sensor for issues
     Object.entries(sensorsData.sensors).forEach(([sensorId, sensorData]) => {
       if (!sensorData.sensorData) return;
 
       const readings = Object.values(sensorData.sensorData);
       if (readings.length === 0) return;
 
-      // Get the latest reading
       const latestReading = readings[readings.length - 1];
-      
-      // Check if reading is recent (within last 4 hours)
       const readingTime = new Date(latestReading.timestamp);
       const hoursDiff = (now - readingTime) / (1000 * 60 * 60);
       
       if (hoursDiff > 24) {
-        // Sensor offline alert
         alerts.push({
           id: `offline-${sensorId}`,
           type: 'offline',
@@ -163,7 +422,6 @@ const NotificationPanel = () => {
           severity: 'high'
         });
       } else if (hoursDiff > 4) {
-        // Sensor delayed alert
         alerts.push({
           id: `delayed-${sensorId}`,
           type: 'delayed',
@@ -174,7 +432,6 @@ const NotificationPanel = () => {
         });
       }
 
-      // Check sensor readings for anomalies
       if (latestReading.pH !== undefined && (latestReading.pH < 5.5 || latestReading.pH > 8.5)) {
         alerts.push({
           id: `ph-${sensorId}-${latestReading.timestamp}`,
@@ -215,7 +472,6 @@ const NotificationPanel = () => {
       }
     });
 
-    // Sort alerts by severity and timestamp
     return alerts.sort((a, b) => {
       const severityOrder = { high: 0, medium: 1, low: 2 };
       if (severityOrder[a.severity] !== severityOrder[b.severity]) {
@@ -235,6 +491,7 @@ const NotificationPanel = () => {
     return locations.find(location => location.id === locationId) || {};
   };
 
+  // Event handlers
   const handleViewDetails = (request) => {
     setSelectedRequest(request);
     setDetailDialogOpen(true);
@@ -243,6 +500,16 @@ const NotificationPanel = () => {
   const handleViewAlert = (alert) => {
     setSelectedAlert(alert);
     setAlertDialogOpen(true);
+  };
+
+  // Handle notification view
+  const handleViewNotification = (notification) => {
+    setSelectedNotification(notification);
+    setNotificationDialogOpen(true);
+    // Mark as read when viewed
+    if (!notification.read) {
+      markNotificationAsRead(notification.id);
+    }
   };
 
   const handleApprove = (request) => {
@@ -256,7 +523,6 @@ const NotificationPanel = () => {
   };
 
   const handleRefreshSensorAlerts = () => {
-    // Simulate refresh by re-fetching sensor data
     const sensorRef = ref(rtdb, "sensors");
     onValue(sensorRef, (snapshot) => {
       if (snapshot.exists()) {
@@ -266,6 +532,58 @@ const NotificationPanel = () => {
         setAlert({ open: true, message: 'Sensor alerts refreshed', severity: 'success' });
       }
     });
+  };
+
+  // Notification management functions
+  const handleMarkNotificationRead = async (notificationId) => {
+    try {
+      await markNotificationAsRead(notificationId);
+      setAlert({ 
+        open: true, 
+        message: 'Notification marked as read', 
+        severity: 'info' 
+      });
+    } catch (error) {
+      setAlert({ 
+        open: true, 
+        message: 'Error updating notification', 
+        severity: 'error' 
+      });
+    }
+  };
+
+  const handleResolveNotification = async (notificationId) => {
+    try {
+      await markNotificationAsResolved(notificationId);
+      setAlert({ 
+        open: true, 
+        message: 'Notification resolved', 
+        severity: 'success' 
+      });
+    } catch (error) {
+      setAlert({ 
+        open: true, 
+        message: 'Error resolving notification', 
+        severity: 'error' 
+      });
+    }
+  };
+
+  const handleDeleteNotification = async (notificationId) => {
+    try {
+      await deleteDoc(doc(firestore, 'Notifications', notificationId));
+      setAlert({ 
+        open: true, 
+        message: 'Notification deleted', 
+        severity: 'success' 
+      });
+    } catch (error) {
+      setAlert({ 
+        open: true, 
+        message: 'Error deleting notification', 
+        severity: 'error' 
+      });
+    }
   };
 
   const createPlantingRecord = async (request) => {
@@ -289,48 +607,55 @@ const NotificationPanel = () => {
     }
   };
 
+  // Enhanced approval function
   const confirmApprove = async () => {
     try {
-      await createPlantingRecord(selectedRequest);
-
-      const requestRef = doc(firestore, 'PlantingRequest', selectedRequest.id);
-      await updateDoc(requestRef, {
-        request_status: 'approved',
-        request_remarks: rejectionReason || 'Request approved by administrator',
-        approved_at: Timestamp.now()
-      });
-
+      const result = await approveRequestWithNotification(selectedRequest, rejectionReason);
+      
       setApprovalDialogOpen(false);
       setSelectedRequest(null);
       setRejectionReason('');
       
-      setAlert({ open: true, message: 'Request approved successfully! Planting record created.', severity: 'success' });
+      setAlert({ 
+        open: true, 
+        message: result.message, 
+        severity: 'success' 
+      });
     } catch (error) {
       console.error('Error approving request:', error);
-      setAlert({ open: true, message: 'Error approving request: ' + error.message, severity: 'error' });
+      setAlert({ 
+        open: true, 
+        message: 'Error approving request: ' + error.message, 
+        severity: 'error' 
+      });
     }
   };
 
+  // Enhanced rejection function
   const confirmReject = async () => {
     try {
-      const requestRef = doc(firestore, 'PlantingRequest', selectedRequest.id);
-      await updateDoc(requestRef, {
-        request_status: 'rejected',
-        request_remarks: rejectionReason || 'Request rejected by administrator',
-        rejected_at: Timestamp.now()
-      });
-
+      const result = await rejectRequestWithNotification(selectedRequest, rejectionReason);
+      
       setRejectionDialogOpen(false);
       setRejectionReason('');
       setSelectedRequest(null);
       
-      setAlert({ open: true, message: 'Request rejected successfully!', severity: 'warning' });
+      setAlert({ 
+        open: true, 
+        message: result.message, 
+        severity: 'warning' 
+      });
     } catch (error) {
       console.error('Error rejecting request:', error);
-      setAlert({ open: true, message: 'Error rejecting request: ' + error.message, severity: 'error' });
+      setAlert({ 
+        open: true, 
+        message: 'Error rejecting request: ' + error.message, 
+        severity: 'error' 
+      });
     }
   };
 
+  // Utility functions
   const getStatusColor = (status) => {
     if (!status) return 'default';
     
@@ -399,6 +724,7 @@ const NotificationPanel = () => {
     return request.request_status || request.status || 'unknown';
   };
 
+  // Count calculations
   const pendingCount = plantingRequests.filter(req => 
     (req.request_status === 'pending' || req.status === 'pending') && 
     req.request_status !== 'approved' && 
@@ -406,6 +732,7 @@ const NotificationPanel = () => {
   ).length;
 
   const alertCount = sensorAlerts.length;
+  const notificationCount = notifications.length;
 
   if (loading) {
     return (
@@ -421,7 +748,7 @@ const NotificationPanel = () => {
             mt: '64px',
           }}
         >
-        <LinearProgress />
+          <LinearProgress />
           <Typography sx={{ mt: 2 }}>Loading notifications...</Typography>
         </Box>
       </Box>
@@ -457,37 +784,41 @@ const NotificationPanel = () => {
           </Alert>
         )}
 
-          <Box sx={{ width: '100%' }}>
-            {/* Header */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-              <Box>
-                <Typography variant="h4" sx={{ color: '#2e7d32', fontWeight: 600 }}>
-                  Notifications Center
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                  {pendingCount} pending request{pendingCount !== 1 ? 's' : ''} • {alertCount} sensor alert{alertCount !== 1 ? 's' : ''}
-                </Typography>
-              </Box>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Badge badgeContent={pendingCount} color="warning" sx={{ mr: 1 }}>
-                  <PendingActionsIcon color="action" />
-                </Badge>
-                <Badge badgeContent={alertCount} color="error">
-                  <WarningIcon color="action" />
-                </Badge>
-              </Box>
+        <Box sx={{ width: '100%' }}>
+          {/* Header */}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+            <Box>
+              <Typography variant="h4" sx={{ color: '#2e7d32', fontWeight: 600 }}>
+                Notifications Center
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                {pendingCount} pending request{pendingCount !== 1 ? 's' : ''} • {alertCount} sensor alert{alertCount !== 1 ? 's' : ''} • {notificationCount} notification{notificationCount !== 1 ? 's' : ''}
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Badge badgeContent={pendingCount} color="warning" sx={{ mr: 1 }}>
+                <PendingActionsIcon color="action" />
+              </Badge>
+              <Badge badgeContent={alertCount} color="error" sx={{ mr: 1 }}>
+                <WarningIcon color="action" />
+              </Badge>
+              <Badge badgeContent={notificationCount} color="primary">
+                <NotificationsIcon color="action" />
+              </Badge>
             </Box>
           </Box>
+        </Box>
 
         {/* Tabs for different notification types */}
         <Paper sx={{ mb: 3, borderRadius: 2 }}>
           <Tabs value={activeTab} onChange={handleTabChange} centered>
             <Tab label={`Planting Requests (${pendingCount})`} />
             <Tab label={`Sensor Alerts (${alertCount})`} />
+            <Tab label={`All Notifications (${notificationCount})`} />
           </Tabs>
         </Paper>
 
-        {/* Content based on active tab */}
+        {/* Tab Content */}
         {activeTab === 0 ? (
           /* Planting Requests Tab */
           <>
@@ -512,14 +843,14 @@ const NotificationPanel = () => {
                 <Card sx={{ borderRadius: 2, boxShadow: 2 }}>
                   <CardContent>
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Box sx={{ bgcolor: alpha(theme.palette.primary.main, 0.2), p: 1.5, borderRadius: 2, mr: 2 }}>
-                        <PersonIcon color="primary" />
+                      <Box sx={{ bgcolor: alpha(theme.palette.success.main, 0.2), p: 1.5, borderRadius: 2, mr: 2 }}>
+                        <CheckCircleIcon color="success" />
                       </Box>
                       <Box>
                         <Typography variant="h5" fontWeight="bold">
-                          {new Set(plantingRequests.map(req => req.user_id)).size}
+                          {plantingRequests.filter(req => req.request_status === 'approved').length}
                         </Typography>
-                        <Typography variant="body2" color="text.secondary">Unique Planters</Typography>
+                        <Typography variant="body2" color="text.secondary">Approved Today</Typography>
                       </Box>
                     </Box>
                   </CardContent>
@@ -530,7 +861,24 @@ const NotificationPanel = () => {
                   <CardContent>
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
                       <Box sx={{ bgcolor: alpha(theme.palette.info.main, 0.2), p: 1.5, borderRadius: 2, mr: 2 }}>
-                        <LocationOnIcon color="info" />
+                        <PersonIcon color="info" />
+                      </Box>
+                      <Box>
+                        <Typography variant="h5" fontWeight="bold">
+                          {new Set(plantingRequests.map(req => req.user_id)).size}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">Active Users</Typography>
+                      </Box>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Card sx={{ borderRadius: 2, boxShadow: 2 }}>
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <Box sx={{ bgcolor: alpha(theme.palette.primary.main, 0.2), p: 1.5, borderRadius: 2, mr: 2 }}>
+                        <LocationOnIcon color="primary" />
                       </Box>
                       <Box>
                         <Typography variant="h5" fontWeight="bold">
@@ -542,557 +890,533 @@ const NotificationPanel = () => {
                   </CardContent>
                 </Card>
               </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Card sx={{ borderRadius: 2, boxShadow: 2 }}>
-                  <CardContent>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Box sx={{ bgcolor: alpha(theme.palette.success.main, 0.2), p: 1.5, borderRadius: 2, mr: 2 }}>
-                        <CalendarTodayIcon color="success" />
-                      </Box>
-                      <Box>
-                        <Typography variant="h5" fontWeight="bold">
-                          {plantingRequests.length}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">Total Requests</Typography>
-                      </Box>
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
             </Grid>
 
-            {/* Requests Table */}
-            {plantingRequests.length === 0 ? (
-              <Card sx={{ p: 4, textAlign: 'center', borderRadius: 2 }}>
-                <PendingActionsIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2 }} />
-                <Typography variant="h6" color="text.secondary" gutterBottom>
-                  No Pending Requests
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  All planting requests have been processed. New requests will appear here.
-                </Typography>
-              </Card>
-            ) : (
-              <Card sx={{ borderRadius: 2, boxShadow: 2, overflow: 'hidden' }}>
-                <TableContainer>
-                  <Table>
-                    <TableHead>
-                      <TableRow sx={{ bgcolor: theme.palette.grey[50] }}>
-                        <TableCell><Typography variant="subtitle2" fontWeight="bold">Request ID</Typography></TableCell>
-                        <TableCell><Typography variant="subtitle2" fontWeight="bold">Planter</Typography></TableCell>
-                        <TableCell><Typography variant="subtitle2" fontWeight="bold">Location</Typography></TableCell>
-                        <TableCell><Typography variant="subtitle2" fontWeight="bold">Preferred Date</Typography></TableCell>
-                        <TableCell><Typography variant="subtitle2" fontWeight="bold">Request Date</Typography></TableCell>
-                        <TableCell><Typography variant="subtitle2" fontWeight="bold">Status</Typography></TableCell>
-                        <TableCell align="center"><Typography variant="subtitle2" fontWeight="bold">Actions</Typography></TableCell>
+            {/* Planting Requests Table */}
+            <Paper sx={{ borderRadius: 2, overflow: 'hidden' }}>
+              <TableContainer>
+                <Table>
+                  <TableHead sx={{ bgcolor: '#f5f5f5' }}>
+                    <TableRow>
+                      <TableCell><strong>Requester</strong></TableCell>
+                      <TableCell><strong>Location</strong></TableCell>
+                      <TableCell><strong>Preferred Date</strong></TableCell>
+                      <TableCell><strong>Status</strong></TableCell>
+                      <TableCell><strong>Actions</strong></TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {plantingRequests.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} align="center">
+                          <Typography color="text.secondary" sx={{ py: 4 }}>
+                            No pending planting requests
+                          </Typography>
+                        </TableCell>
                       </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {plantingRequests.map((request) => {
-                        const status = getStatusText(request);
-                        const isPending = status === 'pending';
+                    ) : (
+                      plantingRequests.map((request) => {
                         const user = getUserDetails(request.user_id);
                         const location = getLocationDetails(request.location_id);
-
+                        
                         return (
-                          <TableRow 
-                            key={request.id} 
-                            hover 
-                            sx={{ 
-                              '&:last-child td, &:last-child th': { border: 0 },
-                              bgcolor: isPending ? alpha(theme.palette.warning.light, 0.1) : 'inherit'
-                            }}
-                          >
-                            <TableCell>
-                              <Typography variant="body2" fontWeight="medium">
-                                {request.request_id || request.id}
-                              </Typography>
-                            </TableCell>
+                          <TableRow key={request.id} hover>
                             <TableCell>
                               <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                <Avatar sx={{ width: 32, height: 32, mr: 1, bgcolor: 'primary.main' }}>
-                                  <PersonIcon fontSize="small" />
+                                <Avatar sx={{ mr: 2, bgcolor: '#2e7d32' }}>
+                                  {(user.firstName || 'U').charAt(0)}
                                 </Avatar>
                                 <Box>
-                                  <Typography variant="body2">
-                                    {user.displayName || user.email || request.user_id}
+                                  <Typography variant="body2" fontWeight="bold">
+                                    {user.firstName && user.lastName 
+                                      ? `${user.firstName} ${user.lastName}` 
+                                      : user.email || 'Unknown User'}
                                   </Typography>
                                   <Typography variant="caption" color="text.secondary">
-                                    {user.role || 'Planter'}
+                                    {user.email}
                                   </Typography>
                                 </Box>
                               </Box>
                             </TableCell>
                             <TableCell>
-                              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                <LocationOnIcon fontSize="small" color="action" sx={{ mr: 0.5 }} />
-                                <Typography variant="body2">
-                                  {location.location_name || request.location_id}
-                                </Typography>
-                              </Box>
-                            </TableCell>
-                            <TableCell>
-                              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                <CalendarTodayIcon fontSize="small" color="action" sx={{ mr: 0.5 }} />
-                                <Typography variant="body2">
-                                  {formatDate(request.preferred_date)}
-                                </Typography>
-                              </Box>
+                              <Typography variant="body2">
+                                {location.location_name || 'Unknown Location'}
+                              </Typography>
                             </TableCell>
                             <TableCell>
                               <Typography variant="body2">
-                                {formatDate(request.request_date)}
+                                {formatDate(request.preferred_date)}
                               </Typography>
                             </TableCell>
                             <TableCell>
                               <Chip 
-                                label={status.toUpperCase()} 
-                                color={getStatusColor(status)} 
+                                label={getStatusText(request)} 
+                                color={getStatusColor(getStatusText(request))}
                                 size="small"
-                                variant={isPending ? "filled" : "outlined"}
                               />
                             </TableCell>
-                            <TableCell align="center">
-                              <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
+                            <TableCell>
+                              <Box sx={{ display: 'flex', gap: 1 }}>
                                 <Tooltip title="View Details">
                                   <IconButton 
-                                    color="info" 
+                                    size="small" 
                                     onClick={() => handleViewDetails(request)}
-                                    size="small"
+                                    sx={{ color: '#1976d2' }}
                                   >
                                     <VisibilityIcon />
                                   </IconButton>
                                 </Tooltip>
-                                {isPending && (
-                                  <>
-                                    <Tooltip title="Approve Request">
-                                      <IconButton 
-                                        color="success" 
-                                        onClick={() => handleApprove(request)}
-                                        size="small"
-                                      >
-                                        <CheckCircleIcon />
-                                      </IconButton>
-                                    </Tooltip>
-                                    <Tooltip title="Reject Request">
-                                      <IconButton 
-                                        color="error" 
-                                        onClick={() => handleReject(request)}
-                                        size="small"
-                                      >
-                                        <CancelIcon />
-                                      </IconButton>
-                                    </Tooltip>
-                                  </>
-                                )}
+                                <Tooltip title="Approve">
+                                  <IconButton 
+                                    size="small" 
+                                    onClick={() => handleApprove(request)}
+                                    sx={{ color: '#2e7d32' }}
+                                  >
+                                    <CheckCircleIcon />
+                                  </IconButton>
+                                </Tooltip>
+                                <Tooltip title="Reject">
+                                  <IconButton 
+                                    size="small" 
+                                    onClick={() => handleReject(request)}
+                                    sx={{ color: '#d32f2f' }}
+                                  >
+                                    <CancelIcon />
+                                  </IconButton>
+                                </Tooltip>
                               </Box>
                             </TableCell>
                           </TableRow>
                         );
-                      })}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </Card>
-            )}
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
           </>
-        ) : (
+        ) : activeTab === 1 ? (
           /* Sensor Alerts Tab */
           <>
-            {/* Alert Stats Cards */}
-            <Grid container spacing={2} sx={{ mb: 3 }}>
-              <Grid item xs={12} sm={6} md={3}>
-                <Card sx={{ borderRadius: 2, boxShadow: 2 }}>
-                  <CardContent>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Box sx={{ bgcolor: alpha(theme.palette.error.main, 0.2), p: 1.5, borderRadius: 2, mr: 2 }}>
-                        <WarningIcon color="error" />
-                      </Box>
-                      <Box>
-                        <Typography variant="h5" fontWeight="bold">
-                          {sensorAlerts.filter(a => a.severity === 'high').length}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">High Priority</Typography>
-                      </Box>
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Card sx={{ borderRadius: 2, boxShadow: 2 }}>
-                  <CardContent>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Box sx={{ bgcolor: alpha(theme.palette.warning.main, 0.2), p: 1.5, borderRadius: 2, mr: 2 }}>
-                        <WarningIcon color="warning" />
-                      </Box>
-                      <Box>
-                        <Typography variant="h5" fontWeight="bold">
-                          {sensorAlerts.filter(a => a.severity === 'medium').length}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">Medium Priority</Typography>
-                      </Box>
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Card sx={{ borderRadius: 2, boxShadow: 2 }}>
-                  <CardContent>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Box sx={{ bgcolor: alpha(theme.palette.info.main, 0.2), p: 1.5, borderRadius: 2, mr: 2 }}>
-                        <SensorsIcon color="info" />
-                      </Box>
-                      <Box>
-                        <Typography variant="h5" fontWeight="bold">
-                          {sensorAlerts.filter(a => a.severity === 'low').length}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">Low Priority</Typography>
-                      </Box>
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Card sx={{ borderRadius: 2, boxShadow: 2 }}>
-                  <CardContent>
-                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Box sx={{ bgcolor: alpha(theme.palette.primary.main, 0.2), p: 1.5, borderRadius: 2, mr: 2 }}>
-                          <NewReleasesIcon color="primary" />
-                        </Box>
-                        <Box>
-                          <Typography variant="h5" fontWeight="bold">
-                            {sensorAlerts.length}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">Total Alerts</Typography>
-                        </Box>
-                      </Box>
-                      <IconButton onClick={handleRefreshSensorAlerts} size="small">
-                        <RefreshIcon />
-                      </IconButton>
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
+            {/* Sensor Alerts Header */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h6" sx={{ color: '#2e7d32', fontWeight: 600 }}>
+                Sensor Alerts
+              </Typography>
+              <Button
+                startIcon={<RefreshIcon />}
+                onClick={handleRefreshSensorAlerts}
+                variant="outlined"
+                size="small"
+              >
+                Refresh
+              </Button>
+            </Box>
 
-            {/* Alerts List */}
-            {sensorAlerts.length === 0 ? (
-              <Card sx={{ p: 4, textAlign: 'center', borderRadius: 2 }}>
-                <SensorsIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2 }} />
-                <Typography variant="h6" color="text.secondary" gutterBottom>
-                  No Sensor Alerts
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  All sensors are functioning normally. New alerts will appear here.
-                </Typography>
-              </Card>
-            ) : (
-              <Card sx={{ borderRadius: 2, boxShadow: 2 }}>
-                <List>
-                  {sensorAlerts.map((alert) => (
-                    <ListItem 
-                      key={alert.id} 
-                      divider
-                      button
-                      onClick={() => handleViewAlert(alert)}
-                      sx={{
-                        borderLeft: `4px solid ${theme.palette[getAlertColor(alert.severity)].main}`,
-                        '&:hover': {
-                          backgroundColor: alpha(theme.palette[getAlertColor(alert.severity)].light, 0.1)
-                        }
-                      }}
-                    >
-                      <ListItemIcon>
-                        {getAlertIcon(alert.severity)}
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={alert.message}
-                        secondary={`Detected: ${formatDateTime(alert.timestamp)}`}
-                        primaryTypographyProps={{ 
-                          variant: 'body1',
-                          color: getAlertColor(alert.severity) === 'default' ? 'textPrimary' : getAlertColor(alert.severity)
+            {/* Sensor Alerts Grid */}
+            <Grid container spacing={2}>
+              {sensorAlerts.length === 0 ? (
+                <Grid item xs={12}>
+                  <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 2 }}>
+                    <SensorsIcon sx={{ fontSize: 48, color: '#ccc', mb: 2 }} />
+                    <Typography color="text.secondary">
+                      No sensor alerts at this time
+                    </Typography>
+                  </Paper>
+                </Grid>
+              ) : (
+                sensorAlerts.map((alert) => (
+                  <Grid item xs={12} md={6} lg={4} key={alert.id}>
+                    <Card sx={{ 
+                      borderRadius: 2, 
+                      borderLeft: `4px solid ${theme.palette[getAlertColor(alert.severity)].main}`,
+                      transition: 'transform 0.2s',
+                      '&:hover': { transform: 'translateY(-2px)' }
+                    }}>
+                      <CardContent>
+                        <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
+                          {getAlertIcon(alert.severity)}
+                          <Box sx={{ ml: 2, flex: 1 }}>
+                            <Typography variant="h6" gutterBottom>
+                              Sensor {alert.sensorId}
+                            </Typography>
+                            <Chip 
+                              label={alert.severity.toUpperCase()} 
+                              color={getAlertColor(alert.severity)}
+                              size="small"
+                              sx={{ mb: 1 }}
+                            />
+                          </Box>
+                        </Box>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                          {alert.message}
+                        </Typography>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="caption" color="text.secondary">
+                            {formatDateTime(alert.timestamp)}
+                          </Typography>
+                          <Button
+                            size="small"
+                            onClick={() => handleViewAlert(alert)}
+                            startIcon={<VisibilityIcon />}
+                          >
+                            View
+                          </Button>
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                ))
+              )}
+            </Grid>
+          </>
+        ) : (
+          /* All Notifications Tab */
+          <>
+            <Typography variant="h6" sx={{ color: '#2e7d32', fontWeight: 600, mb: 3 }}>
+              All Notifications
+            </Typography>
+
+            <Paper sx={{ borderRadius: 2 }}>
+              <List>
+                {notifications.length === 0 ? (
+                  <ListItem>
+                    <Box sx={{ width: '100%', textAlign: 'center', py: 4 }}>
+                      <NotificationsIcon sx={{ fontSize: 48, color: '#ccc', mb: 2 }} />
+                      <Typography color="text.secondary">
+                        No notifications available
+                      </Typography>
+                    </Box>
+                  </ListItem>
+                ) : (
+                  notifications.map((notification, index) => (
+                    <React.Fragment key={notification.id}>
+                      <ListItem 
+                        sx={{ 
+                          bgcolor: notification.read ? 'transparent' : alpha(theme.palette.primary.main, 0.05),
+                          borderRadius: 1,
+                          mb: 1,
+                          mx: 1
                         }}
-                      />
-                      <ListItemSecondaryAction>
-                        <Chip 
-                          label={alert.severity.toUpperCase()} 
-                          color={getAlertColor(alert.severity)} 
-                          size="small"
-                          variant="outlined"
+                      >
+                        <ListItemIcon>
+                          {notification.type === 'plant_request' && <NewReleasesIcon color="warning" />}
+                          {notification.type === 'sensor_alert' && <WarningIcon color="error" />}
+                          {notification.type === 'request_approved' && <CheckCircleIcon color="success" />}
+                          {notification.type === 'request_rejected' && <CancelIcon color="error" />}
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Typography variant="subtitle2" sx={{ fontWeight: notification.read ? 'normal' : 'bold' }}>
+                                {notification.title}
+                              </Typography>
+                              <Chip 
+                                label={notification.priority} 
+                                size="small" 
+                                color={notification.priority === 'high' ? 'error' : notification.priority === 'medium' ? 'warning' : 'default'}
+                                variant="outlined"
+                              />
+                            </Box>
+                          }
+                          secondary={
+                            <Box>
+                              <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                                {notification.message}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {formatDateTime(notification.timestamp)}
+                              </Typography>
+                            </Box>
+                          }
                         />
-                      </ListItemSecondaryAction>
-                    </ListItem>
-                  ))}
-                </List>
-              </Card>
-            )}
+                        <ListItemSecondaryAction>
+                          <Box sx={{ display: 'flex', gap: 1 }}>
+                            <Tooltip title="View Details">
+                              <IconButton 
+                                size="small" 
+                                onClick={() => handleViewNotification(notification)}
+                              >
+                                <VisibilityIcon />
+                              </IconButton>
+                            </Tooltip>
+                            {!notification.read && (
+                              <Tooltip title="Mark as Read">
+                                <IconButton 
+                                  size="small" 
+                                  onClick={() => handleMarkNotificationRead(notification.id)}
+                                  color="primary"
+                                >
+                                  <CheckCircleIcon />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                            <Tooltip title="Resolve">
+                              <IconButton 
+                                size="small" 
+                                onClick={() => handleResolveNotification(notification.id)}
+                                color="success"
+                              >
+                                <CheckCircleIcon />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Delete">
+                              <IconButton 
+                                size="small" 
+                                onClick={() => handleDeleteNotification(notification.id)}
+                                color="error"
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </Tooltip>
+                          </Box>
+                        </ListItemSecondaryAction>
+                      </ListItem>
+                      {index < notifications.length - 1 && <Box sx={{ height: 8 }} />}
+                    </React.Fragment>
+                  ))
+                )}
+              </List>
+            </Paper>
           </>
         )}
 
-        {/* Request Details Dialog */}
+        {/* Detail Dialog for Planting Requests */}
         <Dialog open={detailDialogOpen} onClose={() => setDetailDialogOpen(false)} maxWidth="md" fullWidth>
-          <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <VisibilityIcon /> Request Details
-            </Box>
-          </DialogTitle>
+          <DialogTitle>Planting Request Details</DialogTitle>
           <DialogContent>
             {selectedRequest && (
-              <Grid container spacing={3} sx={{ mt: 1, p: 1 }}>
+              <Grid container spacing={2} sx={{ mt: 1 }}>
                 <Grid item xs={12} md={6}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="subtitle2" color="textSecondary" gutterBottom>Request Information</Typography>
-                      <Box sx={{ mb: 2 }}>
-                        <Typography variant="caption" color="textSecondary">Request ID</Typography>
-                        <Typography variant="body1">{selectedRequest.request_id || selectedRequest.id}</Typography>
-                      </Box>
-                      <Box sx={{ mb: 2 }}>
-                        <Typography variant="caption" color="textSecondary">Status</Typography>
-                        <Box sx={{ mt: 0.5 }}>
-                          <Chip 
-                            label={getStatusText(selectedRequest).toUpperCase()} 
-                            color={getStatusColor(getStatusText(selectedRequest))} 
-                            size="small"
-                          />
-                        </Box>
-                      </Box>
-                    </CardContent>
-                  </Card>
+                  <Typography variant="subtitle2" color="text.secondary">Requester Information</Typography>
+                  <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+                    <Typography><strong>Name:</strong> {(() => {
+                      const user = getUserDetails(selectedRequest.user_id);
+                      return user.firstName && user.lastName 
+                        ? `${user.firstName} ${user.lastName}` 
+                        : user.email || 'Unknown User';
+                    })()}</Typography>
+                    <Typography><strong>Email:</strong> {getUserDetails(selectedRequest.user_id).email || 'N/A'}</Typography>
+                  </Box>
                 </Grid>
-
                 <Grid item xs={12} md={6}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="subtitle2" color="textSecondary" gutterBottom>Timeline</Typography>
-                      <Box sx={{ mb: 2 }}>
-                        <Typography variant="caption" color="textSecondary">Preferred Date</Typography>
-                        <Typography variant="body1">{formatDate(selectedRequest.preferred_date)}</Typography>
-                      </Box>
-                      <Box>
-                        <Typography variant="caption" color="textSecondary">Request Date</Typography>
-                        <Typography variant="body1">{formatDate(selectedRequest.request_date)}</Typography>
-                      </Box>
-                    </CardContent>
-                  </Card>
+                  <Typography variant="subtitle2" color="text.secondary">Location Information</Typography>
+                  <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+                    <Typography><strong>Location:</strong> {getLocationDetails(selectedRequest.location_id).location_name || 'Unknown Location'}</Typography>
+                    <Typography><strong>Address:</strong> {getLocationDetails(selectedRequest.location_id).location_address || 'N/A'}</Typography>
+                  </Box>
                 </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="subtitle2" color="textSecondary" gutterBottom>Planter Details</Typography>
-                      {(() => {
-                        const user = getUserDetails(selectedRequest.user_id);
-                        return (
-                          <>
-                            <Box sx={{ mb: 2 }}>
-                              <Typography variant="caption" color="textSecondary">Name</Typography>
-                              <Typography variant="body1">{user.displayName || user.email || selectedRequest.user_id}</Typography>
-                            </Box>
-                            <Box>
-                              <Typography variant="caption" color="textSecondary">Role</Typography>
-                              <Typography variant="body1">{user.role || 'Not specified'}</Typography>
-                            </Box>
-                          </>
-                        );
-                      })()}
-                    </CardContent>
-                  </Card>
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="subtitle2" color="textSecondary" gutterBottom>Location Details</Typography>
-                      {(() => {
-                        const location = getLocationDetails(selectedRequest.location_id);
-                        return (
-                          <>
-                            <Box sx={{ mb: 2 }}>
-                              <Typography variant="caption" color="textSecondary">Location Name</Typography>
-                              <Typography variant="body1">{location.location_name || selectedRequest.location_id}</Typography>
-                            </Box>
-                            <Box>
-                              <Typography variant="caption" color="textSecondary">Type</Typography>
-                              <Typography variant="body1">{location.location_type || 'Not specified'}</Typography>
-                            </Box>
-                          </>
-                        );
-                      })()}
-                    </CardContent>
-                  </Card>
-                </Grid>
-
                 <Grid item xs={12}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="subtitle2" color="textSecondary" gutterBottom>Remarks</Typography>
-                      <Typography variant="body1">
-                        {selectedRequest.request_remarks || 'No remarks provided'}
-                      </Typography>
-                    </CardContent>
-                  </Card>
+                  <Typography variant="subtitle2" color="text.secondary">Request Details</Typography>
+                  <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+                    <Typography><strong>Preferred Date:</strong> {formatDate(selectedRequest.preferred_date)}</Typography>
+                    <Typography><strong>Status:</strong> 
+                      <Chip 
+                        label={getStatusText(selectedRequest)} 
+                        color={getStatusColor(getStatusText(selectedRequest))}
+                        size="small"
+                        sx={{ ml: 1 }}
+                      />
+                    </Typography>
+                    {selectedRequest.request_remarks && (
+                      <Typography><strong>Remarks:</strong> {selectedRequest.request_remarks}</Typography>
+                    )}
+                  </Box>
                 </Grid>
               </Grid>
             )}
           </DialogContent>
-          <DialogActions sx={{ p: 2 }}>
+          <DialogActions>
             <Button onClick={() => setDetailDialogOpen(false)}>Close</Button>
-          </DialogActions>
-        </Dialog>
-
-        {/* Alert Details Dialog */}
-        <Dialog open={alertDialogOpen} onClose={() => setAlertDialogOpen(false)} maxWidth="md" fullWidth>
-          <DialogTitle sx={{ bgcolor: selectedAlert ? theme.palette[getAlertColor(selectedAlert.severity)].main : 'primary.main', color: 'white' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              {selectedAlert && getAlertIcon(selectedAlert.severity)}
-              Sensor Alert Details
-            </Box>
-          </DialogTitle>
-          <DialogContent>
-            {selectedAlert && (
-              <Grid container spacing={3} sx={{ mt: 1, p: 1 }}>
-                <Grid item xs={12}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="subtitle2" color="textSecondary" gutterBottom>Alert Message</Typography>
-                      <Typography variant="body1" paragraph>
-                        {selectedAlert.message}
-                      </Typography>
-                      <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                        <Chip 
-                          label={selectedAlert.severity.toUpperCase()} 
-                          color={getAlertColor(selectedAlert.severity)} 
-                          size="small"
-                        />
-                        <Chip 
-                          label={`Sensor: ${selectedAlert.sensorId}`} 
-                          variant="outlined"
-                          size="small"
-                        />
-                        {selectedAlert.parameter && (
-                          <Chip 
-                            label={`Parameter: ${selectedAlert.parameter}`} 
-                            variant="outlined"
-                            size="small"
-                          />
-                        )}
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="subtitle2" color="textSecondary" gutterBottom>Timeline</Typography>
-                      <Box sx={{ mb: 2 }}>
-                        <Typography variant="caption" color="textSecondary">Detected</Typography>
-                        <Typography variant="body1">{formatDateTime(selectedAlert.timestamp)}</Typography>
-                      </Box>
-                      <Box>
-                        <Typography variant="caption" color="textSecondary">Current Status</Typography>
-                        <Typography variant="body1">Active</Typography>
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="subtitle2" color="textSecondary" gutterBottom>Alert Details</Typography>
-                      <Box sx={{ mb: 2 }}>
-                        <Typography variant="caption" color="textSecondary">Type</Typography>
-                        <Typography variant="body1">{selectedAlert.type}</Typography>
-                      </Box>
-                      {selectedAlert.value && (
-                        <Box>
-                          <Typography variant="caption" color="textSecondary">Value</Typography>
-                          <Typography variant="body1">{selectedAlert.value}</Typography>
-                        </Box>
-                      )}
-                    </CardContent>
-                  </Card>
-                </Grid>
-
-                <Grid item xs={12}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="subtitle2" color="textSecondary" gutterBottom>Recommended Action</Typography>
-                      <Typography variant="body1">
-                        {selectedAlert.severity === 'high' 
-                          ? 'Immediate attention required. Please check the sensor and take corrective action.'
-                          : selectedAlert.severity === 'medium'
-                          ? 'Monitor the situation and plan for maintenance if the issue persists.'
-                          : 'No immediate action required. Monitor for changes.'}
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              </Grid>
-            )}
-          </DialogContent>
-          <DialogActions sx={{ p: 2 }}>
-            <Button onClick={() => setAlertDialogOpen(false)}>Close</Button>
-            <Button 
-              variant="contained" 
-              color={getAlertColor(selectedAlert?.severity)}
-              onClick={() => {
-                // Mark as resolved action
-                setAlert({ open: true, message: 'Alert marked as resolved', severity: 'success' });
-                setAlertDialogOpen(false);
-              }}
-            >
-              Mark as Resolved
-            </Button>
-          </DialogActions>
-        </Dialog>
-
-        {/* Approval Confirmation Dialog */}
-        <Dialog open={approvalDialogOpen} onClose={() => setApprovalDialogOpen(false)} maxWidth="sm" fullWidth>
-          <DialogTitle sx={{ bgcolor: 'success.main', color: 'white' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <CheckCircleIcon /> Approve Request
-            </Box>
-          </DialogTitle>
-          <DialogContent>
-            {selectedRequest && (
+            {selectedRequest && getStatusText(selectedRequest) === 'pending' && (
               <>
-                <Typography paragraph sx={{ mt: 2 }}>
-                  Approve planting request from <strong>{getUserDetails(selectedRequest.user_id).displayName || selectedRequest.user_id}</strong>?
-                </Typography>
-                <Typography variant="body2" color="text.secondary" paragraph>
-                  Location: {getLocationDetails(selectedRequest.location_id).location_name || selectedRequest.location_id}
-                </Typography>
-                
-                <TextField
-                  margin="dense"
-                  label="Approval Notes (Optional)"
-                  fullWidth
+                <Button 
+                  onClick={() => {
+                    setDetailDialogOpen(false);
+                    handleApprove(selectedRequest);
+                  }} 
+                  color="success" 
+                  variant="contained"
+                >
+                  Approve
+                </Button>
+                <Button 
+                  onClick={() => {
+                    setDetailDialogOpen(false);
+                    handleReject(selectedRequest);
+                  }} 
+                  color="error" 
                   variant="outlined"
-                  multiline
-                  rows={3}
-                  value={rejectionReason}
-                  onChange={(e) => setRejectionReason(e.target.value)}
-                  placeholder="Add any notes or comments about this approval..."
-                />
-                
-                <Alert severity="info" sx={{ mt: 2 }}>
-                  This will create a planting record in the database and notify the planter.
-                </Alert>
+                >
+                  Reject
+                </Button>
               </>
             )}
+          </DialogActions>
+        </Dialog>
+
+        {/* Alert Detail Dialog */}
+        <Dialog open={alertDialogOpen} onClose={() => setAlertDialogOpen(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>Sensor Alert Details</DialogTitle>
+          <DialogContent>
+            {selectedAlert && (
+              <Box sx={{ mt: 1 }}>
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                      {getAlertIcon(selectedAlert.severity)}
+                      <Typography variant="h6" sx={{ ml: 2 }}>
+                        Sensor {selectedAlert.sensorId}
+                      </Typography>
+                      <Chip 
+                        label={selectedAlert.severity.toUpperCase()} 
+                        color={getAlertColor(selectedAlert.severity)}
+                        size="small"
+                        sx={{ ml: 2 }}
+                      />
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle2" color="text.secondary">Alert Message</Typography>
+                    <Typography variant="body1" sx={{ mt: 1 }}>
+                      {selectedAlert.message}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="subtitle2" color="text.secondary">Alert Type</Typography>
+                    <Typography variant="body2">{selectedAlert.type}</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="subtitle2" color="text.secondary">Timestamp</Typography>
+                    <Typography variant="body2">{formatDateTime(selectedAlert.timestamp)}</Typography>
+                  </Grid>
+                  {selectedAlert.parameter && (
+                    <Grid item xs={6}>
+                      <Typography variant="subtitle2" color="text.secondary">Parameter</Typography>
+                      <Typography variant="body2">{selectedAlert.parameter}</Typography>
+                    </Grid>
+                  )}
+                  {selectedAlert.value !== undefined && (
+                    <Grid item xs={6}>
+                      <Typography variant="subtitle2" color="text.secondary">Value</Typography>
+                      <Typography variant="body2">{selectedAlert.value}</Typography>
+                    </Grid>
+                  )}
+                </Grid>
+              </Box>
+            )}
           </DialogContent>
-          <DialogActions sx={{ p: 2 }}>
+          <DialogActions>
+            <Button onClick={() => setAlertDialogOpen(false)}>Close</Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Notification Detail Dialog */}
+        <Dialog open={notificationDialogOpen} onClose={() => setNotificationDialogOpen(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>Notification Details</DialogTitle>
+          <DialogContent>
+            {selectedNotification && (
+              <Box sx={{ mt: 1 }}>
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                      {selectedNotification.type === 'plant_request' && <NewReleasesIcon color="warning" />}
+                      {selectedNotification.type === 'sensor_alert' && <WarningIcon color="error" />}
+                      {selectedNotification.type === 'request_approved' && <CheckCircleIcon color="success" />}
+                      {selectedNotification.type === 'request_rejected' && <CancelIcon color="error" />}
+                      <Typography variant="h6" sx={{ ml: 2 }}>
+                        {selectedNotification.title}
+                      </Typography>
+                      <Chip 
+                        label={selectedNotification.priority} 
+                        size="small" 
+                        color={selectedNotification.priority === 'high' ? 'error' : selectedNotification.priority === 'medium' ? 'warning' : 'default'}
+                        variant="outlined"
+                        sx={{ ml: 2 }}
+                      />
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle2" color="text.secondary">Message</Typography>
+                    <Typography variant="body1" sx={{ mt: 1 }}>
+                      {selectedNotification.message}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="subtitle2" color="text.secondary">Type</Typography>
+                    <Typography variant="body2">{selectedNotification.type}</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="subtitle2" color="text.secondary">Created</Typography>
+                    <Typography variant="body2">{formatDateTime(selectedNotification.timestamp)}</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="subtitle2" color="text.secondary">Status</Typography>
+                    <Typography variant="body2">
+                      {selectedNotification.read ? 'Read' : 'Unread'} • {selectedNotification.resolved ? 'Resolved' : 'Active'}
+                    </Typography>
+                  </Grid>
+                  {selectedNotification.data && (
+                    <Grid item xs={12}>
+                      <Typography variant="subtitle2" color="text.secondary">Additional Data</Typography>
+                      <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+                        <pre style={{ fontSize: '12px', margin: 0, whiteSpace: 'pre-wrap' }}>
+                          {JSON.stringify(selectedNotification.data, null, 2)}
+                        </pre>
+                      </Box>
+                    </Grid>
+                  )}
+                </Grid>
+              </Box>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setNotificationDialogOpen(false)}>Close</Button>
+            {selectedNotification && !selectedNotification.read && (
+              <Button 
+                onClick={() => {
+                  handleMarkNotificationRead(selectedNotification.id);
+                  setNotificationDialogOpen(false);
+                }} 
+                color="primary"
+              >
+                Mark as Read
+              </Button>
+            )}
+            {selectedNotification && !selectedNotification.resolved && (
+              <Button 
+                onClick={() => {
+                  handleResolveNotification(selectedNotification.id);
+                  setNotificationDialogOpen(false);
+                }} 
+                color="success"
+              >
+                Resolve
+              </Button>
+            )}
+          </DialogActions>
+        </Dialog>
+
+        {/* Approval Dialog */}
+        <Dialog open={approvalDialogOpen} onClose={() => setApprovalDialogOpen(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>Approve Planting Request</DialogTitle>
+          <DialogContent>
+            <Typography variant="body1" sx={{ mb: 2 }}>
+              Are you sure you want to approve this planting request?
+            </Typography>
+            <TextField
+              fullWidth
+              multiline
+              rows={3}
+              label="Approval Notes (Optional)"
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+              placeholder="Add any notes for the approval..."
+            />
+          </DialogContent>
+          <DialogActions>
             <Button onClick={() => setApprovalDialogOpen(false)}>Cancel</Button>
-            <Button 
-              onClick={confirmApprove} 
-              color="success" 
-              variant="contained"
-              startIcon={<CheckCircleIcon />}
-            >
+            <Button onClick={confirmApprove} color="success" variant="contained">
               Approve Request
             </Button>
           </DialogActions>
@@ -1100,44 +1424,28 @@ const NotificationPanel = () => {
 
         {/* Rejection Dialog */}
         <Dialog open={rejectionDialogOpen} onClose={() => setRejectionDialogOpen(false)} maxWidth="sm" fullWidth>
-          <DialogTitle sx={{ bgcolor: 'error.main', color: 'white' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <CancelIcon /> Reject Request
-            </Box>
-          </DialogTitle>
+          <DialogTitle>Reject Planting Request</DialogTitle>
           <DialogContent>
-            {selectedRequest && (
-              <>
-                <Typography paragraph sx={{ mt: 2 }}>
-                  Reject planting request from <strong>{getUserDetails(selectedRequest.user_id).displayName || selectedRequest.user_id}</strong>?
-                </Typography>
-                <Typography variant="body2" color="text.secondary" paragraph>
-                  Please provide a reason for rejection:
-                </Typography>
-                
-                <TextField
-                  autoFocus
-                  margin="dense"
-                  label="Rejection Reason"
-                  fullWidth
-                  variant="outlined"
-                  multiline
-                  rows={4}
-                  value={rejectionReason}
-                  onChange={(e) => setRejectionReason(e.target.value)}
-                  required
-                  placeholder="Explain why this request is being rejected..."
-                />
-              </>
-            )}
+            <Typography variant="body1" sx={{ mb: 2 }}>
+              Please provide a reason for rejecting this planting request:
+            </Typography>
+            <TextField
+              fullWidth
+              multiline
+              rows={3}
+              label="Rejection Reason"
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+              placeholder="Explain why this request is being rejected..."
+              required
+            />
           </DialogContent>
-          <DialogActions sx={{ p: 2 }}>
+          <DialogActions>
             <Button onClick={() => setRejectionDialogOpen(false)}>Cancel</Button>
             <Button 
               onClick={confirmReject} 
               color="error" 
               variant="contained"
-              startIcon={<CancelIcon />}
               disabled={!rejectionReason.trim()}
             >
               Reject Request

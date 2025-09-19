@@ -7,7 +7,6 @@ import { AuthProvider } from './context/AuthContext.js';
 import ProtectedRoute from './components/ProtectedRoute.js';
 import PublicRoute from './components/PublicRoute.js';
 
-
 // Import pages
 import Login from './pages/Login.js';
 import Registration from './pages/Registration.js';
@@ -176,7 +175,6 @@ function App() {
                 </ProtectedRoute>
               } 
             />
-
             {/* Default Redirects */}
             <Route path="/" element={<Navigate to="/login" replace />} />
             <Route path="*" element={<NotFound />} />
