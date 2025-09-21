@@ -423,7 +423,7 @@ function Recommendations() {
                       <TableRow sx={{ bgcolor: theme.palette.grey[50] }}>
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Recommendation ID</Typography></TableCell>
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Sensor ID</Typography></TableCell>
-                        <TableCell><Typography variant="subtitle2" fontWeight="bold">Inventory ID</Typography></TableCell>
+                        <TableCell><Typography variant="subtitle2" fontWeight="bold">Location</Typography></TableCell>
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Seedlings Count</Typography></TableCell>
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Confidence</Typography></TableCell>
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Generated</Typography></TableCell>
