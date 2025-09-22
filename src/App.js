@@ -16,6 +16,7 @@ import Sensor from './pages/Sensor.js';
 import Recommendations from './pages/Recommendations.js';
 import Tasks from './pages/Task.js';
 import Notification from './pages/Notification.js';
+import ForgotPassword from './pages/ForgotPassword.js';
 // Uncomment these imports when you create these components:
 // import ForgotPassword from './pages/ForgotPassword';
 // import ResetPassword from './pages/ResetPassword';
@@ -26,7 +27,6 @@ import Notification from './pages/Notification.js';
 // import NotFound from './pages/NotFound';
 
 // Create temporary placeholder components for development
-const ForgotPassword = () => <div>Forgot Password Page - Under Construction</div>;
 const ResetPassword = () => <div>Reset Password Page - Under Construction</div>;
 const PlantingProjects = () => <div>Planting Projects Page - Under Construction</div>;
 const TreeInventory = () => <div>Tree Inventory Page - Under Construction</div>;

@@ -17,7 +17,7 @@ import {
   Settings as SettingsIcon,
 } from '@mui/icons-material';
 import { useState, useEffect } from 'react';
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { auth, firestore } from "../firebase.js";
 
@@ -25,6 +25,7 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
   const [anchorEl, setAnchorEl] = useState(null);
   const [notificationCount, setNotificationCount] = useState(0);
   const navigate = useNavigate();
+  const location = useLocation();
   
   const handleMenuOpen = (event) => {
     setAnchorEl(event.currentTarget);
@@ -52,6 +53,29 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
   // Navigate to notifications page
   const handleNotificationClick = () => {
     navigate("/notifications");
+  };
+
+  // Helper function to get current page title
+  const getCurrentPageTitle = () => {
+    const path = location.pathname;
+    switch (path) {
+      case '/dashboard':
+        return 'Dashboard';
+      case '/Sensor':
+        return 'Sensor Data';
+      case '/recommendations':
+        return 'Recommendations';
+      case '/tasks':
+        return 'Planting Tasks';
+      case '/notifications':
+        return 'Notifications';
+      case '/profile':
+        return 'Profile';
+      case '/settings':
+        return 'Settings';
+      default:
+        return 'Admin Dashboard';
+    }
   };
 
   // Fetch notification count from Firestore
@@ -120,7 +144,7 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
           <MenuIcon />
         </IconButton>
         <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-          Admin Dashboard
+          {getCurrentPageTitle()}
         </Typography>
         
         {/* Notifications Icon with Enhanced Badge */}
