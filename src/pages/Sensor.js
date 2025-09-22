@@ -62,7 +62,7 @@ const parseRange = (rangeStr) => {
 // Load and parse the Excel dataset
 const loadTreeDataset = async () => {
   try {
-    console.log('Loading tree dataset from Excel file...');
+    console.log('Loading tree dataset...');
     
     // Fetch the Excel file from public folder
     const response = await fetch('/data/Tree_Seedling_Dataset.xlsx');
@@ -417,10 +417,10 @@ function Sensors() {
       // Calculate overall recommendation confidence
       const avgConfidence = recommendedTrees.reduce((sum, tree) => sum + tree.confidenceScore, 0) / recommendedTrees.length;
       
-      // Create recommendation document in Firestore
+      // Create recommendation document in Firestore - CHANGED inventory_id to location
       const recommendationData = {
         sensorData_id: sensor.id,
-        inventory_id: sensor.location || `LOC_${sensor.id}`,
+        location: sensor.location || `LOC_${sensor.id}`, // CHANGED: inventory_id -> location
         reco_confidenceScore: (avgConfidence * 100).toFixed(1),
         reco_generatedDATE: serverTimestamp(),
         algorithm_version: 'v2.0_excel_dataset_57_species',

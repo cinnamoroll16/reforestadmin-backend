@@ -114,7 +114,7 @@ function Recommendations() {
       const taskData = {
         user_id: user?.uid || 'USER001', // Use actual user ID or fallback
         reco_id: reco.reco_id,
-        location_id: reco.inventory_Id || 'LOC001', // Using inventory_Id as location_id fallback
+        location_id: reco.location || 'LOC001', // CHANGED: Use location instead of inventory_Id
         task_status: 'Assigned',
         task_date: serverTimestamp(), // Use server timestamp
         created_at: serverTimestamp(),
@@ -180,13 +180,33 @@ function Recommendations() {
           const confidencePercentage = confidenceScore > 1 ? confidenceScore : Math.round(confidenceScore * 100);
           const status = generateStatus(confidenceScore);
 
+          // Handle Firestore timestamp properly
+          let generatedDate = new Date().toISOString(); // Default fallback
+          if (data.reco_generatedDATE) {
+            try {
+              // Handle Firestore Timestamp object
+              if (data.reco_generatedDATE.toDate) {
+                generatedDate = data.reco_generatedDATE.toDate().toISOString();
+              } else if (data.reco_generatedDATE.seconds) {
+                // Handle Firestore timestamp with seconds
+                generatedDate = new Date(data.reco_generatedDATE.seconds * 1000).toISOString();
+              } else {
+                // Handle regular date string
+                generatedDate = new Date(data.reco_generatedDATE).toISOString();
+              }
+            } catch (error) {
+              console.error('Error parsing date:', error);
+              generatedDate = new Date().toISOString();
+            }
+          }
+
           return {
             id: docId,
             reco_id: docId,
             sensorData_id: data.sensorData_id || 'N/A',
-            inventory_Id: data.inventory_id || 'N/A',
+            location: data.location || 'N/A', // CHANGED: Use location field instead of inventory_id
             reco_confidenceScore: confidencePercentage,
-            reco_generatedAt: data.reco_generatedDATE || new Date().toISOString(),
+            reco_generatedAt: generatedDate,
             status: status,
             
             // Environmental conditions (default values)
@@ -441,7 +461,7 @@ function Recommendations() {
                             <Typography variant="body2">{reco.sensorData_id}</Typography>
                           </TableCell>
                           <TableCell>
-                            <Typography variant="body2">{reco.inventory_Id}</Typography>
+                            <Typography variant="body2">{reco.location}</Typography>
                           </TableCell>
                           <TableCell>
                             <Chip 
@@ -528,7 +548,7 @@ function Recommendations() {
                   <Grid item xs={12} md={6}>
                     <Typography variant="subtitle2" gutterBottom>Source Data</Typography>
                     <Typography variant="body2">Sensor: {selectedReco.sensorData_id}</Typography>
-                    <Typography variant="body2">Inventory: {selectedReco.inventory_Id}</Typography>
+                    <Typography variant="body2">Location: {selectedReco.location}</Typography>
                     <Typography variant="body2">
                       Generated: {selectedReco.reco_generatedAt 
                         ? new Date(selectedReco.reco_generatedAt).toLocaleString() 
