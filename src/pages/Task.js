@@ -2,7 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Button, Dialog, DialogTitle,
+  Box, Typography, Paper, Button, Dialog, DialogTitle,
   DialogContent, DialogActions, Grid, Card, CardContent, Alert, 
+  useMediaQuery, useTheme, TextField, FormControl,
   useMediaQuery, useTheme, TextField, FormControl,
   InputLabel, Select, MenuItem, LinearProgress, Avatar, alpha,
   Toolbar, IconButton, Tooltip, Divider, List, ListItem,
@@ -71,47 +73,112 @@ const SeedlingAssignmentPage = () => {
     
     const fetchData = async () => {
       try {
-        // Fetch only approved planting requests
-        const requestsQuery = query(
-          collection(firestore, 'PlantingRequest'),
-          where('request_status', '==', 'approved'),
-          orderBy('preferred_date', 'asc')
-        );
+        console.log('🚀 Starting to fetch approved planting requests...');
         
-        const recordsUnsubscribe = onSnapshot(requestsQuery, (snapshot) => {
-          const recordsData = snapshot.docs.map(doc => ({
+        // First, let's try to fetch all PlantingRequest documents to see what we have
+        const allRequestsQuery = query(collection(firestore, 'PlantingRequest'));
+        
+        const recordsUnsubscribe = onSnapshot(allRequestsQuery, (snapshot) => {
+          console.log(`📋 Found ${snapshot.docs.length} total planting requests`);
+          
+          const allRequests = snapshot.docs.map(doc => ({
             id: doc.id,
-            ...doc.data(),
-            record_datePlanted: doc.data().preferred_date?.toDate?.() || new Date(doc.data().preferred_date) || new Date(),
+            ...doc.data()
           }));
+          
+          console.log('📋 All requests with statuses:', allRequests.map(r => ({ 
+            id: r.id, 
+            request_status: r.request_status,
+            status: r.status,
+            preferred_date: r.preferred_date 
+          })));
+          
+          // Filter for approved requests (handle different possible status field names)
+          const approvedRequests = allRequests.filter(request => {
+            const status = request.request_status || request.status;
+            console.log(`Request ${request.id}: status="${status}"`);
+            return status === 'approved';
+          });
+          
+          console.log(`✅ Found ${approvedRequests.length} approved requests`);
+          
+          // Process the approved requests
+          const recordsData = approvedRequests.map(doc => ({
+            id: doc.id,
+            ...doc,
+            record_datePlanted: (() => {
+              // Handle different date formats
+              const dateField = doc.preferred_date || doc.record_datePlanted;
+              if (!dateField) return new Date();
+              
+              // If it's a Firestore Timestamp
+              if (dateField.toDate) return dateField.toDate();
+              
+              // If it's a string
+              if (typeof dateField === 'string') return new Date(dateField);
+              
+              // If it's already a Date
+              if (dateField instanceof Date) return dateField;
+              
+              // Fallback
+              return new Date();
+            })()
+          }));
+          
+          console.log(`📊 Processed ${recordsData.length} approved records for display`);
           setApprovedRecords(recordsData);
+          setLoading(false);
+        }, (error) => {
+          console.error('❌ Error fetching planting requests:', error);
+          setAlert({ 
+            open: true, 
+            message: 'Error loading planting requests: ' + error.message, 
+            severity: 'error' 
+          });
+          setLoading(false);
         });
 
         // Fetch recommendations for seedling matching
+        console.log('🌿 Fetching recommendations...');
         const recosSnapshot = await getDocs(collection(firestore, 'Recommendation'));
         const recosData = recosSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        console.log(`🌿 Found ${recosData.length} recommendations`);
+        console.log('🌿 Sample recommendation:', recosData[0]);
         setRecommendations(recosData);
 
         // Fetch users
+        console.log('👥 Fetching users...');
         const usersSnapshot = await getDocs(collection(firestore, 'users'));
         const usersData = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        console.log(`👥 Found ${usersData.length} users`);
         setPlanters(usersData);
 
         // Fetch locations
+        console.log('📍 Fetching locations...');
         const locationsSnapshot = await getDocs(collection(firestore, 'Location'));
         const locationsData = locationsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        console.log(`📍 Found ${locationsData.length} locations`);
         setLocations(locationsData);
 
         // Fetch available seedlings
+        console.log('🌱 Fetching seedlings...');
         const seedlingsSnapshot = await getDocs(collection(firestore, 'TreeSeedling'));
         const seedlingsData = seedlingsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        console.log(`🌱 Found ${seedlingsData.length} seedlings`);
         setSeedlings(seedlingsData);
 
-        setLoading(false);
+        return () => {
+          recordsUnsubscribe();
+        };
+
       } catch (error) {
-        console.error("Error fetching data:", error);
+        console.error("❌ Error fetching data:", error);
+        setAlert({ 
+          open: true, 
+          message: 'Error loading data: ' + error.message, 
+          severity: 'error' 
+        });
         setLoading(false);
-        setAlert({ open: true, message: 'Error loading data: ' + error.message, severity: 'error' });
       }
     };
 
@@ -131,34 +198,52 @@ const SeedlingAssignmentPage = () => {
     return seedlings.find(seedling => seedling.id === seedlingId) || {};
   };
 
-  // Get recommended seedlings for location with enhanced scoring
+  // Get recommended seedlings for location with enhanced scoring based on your Firestore structure
   const getRecommendedSeedlings = (locationId) => {
-    const locationRecommendations = recommendations.filter(reco => 
-      reco.location_id === locationId
-    );
+    console.log(`🔍 Looking for recommendations for location: ${locationId}`);
+    
+    // Find recommendations that match this location
+    const locationRecommendations = recommendations.filter(reco => {
+      // Check both location and location_id fields to be flexible
+      const recoLocation = reco.location || reco.location_id;
+      console.log(`📍 Checking recommendation ${reco.id}: location="${recoLocation}" vs target="${locationId}"`);
+      return recoLocation === locationId;
+    });
+    
+    console.log(`🌿 Found ${locationRecommendations.length} recommendations for location ${locationId}`);
     
     if (locationRecommendations.length === 0) return [];
     
     const recommendedSeedlings = [];
+    
     locationRecommendations.forEach(reco => {
-      if (reco.recommendedSeedlings && Array.isArray(reco.recommendedSeedlings)) {
-        reco.recommendedSeedlings.forEach(seedling => {
-          // Find matching seedling details
+      console.log(`Processing recommendation ${reco.id} with ${reco.seedlings?.length || 0} seedlings`);
+      
+      if (reco.seedlings && Array.isArray(reco.seedlings)) {
+        reco.seedlings.forEach(seedling => {
+          // Find matching seedling details from TreeSeedling collection
           const seedlingDetails = seedlings.find(s => 
             s.id === seedling.seedling_id || 
-            s.seedling_commonName === seedling.commonName
+            s.id === seedling.id ||
+            s.seedling_commonName === seedling.commonName ||
+            s.seedling_commonName === seedling.seedling_commonName
           );
           
           recommendedSeedlings.push({
             ...seedling,
             ...seedlingDetails,
-            confidence: seedling.confidenceScore || seedling.suitabilityScore || 0,
-            environmentalMatch: seedling.environmentalFactors || {},
-            growthProjection: seedling.growthProjection || {}
+            // Use your confidence score field name
+            confidence: parseFloat(reco.reco_confidenceScore) || parseFloat(seedling.confidenceScore) || parseFloat(seedling.suitabilityScore) || 0,
+            recommendationId: reco.id,
+            sensorDataId: reco.sensorData_id,
+            inventoryId: reco.inventory_id,
+            generatedDate: reco.reco_generatedDATE
           });
         });
       }
     });
+    
+    console.log(`🎯 Final recommended seedlings: ${recommendedSeedlings.length}`);
     
     return recommendedSeedlings
       .sort((a, b) => b.confidence - a.confidence)
