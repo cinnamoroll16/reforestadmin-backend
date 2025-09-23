@@ -1,5 +1,5 @@
-// src/pages/ForgotPassword.js
-import React, { useState } from 'react';
+// src/pages/ForgotPassword.js - Corrected version with consistent AuthContext usage
+import React, { useState, useEffect } from 'react';
 import {
   Container,
   Paper,
@@ -12,45 +12,339 @@ import {
   Alert,
   InputAdornment,
   CircularProgress,
+  Fade,
+  alpha,
 } from '@mui/material';
-import { Email } from '@mui/icons-material';
+import { Email, CheckCircle, ArrowBack } from '@mui/icons-material';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.js';
 
 const ForgotPassword = () => {
   const navigate = useNavigate();
-  const { resetPassword } = useAuth();
+  const { 
+    resetPassword, 
+    loading: authLoading, 
+    error: authError, 
+    setError: clearAuthError,
+    user,
+    validateEmailFormat 
+  } = useAuth();
   
   const [formData, setFormData] = useState({ email: '' });
-  const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [fieldError, setFieldError] = useState('');
+
+  // Redirect if user is already logged in
+  useEffect(() => {
+    if (user && user.emailVerified) {
+      navigate('/dashboard');
+    }
+  }, [user, navigate]);
+
+  // Clear auth errors when component mounts
+  useEffect(() => {
+    clearAuthError();
+  }, [clearAuthError]);
 
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-    if (error) setError('');
-    if (message) setMessage('');
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+    
+    // Clear errors when user types
+    if (authError) clearAuthError();
+    if (fieldError) setFieldError('');
+  };
+
+  const validateForm = () => {
+    // Check if email is provided
+    if (!formData.email.trim()) {
+      setFieldError('Email address is required');
+      return false;
+    }
+
+    // Check email format
+    if (!validateEmailFormat(formData.email)) {
+      setFieldError('Please enter a valid email address');
+      return false;
+    }
+
+    return true;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    setError('');
-    setMessage('');
+    
+    // Clear previous errors
+    clearAuthError();
+    setFieldError('');
+    
+    // Validate form
+    if (!validateForm()) {
+      return;
+    }
 
     try {
       await resetPassword(formData.email);
-      setMessage('Check your inbox for further instructions');
+      setSuccess(true);
+      
+      // Auto redirect after 8 seconds (longer than before to give user time to read)
       setTimeout(() => {
         navigate('/login');
-      }, 3000);
+      }, 8000);
     } catch (error) {
-      setError('Failed to reset password. Please check your email address.');
-    } finally {
-      setLoading(false);
+      // Error is handled by AuthContext and displayed via authError
+      console.error('Password reset error:', error);
     }
   };
 
+  const handleBackToLogin = () => {
+    navigate('/login');
+  };
+
+  const handleResendEmail = async () => {
+    // Clear errors
+    clearAuthError();
+    setFieldError('');
+    
+    if (!validateForm()) {
+      return;
+    }
+
+    try {
+      await resetPassword(formData.email);
+      // Show success message without changing success state
+      clearAuthError(); // Clear any errors
+    } catch (error) {
+      // Error will be shown via authError
+      console.error('Resend email error:', error);
+    }
+  };
+
+  // Success state
+  if (success) {
+    return (
+      <Box
+        sx={{ 
+          minHeight: '100vh', 
+          display: 'flex',
+          width: '100%',
+          margin: 0,
+          padding: 0,
+        }}
+      >
+        <Grid container sx={{ flex: 1, minHeight: '100vh', margin: 0 }}>
+          <Grid
+            item
+            xs={12}
+            md={6}
+            sx={{
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              bgcolor: '#f8f9fa',
+              p: { xs: 3, md: 6 },
+              minHeight: '100vh',
+            }}
+          >
+            <Fade in={success}>
+              <Paper
+                elevation={3}
+                sx={{
+                  width: '100%',
+                  maxWidth: 450,
+                  p: { xs: 4, md: 5 },
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  borderRadius: 3,
+                  bgcolor: '#ffffff',
+                }}
+              >
+                <Box
+                  sx={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: '50%',
+                    bgcolor: '#e8f5e9',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    mb: 3,
+                  }}
+                >
+                  <CheckCircle sx={{ fontSize: 40, color: '#2e7d32' }} />
+                </Box>
+
+                <Typography 
+                  variant="h4" 
+                  fontWeight="600" 
+                  align="center" 
+                  gutterBottom
+                  sx={{ color: '#1a1a1a', mb: 2 }}
+                >
+                  Check Your Email
+                </Typography>
+
+                <Typography
+                  variant="body1"
+                  align="center"
+                  color="text.secondary"
+                  sx={{ mb: 3, lineHeight: 1.6 }}
+                >
+                  We've sent password reset instructions to{' '}
+                  <strong>{formData.email}</strong>
+                </Typography>
+
+                <Alert 
+                  severity="info" 
+                  sx={{ 
+                    mb: 3, 
+                    width: '100%',
+                    borderRadius: 2,
+                  }}
+                >
+                  If you don't see the email, check your spam folder.
+                </Alert>
+
+                {/* Resend Email Button */}
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  onClick={handleResendEmail}
+                  disabled={authLoading}
+                  sx={{
+                    py: 1.5,
+                    mb: 2,
+                    borderRadius: 1.5,
+                    textTransform: 'none',
+                    fontSize: '16px',
+                    fontWeight: 600,
+                    borderColor: '#2e7d32',
+                    color: '#2e7d32',
+                    '&:hover': {
+                      borderColor: '#1b5e20',
+                      bgcolor: alpha('#2e7d32', 0.04),
+                    }
+                  }}
+                >
+                  {authLoading ? (
+                    <CircularProgress size={20} color="inherit" />
+                  ) : (
+                    'Resend Email'
+                  )}
+                </Button>
+
+                {/* Back to Login Button */}
+                <Button
+                  fullWidth
+                  variant="text"
+                  startIcon={<ArrowBack />}
+                  onClick={handleBackToLogin}
+                  sx={{
+                    py: 1.5,
+                    borderRadius: 1.5,
+                    textTransform: 'none',
+                    fontSize: '16px',
+                    fontWeight: 600,
+                    color: '#666',
+                    '&:hover': {
+                      bgcolor: alpha('#2e7d32', 0.04),
+                    }
+                  }}
+                >
+                  Back to Sign In
+                </Button>
+
+                <Typography 
+                  variant="caption" 
+                  color="text.secondary" 
+                  align="center"
+                  sx={{ mt: 2 }}
+                >
+                  Redirecting to login in 8 seconds...
+                </Typography>
+              </Paper>
+            </Fade>
+          </Grid>
+
+          {/* Right Panel */}
+          <Grid
+            item
+            xs={12}
+            md={6}
+            sx={{
+              position: 'relative',
+              display: { xs: 'none', md: 'flex' },
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: '100vh',
+              overflow: 'hidden',
+            }}
+          >
+            <Box
+              sx={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundImage: 'url(/images/loginImage.png)',
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat',
+                '&::before': {
+                  content: '""',
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                  zIndex: 1,
+                }
+              }}
+            />
+            
+            <Box
+              sx={{
+                position: 'relative',
+                zIndex: 2,
+                color: '#fff',
+                textAlign: 'center',
+                p: 4,
+              }}
+            >
+              <Typography
+                variant="h2"
+                fontWeight="700"
+                sx={{ 
+                  textShadow: '3px 3px 8px rgba(0,0,0,0.7)',
+                  mb: 2,
+                  fontSize: { xs: '2.5rem', md: '3.5rem' }
+                }}
+              >
+                REFOREST
+              </Typography>
+              <Typography
+                variant="h5"
+                sx={{ 
+                  textShadow: '2px 2px 6px rgba(0,0,0,0.7)',
+                  opacity: 0.9,
+                  fontWeight: 400,
+                  maxWidth: 400,
+                  mx: 'auto'
+                }}
+              >
+                Join us in restoring our planet, one tree at a time
+              </Typography>
+            </Box>
+          </Grid>
+        </Grid>
+      </Box>
+    );
+  }
+
+  // Form state
   return (
     <Box
       sx={{ 
@@ -62,7 +356,6 @@ const ForgotPassword = () => {
       }}
     >
       <Grid container sx={{ flex: 1, minHeight: '100vh', margin: 0 }}>
-        {/* Left Panel (Forgot Password Form) */}
         <Grid
           item
           xs={12}
@@ -74,9 +367,6 @@ const ForgotPassword = () => {
             bgcolor: '#f8f9fa',
             p: { xs: 3, md: 6 },
             minHeight: '100vh',
-            margin: 0,
-            width: '100%',
-            flex: 1,
           }}
         >
           <Paper
@@ -90,7 +380,6 @@ const ForgotPassword = () => {
               alignItems: 'center',
               borderRadius: 3,
               bgcolor: '#ffffff',
-              margin: 0,
             }}
           >
             <Typography 
@@ -111,29 +400,30 @@ const ForgotPassword = () => {
               Enter your email address and we'll send you instructions to reset your password.
             </Typography>
 
-            {error && (
+            {/* Error Alerts */}
+            {authError && (
               <Alert 
                 severity="error" 
                 sx={{ 
                   mb: 3, 
                   width: '100%',
-                  borderRadius: 1
+                  borderRadius: 2
                 }}
               >
-                {error}
+                {authError}
               </Alert>
             )}
 
-            {message && (
+            {fieldError && (
               <Alert 
-                severity="success" 
+                severity="error" 
                 sx={{ 
                   mb: 3, 
                   width: '100%',
-                  borderRadius: 1
+                  borderRadius: 2
                 }}
               >
-                {message}
+                {fieldError}
               </Alert>
             )}
 
@@ -153,6 +443,8 @@ const ForgotPassword = () => {
                 autoFocus
                 value={formData.email}
                 onChange={handleChange}
+                disabled={authLoading}
+                error={!!fieldError || !!authError}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -172,7 +464,7 @@ const ForgotPassword = () => {
                 type="submit"
                 fullWidth
                 variant="contained"
-                disabled={loading}
+                disabled={authLoading || !formData.email.trim()}
                 sx={{
                   backgroundColor: '#2e7d32',
                   '&:hover': { backgroundColor: '#1b5e20' },
@@ -189,10 +481,13 @@ const ForgotPassword = () => {
                   }
                 }}
               >
-                {loading ? (
-                  <CircularProgress size={24} color="inherit" />
+                {authLoading ? (
+                  <>
+                    <CircularProgress size={20} color="inherit" sx={{ mr: 1 }} />
+                    Sending Reset Email...
+                  </>
                 ) : (
-                  'Reset Password'
+                  'Send Reset Email'
                 )}
               </Button>
 
@@ -219,7 +514,7 @@ const ForgotPassword = () => {
           </Paper>
         </Grid>
 
-        {/* Right Panel (Background Image) */}
+        {/* Right Panel */}
         <Grid
           item
           xs={12}
@@ -231,8 +526,6 @@ const ForgotPassword = () => {
             justifyContent: 'center',
             minHeight: '100vh',
             overflow: 'hidden',
-            width: '500%',
-            flex: 1,
           }}
         >
           <Box
