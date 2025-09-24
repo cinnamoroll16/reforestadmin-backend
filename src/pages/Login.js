@@ -195,7 +195,7 @@ const Login = () => {
               <Box sx={{ textAlign: 'right', mb: 3 }}>
                 <Link 
                   component={RouterLink} 
-                  to="/forgot-password" 
+                  to="/forgotpassword" 
                   variant="body2"
                   sx={{ 
                     color: '#2e7d32',

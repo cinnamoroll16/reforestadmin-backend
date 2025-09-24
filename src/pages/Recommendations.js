@@ -45,7 +45,7 @@ import { useTheme, useMediaQuery } from '@mui/material';
 import ReForestAppBar from './AppBar.js';
 import Navigation from './Navigation.js';
 import { auth, firestore } from "../firebase.js";
-import { collection, onSnapshot, doc, getDocs, query, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, doc, getDoc, getDocs, query, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
 
 const drawerWidth = 240;
 
@@ -54,11 +54,11 @@ function Recommendations() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(5);
   const [filter, setFilter] = useState('');
-  const [openDialog, setOpenDialog] = useState(false);
   const [selectedReco, setSelectedReco] = useState(null);
   const [filterStatus, setFilterStatus] = useState('all');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [openDialog, setOpenDialog] = useState(false);
   const navigate = useNavigate();
   
   const user = auth.currentUser;
@@ -78,31 +78,103 @@ function Recommendations() {
     return 'Needs Review';
   };
 
-  // Fetch seedling details for a specific recommendation
-  const fetchSeedlingsForRecommendation = async (recoId) => {
+  // Fetch sensor data from reference path
+  const fetchSensorData = async (sensorDataRef) => {
     try {
-      const seedlingsSnapshot = await getDocs(
-        collection(firestore, 'Recommendation', recoId, 'seedlings')
-      );
+      console.log("🔍 Fetching sensor data for:", sensorDataRef);
       
-      const seedlings = [];
-      seedlingsSnapshot.forEach((doc) => {
-        const data = doc.data();
-        seedlings.push({
-          seedling_id: doc.id,
-          commonName: data.seedling_commonName || 'Unknown',
-          scientificName: data.seedling_scientificName || 'Unknown',
-          prefMoisture: parseFloat(data.seedling_preMoisture) || 0,
-          prefpH: parseFloat(data.seedling_prePH) || 0,
-          prefTemp: parseFloat(data.seedling_preTemp) || 0,
-          isNative: data.seedling_isNative === 'true' || false,
-          confidenceScore: 0.8 + (Math.random() * 0.2) // Default confidence for individual seedlings
-        });
-      });
+      if (!sensorDataRef || sensorDataRef === 'N/A') return null;
       
-      return seedlings;
+      // Parse path: "/sensors/s101/sensordata/data_001"
+      const parts = sensorDataRef.split('/').filter(Boolean);
+      console.log("📋 Parsed parts:", parts);
+      
+      if (parts.length < 4) {
+        console.log("❌ Invalid path length:", parts.length);
+        return null;
+      }
+      
+      const [collection, sensorId, subcollection, dataId] = parts;
+      console.log(`📍 Collection: ${collection}, Sensor: ${sensorId}, Sub: ${subcollection}, Data: ${dataId}`);
+      
+      // Access sensordata as a subcollection, not a field
+      const sensorDataDocRef = doc(firestore, collection, sensorId, subcollection, dataId);
+      const sensorDataSnapshot = await getDoc(sensorDataDocRef);
+      
+      if (!sensorDataSnapshot.exists()) {
+        console.log("❌ Sensor data document doesn't exist");
+        return null;
+      }
+      
+      const sensorDataDoc = sensorDataSnapshot.data();
+      console.log("✅ Sensor data found:", sensorDataDoc);
+      
+      return {
+        sensorId,
+        dataId,
+        ...sensorDataDoc
+      };
     } catch (error) {
-      console.error(`Error fetching seedlings for recommendation ${recoId}:`, error);
+      console.error("❌ Error fetching sensor data:", error);
+      return null;
+    }
+  };
+
+  // Fetch location data from reference path
+  const fetchLocationData = async (locationRef) => {
+    try {
+      if (!locationRef || locationRef === 'N/A') return null;
+      
+      // Parse path: "/locations/locA"
+      const parts = locationRef.split('/').filter(Boolean);
+      if (parts.length < 2) return null;
+      
+      const [collection, locationId] = parts;
+      
+      const locationDocRef = doc(firestore, collection, locationId);
+      const locationSnapshot = await getDoc(locationDocRef);
+      
+      if (locationSnapshot.exists()) {
+        return {
+          locationId,
+          ...locationSnapshot.data()
+        };
+      }
+      
+      return null;
+    } catch (error) {
+      console.error("Error fetching location data:", error);
+      return null;
+    }
+  };
+
+  // Fetch seedlings for one recommendation
+  const fetchSeedlingsForRecommendation = async (seedlingRefs) => {
+    try {
+      const seedlings = await Promise.all(
+        seedlingRefs.map(async (refPath) => {
+          // Split path "/treeseedlings/ts001" → ["", "treeseedlings", "ts001"]
+          const parts = refPath.split("/").filter(Boolean);
+          const [collectionName, docId] = parts;
+
+          if (!collectionName || !docId) return null;
+
+          const docRef = doc(firestore, collectionName, docId);
+          const snapshot = await getDoc(docRef);
+
+          if (snapshot.exists()) {
+            return { id: snapshot.id, ...snapshot.data() };
+          } else {
+            console.warn(`Seedling ${docId} not found in ${collectionName}`);
+            return null;
+          }
+        })
+      );
+
+      // Remove any nulls if some docs weren't found
+      return seedlings.filter(Boolean);
+    } catch (error) {
+      console.error("Error fetching seedlings:", error);
       return [];
     }
   };
@@ -114,14 +186,17 @@ function Recommendations() {
       const taskData = {
         user_id: user?.uid || 'USER001', // Use actual user ID or fallback
         reco_id: reco.reco_id,
-        location_id: reco.inventory_Id || 'LOC001', // Using inventory_Id as location_id fallback
+        location_id: reco.locationData?.locationId || 'LOC001', // Use resolved location ID
         task_status: 'Assigned',
         task_date: serverTimestamp(), // Use server timestamp
         created_at: serverTimestamp(),
         recommendation_data: {
-          sensorData_id: reco.sensorData_id,
+          sensorDataRef: reco.sensorDataRef,
+          locationRef: reco.locationRef,
           confidenceScore: reco.reco_confidenceScore,
-          seedlingCount: reco.seedlingCount
+          seedlingCount: reco.seedlingCount,
+          sensorData: reco.sensorData,
+          locationData: reco.locationData
         }
       };
 
@@ -139,84 +214,105 @@ function Recommendations() {
     }
   };
 
-  // Fetch recommendations from Firestore
+  // Fetch recommendations + related seedlings from Firestore
   useEffect(() => {
     setLoading(true);
-    
-    // Listen to the "Recommendation" collection
+
     const q = query(
-      collection(firestore, 'Recommendation'),
-      orderBy('reco_generatedDATE', 'desc')
+      collection(firestore, 'recommendations'),
+      orderBy('reco_generatedAt', 'desc')
     );
-    
-    const unsubscribe = onSnapshot(
-      q,
-      async (snapshot) => {
-        const docs = snapshot.docs;
-        console.log("Raw recommendations data:", docs.map(doc => ({ id: doc.id, data: doc.data() })));
 
-        if (docs.length === 0) {
-          console.log("No recommendations found in database");
-          setRecommendations([]);
-          setLoading(false);
-          return;
-        }
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      const docs = snapshot.docs;
 
-        // Process each recommendation document
-        const recoPromises = docs.map(async (docSnapshot) => {
-          const data = docSnapshot.data();
-          const docId = docSnapshot.id;
-          
-          console.log(`Processing recommendation ${docId}:`, data);
-          
-          // Fetch seedlings for this recommendation
-          const seedlings = await fetchSeedlingsForRecommendation(docId);
-          
-          // Parse confidence score
-          const confidenceScore = typeof data.reco_confidenceScore === 'string' 
-            ? parseFloat(data.reco_confidenceScore) 
-            : data.reco_confidenceScore || 0.85;
-          
-          const confidencePercentage = confidenceScore > 1 ? confidenceScore : Math.round(confidenceScore * 100);
-          const status = generateStatus(confidenceScore);
-
-          return {
-            id: docId,
-            reco_id: docId,
-            sensorData_id: data.sensorData_id || 'N/A',
-            inventory_Id: data.inventory_id || 'N/A',
-            reco_confidenceScore: confidencePercentage,
-            reco_generatedAt: data.reco_generatedDATE || new Date().toISOString(),
-            status: status,
-            
-            // Environmental conditions (default values)
-            soilConditions: 'Optimal for selected species',
-            rainfall: 'Adequate',
-            temperature: 'Within preferred range',
-            
-            // Seedling data
-            recommendedSeedlings: seedlings,
-            seedlingCount: seedlings.length
-          };
-        });
-
-        try {
-          const recoArray = await Promise.all(recoPromises);
-          console.log("Processed recommendations array:", recoArray);
-          setRecommendations(recoArray);
-        } catch (error) {
-          console.error("Error processing recommendations:", error);
-          setRecommendations([]);
-        } finally {
-          setLoading(false);
-        }
-      },
-      (error) => {
-        console.error("Error fetching recommendations:", error);
+      if (docs.length === 0) {
         setRecommendations([]);
         setLoading(false);
+        return;
       }
-    );
+
+      const recoPromises = docs.map(async (docSnapshot) => {
+        const data = docSnapshot.data();
+        const docId = docSnapshot.id;
+
+        // 🔹 Fetch sensor data from reference
+        const sensorData = await fetchSensorData(data.sensorDataRef);
+        
+        // 🔹 Fetch location data from reference
+        const locationData = await fetchLocationData(data.locationRef);
+
+        // 🔹 Resolve each treeseedling ref in seedlingOptions
+        let seedlings = [];
+        if (Array.isArray(data.seedlingOptions)) {
+          seedlings = await Promise.all(
+            data.seedlingOptions.map(async (refPath) => {
+              try {
+                // Extract seedling ID from "/treeseedlings/ts001"
+                const seedlingId = refPath.split('/').pop();
+                const seedlingDoc = await getDocs(
+                  collection(firestore, 'treeseedlings')
+                );
+
+                const sData = seedlingDoc.docs.find((d) => d.id === seedlingId)?.data();
+                if (!sData) return null;
+
+                return {
+                  seedling_id: seedlingId,
+                  commonName: sData.seedling_commonName || 'Unknown',
+                  scientificName: sData.seedling_scientificName || 'Unknown',
+                  prefMoisture: parseFloat(sData.seedling_prefMoisture) || 0,
+                  prefTemp: parseFloat(sData.seedling_prefTemp) || 0,
+                  prefpH: parseFloat(sData.seedling_prefpH) || 0,
+                  isNative: sData.seedling_isNative === true,
+                  confidenceScore: 0.8 + Math.random() * 0.2
+                };
+              } catch (error) {
+                console.error("Error fetching seedling:", refPath, error);
+                return null;
+              }
+            })
+          );
+
+          seedlings = seedlings.filter(Boolean); // remove nulls
+        }
+
+        // Confidence parsing
+        const confidenceScore = typeof data.reco_confidenceScore === 'string'
+          ? parseFloat(data.reco_confidenceScore)
+          : data.reco_confidenceScore || 0.85;
+
+        const confidencePercentage = confidenceScore > 1
+          ? confidenceScore
+          : Math.round(confidenceScore * 100);
+
+        const status = generateStatus(confidenceScore);
+
+        return {
+          id: docId,
+          reco_id: docId,
+          sensorDataRef: data.sensorDataRef || 'N/A',
+          locationRef: data.locationRef || 'N/A',
+          sensorData: sensorData || null,
+          locationData: locationData || null,
+          reco_confidenceScore: confidencePercentage,
+          reco_generatedAt: data.reco_generatedAt || new Date().toISOString(),
+          status,
+          recommendedSeedlings: seedlings,
+          seedlingCount: seedlings.length
+        };
+      });
+
+      try {
+        const recoArray = await Promise.all(recoPromises);
+        setRecommendations(recoArray);
+      } catch (error) {
+        console.error("Error processing recommendations:", error);
+        setRecommendations([]);
+      } finally {
+        setLoading(false);
+      }
+    });
 
     return () => unsubscribe();
   }, []);
@@ -224,7 +320,8 @@ function Recommendations() {
   // Handle filtering
   const filteredRecommendations = recommendations.filter(reco => {
     const matchesSearch = reco.reco_id.toLowerCase().includes(filter.toLowerCase()) ||
-                         reco.sensorData_id.toLowerCase().includes(filter.toLowerCase());
+                         (reco.locationData?.location_name || '').toLowerCase().includes(filter.toLowerCase()) ||
+                         (reco.sensorData?.sensorId || '').toLowerCase().includes(filter.toLowerCase());
     const matchesStatus = filterStatus === 'all' || reco.status === filterStatus;
     return matchesSearch && matchesStatus;
   });
@@ -383,7 +480,7 @@ function Recommendations() {
                   variant="outlined"
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
-                  placeholder="Search by ID or Sensor ID"
+                  placeholder="Search by ID, Location, or Sensor"
                 />
               </Grid>
               <Grid item xs={12} md={6}>
@@ -422,8 +519,8 @@ function Recommendations() {
                     <TableHead>
                       <TableRow sx={{ bgcolor: theme.palette.grey[50] }}>
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Recommendation ID</Typography></TableCell>
-                        <TableCell><Typography variant="subtitle2" fontWeight="bold">Sensor ID</Typography></TableCell>
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Location</Typography></TableCell>
+                        <TableCell><Typography variant="subtitle2" fontWeight="bold">Sensor Data</Typography></TableCell>
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Seedlings Count</Typography></TableCell>
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Confidence</Typography></TableCell>
                         <TableCell><Typography variant="subtitle2" fontWeight="bold">Generated</Typography></TableCell>
@@ -438,10 +535,38 @@ function Recommendations() {
                             <Typography variant="body2" fontWeight="medium">{reco.reco_id}</Typography>
                           </TableCell>
                           <TableCell>
-                            <Typography variant="body2">{reco.sensorData_id}</Typography>
+                            <Box>
+                              <Typography variant="body2" fontWeight="medium">
+                                {reco.locationData?.location_name || 'Unknown Location'}
+                              </Typography>
+                              {reco.locationData && (
+                                <Typography variant="caption" color="text.secondary">
+                                  {reco.locationData.location_latitude}, {reco.locationData.location_longitude}
+                                </Typography>
+                              )}
+                            </Box>
                           </TableCell>
                           <TableCell>
-                            <Typography variant="body2">{reco.inventory_Id}</Typography>
+                            <Box>
+                              {reco.sensorData ? (
+                                <>
+                                  <Typography variant="body2" fontWeight="medium">
+                                    Sensor {reco.sensorData.sensorId}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary" display="block">
+                                    Moisture: {reco.sensorData.soilMoisture}%
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary" display="block">
+                                    Temp: {reco.sensorData.temperature}°C
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary" display="block">
+                                    pH: {reco.sensorData.pH}
+                                  </Typography>
+                                </>
+                              ) : (
+                                <Typography variant="body2" color="text.secondary">No data</Typography>
+                              )}
+                            </Box>
                           </TableCell>
                           <TableCell>
                             <Chip 
@@ -465,14 +590,11 @@ function Recommendations() {
                           </TableCell>
                           <TableCell>
                             <Typography variant="body2">
-                              {reco.reco_generatedAt 
-                                ? new Date(reco.reco_generatedAt).toLocaleDateString('en-US', {
-                                    year: 'numeric',
-                                    month: 'short',
-                                    day: 'numeric'
-                                  })
+                              Generated: {reco.reco_generatedAt
+                                ? new Date(reco.reco_generatedAt).toLocaleString()
                                 : 'N/A'}
                             </Typography>
+
                           </TableCell>
                           <TableCell>
                             <Chip label={reco.status} color={getStatusColor(reco.status)} size="small" />
@@ -527,8 +649,12 @@ function Recommendations() {
                   </Grid>
                   <Grid item xs={12} md={6}>
                     <Typography variant="subtitle2" gutterBottom>Source Data</Typography>
-                    <Typography variant="body2">Sensor: {selectedReco.sensorData_id}</Typography>
-                    <Typography variant="body2">Inventory: {selectedReco.inventory_Id}</Typography>
+                    <Typography variant="body2">
+                      Sensor: {selectedReco.sensorData ? selectedReco.sensorData.sensorId : 'N/A'}
+                    </Typography>
+                    <Typography variant="body2">
+                      Location: {selectedReco.locationData?.location_name || 'N/A'}
+                    </Typography>
                     <Typography variant="body2">
                       Generated: {selectedReco.reco_generatedAt 
                         ? new Date(selectedReco.reco_generatedAt).toLocaleString() 
@@ -537,9 +663,25 @@ function Recommendations() {
                   </Grid>
                   <Grid item xs={12} md={6}>
                     <Typography variant="subtitle2" gutterBottom>Environmental Conditions</Typography>
-                    <Typography variant="body2">Soil: {selectedReco.soilConditions}</Typography>
-                    <Typography variant="body2">Rainfall: {selectedReco.rainfall}</Typography>
-                    <Typography variant="body2">Temperature: {selectedReco.temperature}</Typography>
+                    {selectedReco.sensorData ? (
+                      <>
+                        <Typography variant="body2">Soil Moisture: {selectedReco.sensorData.soilMoisture}%</Typography>
+                        <Typography variant="body2">Temperature: {selectedReco.sensorData.temperature}°C</Typography>
+                        <Typography variant="body2">pH Level: {selectedReco.sensorData.pH}</Typography>
+                        <Typography variant="body2">
+                          Recorded: {new Date(selectedReco.sensorData.timestamp).toLocaleString()}
+                        </Typography>
+                      </>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">No sensor data available</Typography>
+                    )}
+                    {selectedReco.locationData && (
+                      <>
+                        <Typography variant="body2" sx={{ mt: 1 }}>
+                          Coordinates: {selectedReco.locationData.location_latitude}, {selectedReco.locationData.location_longitude}
+                        </Typography>
+                      </>
+                    )}
                   </Grid>
                   <Grid item xs={12}>
                     <Typography variant="subtitle2" gutterBottom>Recommended Seedlings ({selectedReco.recommendedSeedlings.length})</Typography>

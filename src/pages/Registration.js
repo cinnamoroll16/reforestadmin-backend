@@ -32,14 +32,15 @@ import {
 import { Link as RouterLink } from 'react-router-dom';
 
 // ✅ Firebase imports
-import { auth, firestore } from '../firebase.js'; // make sure firebase.js exports these
+import { auth, firestore } from '../firebase.js';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 
 const Registration = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
-    name: '',
+    firstName: '',
+    lastName: '',
     email: '',
     password: '',
     confirmPassword: '',
@@ -61,7 +62,8 @@ const Registration = () => {
 
   const validateForm = () => {
     const errors = {};
-    if (!formData.name.trim()) errors.name = 'Name is required';
+    if (!formData.firstName.trim()) errors.firstName = 'First name is required';
+    if (!formData.lastName.trim()) errors.lastName = 'Last name is required';
     if (!formData.email.trim()) {
       errors.email = 'Email is required';
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
@@ -78,6 +80,16 @@ const Registration = () => {
     if (!formData.role) errors.role = 'Please select a role';
     if (!acceptedTerms) errors.terms = 'You must accept the terms and conditions';
     return errors;
+  };
+
+  // Function to convert role value to roleRef path
+  const getRoleRef = (roleValue) => {
+    const roleMapping = {
+      'admin': '/roles/admin',
+      'officer': '/roles/officer', 
+      'stakeholder': '/roles/stakeholder'
+    };
+    return roleMapping[roleValue] || `/roles/${roleValue}`;
   };
 
   const handleSubmit = async (e) => {
@@ -98,22 +110,32 @@ const Registration = () => {
         const user = userCredential.user;
 
         // ✅ Update display name in Auth profile
+        const fullName = `${formData.firstName} ${formData.lastName}`;
         await updateProfile(user, {
-          displayName: formData.name,
+          displayName: fullName,
         });
 
-        // ✅ Save user data in Firestore
+        // ✅ Save user data in Firestore with the specified structure
         await setDoc(doc(firestore, 'users', user.uid), {
-          uid: user.uid,
-          name: formData.name,
-          email: formData.email,
-          role: formData.role,
+          user_lastname: formData.lastName.trim(),
+          user_firstname: formData.firstName.trim(),
+          user_email: formData.email.toLowerCase().trim(),
+          roleRef: getRoleRef(formData.role),
+          user_password: "hashed_password", // Note: In practice, Firebase Auth handles passwords
           createdAt: new Date(),
           status: 'active',
+          uid: user.uid // Keep uid for easy reference
         });
 
         setSubmitted(true);
-        setFormData({ name: '', email: '', password: '', confirmPassword: '', role: '' });
+        setFormData({ 
+          firstName: '', 
+          lastName: '', 
+          email: '', 
+          password: '', 
+          confirmPassword: '', 
+          role: '' 
+        });
         setAcceptedTerms(false);
 
         // Redirect after success
@@ -121,6 +143,7 @@ const Registration = () => {
           navigate('/login');
         }, 2000);
       } catch (err) {
+        console.error('Registration error:', err);
         setServerError(err.message);
       }
 
@@ -131,7 +154,7 @@ const Registration = () => {
   };
 
   const roleOptions = [
-    { value: 'planter', label: 'Planter', description: 'Plant trees and track progress', icon: <Nature sx={{ fontSize: 20, color: '#2e7d32' }} /> },
+    { value: 'admin', label: 'Admin', description: 'Dako-dako ni HAHAHA', icon: <Nature sx={{ fontSize: 20, color: '#2e7d32' }} /> },
     { value: 'officer', label: 'DENR Officer', description: 'Monitor and verify plantations', icon: <Security sx={{ fontSize: 20, color: '#2e7d32' }} /> },
     { value: 'stakeholder', label: 'Stakeholder', description: 'Support and fund initiatives', icon: <Business sx={{ fontSize: 20, color: '#2e7d32' }} /> }
   ];
@@ -260,27 +283,46 @@ const Registration = () => {
 
             {/* Form */}
             <Box component="form" onSubmit={handleSubmit} sx={{ width: '100%' }}>
-              {/* Name */}
-              <TextField
-                fullWidth
-                required
-                id="name"
-                label="Full Name"
-                name="name"
-                autoComplete="name"
-                value={formData.name}
-                onChange={handleChange}
-                error={!!errors.name}
-                helperText={errors.name}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <AccountCircle fontSize="small" color="action" />
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
-              />
+              {/* First Name and Last Name Row */}
+              <Grid container spacing={2} sx={{ mb: 2 }}>
+                <Grid item xs={6}>
+                  <TextField
+                    fullWidth
+                    required
+                    id="firstName"
+                    label="First Name"
+                    name="firstName"
+                    autoComplete="given-name"
+                    value={formData.firstName}
+                    onChange={handleChange}
+                    error={!!errors.firstName}
+                    helperText={errors.firstName}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <AccountCircle fontSize="small" color="action" />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
+                  />
+                </Grid>
+                <Grid item xs={6}>
+                  <TextField
+                    fullWidth
+                    required
+                    id="lastName"
+                    label="Last Name"
+                    name="lastName"
+                    autoComplete="family-name"
+                    value={formData.lastName}
+                    onChange={handleChange}
+                    error={!!errors.lastName}
+                    helperText={errors.lastName}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
+                  />
+                </Grid>
+              </Grid>
 
               {/* Email */}
               <TextField
