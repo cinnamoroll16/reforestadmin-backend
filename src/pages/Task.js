@@ -10,6 +10,7 @@ import {
   CardHeader, Accordion, AccordionSummary, AccordionDetails,
   Stack, Rating, Switch, FormControlLabel
 } from '@mui/material';
+import { useParams } from 'react-router-dom';
 import {
   Park as TreeIcon,
   Visibility as ViewIcon,
@@ -18,7 +19,7 @@ import {
   LocationOn as LocationIcon,
   CalendarToday as CalendarIcon,
   Nature as SeedlingIcon,
-  Eco as EcoIcon,
+  LocalFlorist as EcoIcon,
   Science as ScienceIcon,
   TrendingUp as SuitabilityIcon,
   Assignment as TaskIcon,
@@ -33,7 +34,7 @@ import {
   Thermostat as TempIcon
 } from '@mui/icons-material';
 import { 
-  collection, getDocs, doc, updateDoc, addDoc,
+  collection, getDocs, doc, updateDoc, addDoc, getDoc,
   query, where, onSnapshot, orderBy, serverTimestamp
 } from 'firebase/firestore';
 import { auth, firestore } from "../firebase.js";
@@ -43,13 +44,15 @@ import Navigation from './Navigation.js';
 const drawerWidth = 240;
 
 const SeedlingAssignmentPage = () => {
-  const [approvedRecords, setApprovedRecords] = useState([]);
+  const [plantingRequests, setPlantingRequests] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
-  const [planters, setPlanters] = useState([]);
+  const [users, setUsers] = useState([]);
   const [locations, setLocations] = useState([]);
   const [seedlings, setSeedlings] = useState([]);
+  const [plantingRecords, setPlantingRecords] = useState([]);
+  const [plantingTasks, setPlantingTasks] = useState([]);
   const [filter, setFilter] = useState('');
-  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [selectedRequest, setSelectedRequest] = useState(null);
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -61,9 +64,186 @@ const SeedlingAssignmentPage = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const user = auth.currentUser;
+  const { id: recoId } = useParams();
 
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
   const handleLogout = () => auth.signOut();
+
+  // Helper function to resolve user reference
+  const resolveUserRef = async (userRef) => {
+    try {
+      if (!userRef) return null;
+      
+      // Handle both DocumentReference objects and path strings
+      let userId;
+      if (typeof userRef === 'string') {
+        userId = userRef.split('/').pop();
+      } else if (userRef.path) {
+        userId = userRef.path.split('/').pop();
+      } else {
+        console.error('Invalid userRef format:', userRef);
+        return null;
+      }
+      
+      const userDoc = await getDoc(doc(firestore, 'users', userId));
+      if (userDoc.exists()) {
+        return { id: userDoc.id, ...userDoc.data() };
+      }
+      return null;
+    } catch (error) {
+      console.error('Error resolving user ref:', error);
+      return null;
+    }
+  };
+
+  // Helper function to resolve location reference
+  const resolveLocationRef = async (locationRef) => {
+    try {
+      if (!locationRef) return null;
+      
+      // Handle both DocumentReference objects and path strings
+      let locationId;
+      if (typeof locationRef === 'string') {
+        locationId = locationRef.split('/').pop();
+      } else if (locationRef.path) {
+        locationId = locationRef.path.split('/').pop();
+      } else {
+        console.error('Invalid locationRef format:', locationRef);
+        return null;
+      }
+      
+      const locationDoc = await getDoc(doc(firestore, 'locations', locationId));
+      if (locationDoc.exists()) {
+        return { id: locationDoc.id, ...locationDoc.data() };
+      }
+      return null;
+    } catch (error) {
+      console.error('Error resolving location ref:', error);
+      return null;
+    }
+  };
+
+  // Helper function to resolve recommendation reference
+  const resolveRecoRef = async (recoRef) => {
+    try {
+      if (!recoRef) return null;
+      
+      let recoId;
+      if (typeof recoRef === 'string') {
+        recoId = recoRef.split('/').pop();
+      } else if (recoRef.path) {
+        recoId = recoRef.path.split('/').pop();
+      } else {
+        console.error('Invalid recoRef format:', recoRef);
+        return null;
+      }
+      
+      const recoDoc = await getDoc(doc(firestore, 'recommendations', recoId));
+      if (recoDoc.exists()) {
+        return { id: recoDoc.id, ...recoDoc.data() };
+      }
+      return null;
+    } catch (error) {
+      console.error('Error resolving reco ref:', error);
+      return null;
+    }
+  };
+
+  // Check if request already has assigned seedling by looking in plantingrecords
+  const isRequestAssigned = (requestId, requestLocationRef, requestUserRef) => {
+    return plantingRecords.some(record => {
+      // Convert references to comparable strings
+      const recordLocationStr = typeof record.locationRef === 'string' 
+        ? record.locationRef 
+        : record.locationRef?.path || '';
+      
+      const recordUserStr = typeof record.userRef === 'string'
+        ? record.userRef
+        : record.userRef?.path || '';
+      
+      const requestLocationStr = typeof requestLocationRef === 'string'
+        ? requestLocationRef
+        : requestLocationRef?.path || '';
+      
+      const requestUserStr = typeof requestUserRef === 'string'
+        ? requestUserRef
+        : requestUserRef?.path || '';
+      
+      return recordLocationStr === requestLocationStr && 
+             recordUserStr === requestUserStr &&
+             record.seedlingRef; // Has an assigned seedling
+    });
+  };
+
+  // Get assigned seedling for a request
+  const getAssignedSeedling = (requestLocationRef, requestUserRef) => {
+    const record = plantingRecords.find(record => {
+      // Convert references to comparable strings
+      const recordLocationStr = typeof record.locationRef === 'string' 
+        ? record.locationRef 
+        : record.locationRef?.path || '';
+      
+      const recordUserStr = typeof record.userRef === 'string'
+        ? record.userRef
+        : record.userRef?.path || '';
+      
+      const requestLocationStr = typeof requestLocationRef === 'string'
+        ? requestLocationRef
+        : requestLocationRef?.path || '';
+      
+      const requestUserStr = typeof requestUserRef === 'string'
+        ? requestUserRef
+        : requestUserRef?.path || '';
+      
+      return recordLocationStr === requestLocationStr && 
+             recordUserStr === requestUserStr &&
+             record.seedlingRef;
+    });
+    
+    if (!record) return null;
+    
+    // Handle both DocumentReference objects and string paths
+    if (typeof record.seedlingRef === 'string') {
+      return record.seedlingRef;
+    } else if (record.seedlingRef?.path) {
+      return record.seedlingRef.path;
+    } else if (record.seedlingRef?.id) {
+      return `/treeseedlings/${record.seedlingRef.id}`;
+    }
+    
+    return null;
+  };
+
+  // Fetch specific seedlings by their IDs
+  const fetchSpecificSeedlings = async (seedlingIds) => {
+    try {
+      console.log('🌱 Fetching specific seedlings:', seedlingIds);
+      
+      const seedlingPromises = seedlingIds.map(async (seedlingId) => {
+        try {
+          const seedlingDoc = await getDoc(doc(firestore, 'treeseedlings', seedlingId));
+          if (seedlingDoc.exists()) {
+            return { id: seedlingDoc.id, ...seedlingDoc.data() };
+          } else {
+            console.warn(`Seedling ${seedlingId} not found`);
+            return null;
+          }
+        } catch (error) {
+          console.error(`Error fetching seedling ${seedlingId}:`, error);
+          return null;
+        }
+      });
+
+      const seedlingsData = await Promise.all(seedlingPromises);
+      const validSeedlings = seedlingsData.filter(seedling => seedling !== null);
+      
+      console.log(`✅ Fetched ${validSeedlings.length} specific seedlings`);
+      return validSeedlings;
+    } catch (error) {
+      console.error('Error fetching specific seedlings:', error);
+      return [];
+    }
+  };
 
   // Fetch all necessary data
   useEffect(() => {
@@ -71,61 +251,35 @@ const SeedlingAssignmentPage = () => {
     
     const fetchData = async () => {
       try {
-        console.log('🚀 Starting to fetch approved planting requests...');
+        console.log('🚀 Starting to fetch planting requests...');
         
-        // First, let's try to fetch all PlantingRequest documents to see what we have
-        const allRequestsQuery = query(collection(firestore, 'PlantingRequest'));
-        
-        const recordsUnsubscribe = onSnapshot(allRequestsQuery, (snapshot) => {
-          console.log(`📋 Found ${snapshot.docs.length} total planting requests`);
+        // Fetch planting requests
+        const requestsQuery = query(collection(firestore, 'plantingrequests'));
+        const requestsUnsubscribe = onSnapshot(requestsQuery, async (snapshot) => {
+          console.log(`📋 Found ${snapshot.docs.length} planting requests`);
           
-          const allRequests = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }));
-          
-          console.log('📋 All requests with statuses:', allRequests.map(r => ({ 
-            id: r.id, 
-            request_status: r.request_status,
-            status: r.status,
-            preferred_date: r.preferred_date 
-          })));
-          
-          // Filter for approved requests (handle different possible status field names)
-          const approvedRequests = allRequests.filter(request => {
-            const status = request.request_status || request.status;
-            console.log(`Request ${request.id}: status="${status}"`);
-            return status === 'approved';
-          });
-          
-          console.log(`✅ Found ${approvedRequests.length} approved requests`);
-          
-          // Process the approved requests
-          const recordsData = approvedRequests.map(doc => ({
-            id: doc.id,
-            ...doc,
-            record_datePlanted: (() => {
-              // Handle different date formats
-              const dateField = doc.preferred_date || doc.record_datePlanted;
-              if (!dateField) return new Date();
+          const requestsData = await Promise.all(
+            snapshot.docs.map(async (requestDoc) => {
+              const requestData = { id: requestDoc.id, ...requestDoc.data() };
               
-              // If it's a Firestore Timestamp
-              if (dateField.toDate) return dateField.toDate();
-              
-              // If it's a string
-              if (typeof dateField === 'string') return new Date(dateField);
-              
-              // If it's already a Date
-              if (dateField instanceof Date) return dateField;
-              
-              // Fallback
-              return new Date();
-            })()
-          }));
+              console.log('Processing request:', requestData.id, requestData);
+
+              // Resolve references
+              const userData = await resolveUserRef(requestData.userRef);
+              const locationData = await resolveLocationRef(requestData.locationRef);
+
+              return {
+                ...requestData,
+                resolvedUser: userData,
+                resolvedLocation: locationData,
+                task_date: requestData.preferred_date ? new Date(requestData.preferred_date) : new Date(),
+                task_status: requestData.request_status || 'pending'
+              };
+            })
+          );
           
-          console.log(`📊 Processed ${recordsData.length} approved records for display`);
-          setApprovedRecords(recordsData);
-          setLoading(false);
+          console.log(`✅ Processed ${requestsData.length} requests with resolved references`);
+          setPlantingRequests(requestsData);
         }, (error) => {
           console.error('❌ Error fetching planting requests:', error);
           setAlert({ 
@@ -133,40 +287,57 @@ const SeedlingAssignmentPage = () => {
             message: 'Error loading planting requests: ' + error.message, 
             severity: 'error' 
           });
-          setLoading(false);
+        });
+
+        // Fetch planting records to check assignments
+        console.log('📝 Fetching planting records...');
+        const recordsQuery = query(collection(firestore, 'plantingrecords'));
+        const recordsUnsubscribe = onSnapshot(recordsQuery, (snapshot) => {
+          const recordsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          console.log(`📝 Found ${recordsData.length} planting records`);
+          setPlantingRecords(recordsData);
+        });
+
+        // Fetch planting tasks
+        console.log('📋 Fetching planting tasks...');
+        const tasksQuery = query(collection(firestore, 'plantingtasks'));
+        const tasksUnsubscribe = onSnapshot(tasksQuery, (snapshot) => {
+          const tasksData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          console.log(`📋 Found ${tasksData.length} planting tasks`);
+          setPlantingTasks(tasksData);
         });
 
         // Fetch recommendations for seedling matching
         console.log('🌿 Fetching recommendations...');
-        const recosSnapshot = await getDocs(collection(firestore, 'Recommendation'));
+        const recosSnapshot = await getDocs(collection(firestore, 'recommendations'));
         const recosData = recosSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        console.log(`🌿 Found ${recosData.length} recommendations`);
-        console.log('🌿 Sample recommendation:', recosData[0]);
         setRecommendations(recosData);
 
         // Fetch users
         console.log('👥 Fetching users...');
         const usersSnapshot = await getDocs(collection(firestore, 'users'));
         const usersData = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        console.log(`👥 Found ${usersData.length} users`);
-        setPlanters(usersData);
+        setUsers(usersData);
 
         // Fetch locations
         console.log('📍 Fetching locations...');
-        const locationsSnapshot = await getDocs(collection(firestore, 'Location'));
+        const locationsSnapshot = await getDocs(collection(firestore, 'locations'));
         const locationsData = locationsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        console.log(`📍 Found ${locationsData.length} locations`);
         setLocations(locationsData);
 
-        // Fetch available seedlings
-        console.log('🌱 Fetching seedlings...');
-        const seedlingsSnapshot = await getDocs(collection(firestore, 'TreeSeedling'));
-        const seedlingsData = seedlingsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        console.log(`🌱 Found ${seedlingsData.length} seedlings`);
-        setSeedlings(seedlingsData);
+        // Fetch ONLY the 3 specific seedlings from seedlingOptions
+        console.log('🌱 Fetching specific seedlings from recommendations...');
+        const specificSeedlingIds = ['ts001', 'ts002', 'ts003'];
+        
+        const specificSeedlings = await fetchSpecificSeedlings(specificSeedlingIds);
+        setSeedlings(specificSeedlings);
+
+        setLoading(false);
 
         return () => {
+          requestsUnsubscribe();
           recordsUnsubscribe();
+          tasksUnsubscribe();
         };
 
       } catch (error) {
@@ -183,97 +354,79 @@ const SeedlingAssignmentPage = () => {
     fetchData();
   }, []);
 
-  // Helper functions
-  const getPlanterDetails = (userId) => {
-    return planters.find(planter => planter.id === userId) || {};
-  };
+  // Handle recoId parameter to auto-open assign dialog
+  useEffect(() => {
+    if (recoId && plantingRequests.length > 0) {
+      const matchedRequest = plantingRequests.find(req => req.id === recoId);
+      if (matchedRequest) {
+        setSelectedRequest(matchedRequest);
+        
+        // Preselect assigned seedling if already exists
+        const assignedSeedlingRef = getAssignedSeedling(matchedRequest.locationRef, matchedRequest.userRef);
+        const assignedSeedlingId = assignedSeedlingRef ? assignedSeedlingRef.split('/').pop() : '';
+        setSelectedSeedling(assignedSeedlingId);
 
-  const getLocationDetails = (locationId) => {
-    return locations.find(location => location.id === locationId) || {};
-  };
-
-  const getSeedlingDetails = (seedlingId) => {
-    return seedlings.find(seedling => seedling.id === seedlingId) || {};
-  };
-
-  // Get recommended seedlings for location with enhanced scoring based on your Firestore structure
-  const getRecommendedSeedlings = (locationId) => {
-    console.log(`🔍 Looking for recommendations for location: ${locationId}`);
-    
-    // Find recommendations that match this location
-    const locationRecommendations = recommendations.filter(reco => {
-      // Check both location and location_id fields to be flexible
-      const recoLocation = reco.location || reco.location_id;
-      console.log(`📍 Checking recommendation ${reco.id}: location="${recoLocation}" vs target="${locationId}"`);
-      return recoLocation === locationId;
-    });
-    
-    console.log(`🌿 Found ${locationRecommendations.length} recommendations for location ${locationId}`);
-    
-    if (locationRecommendations.length === 0) return [];
-    
-    const recommendedSeedlings = [];
-    
-    locationRecommendations.forEach(reco => {
-      console.log(`Processing recommendation ${reco.id} with ${reco.seedlings?.length || 0} seedlings`);
-      
-      if (reco.seedlings && Array.isArray(reco.seedlings)) {
-        reco.seedlings.forEach(seedling => {
-          // Find matching seedling details from TreeSeedling collection
-          const seedlingDetails = seedlings.find(s => 
-            s.id === seedling.seedling_id || 
-            s.id === seedling.id ||
-            s.seedling_commonName === seedling.commonName ||
-            s.seedling_commonName === seedling.seedling_commonName
-          );
-          
-          recommendedSeedlings.push({
-            ...seedling,
-            ...seedlingDetails,
-            // Use your confidence score field name
-            confidence: parseFloat(reco.reco_confidenceScore) || parseFloat(seedling.confidenceScore) || parseFloat(seedling.suitabilityScore) || 0,
-            recommendationId: reco.id,
-            sensorDataId: reco.sensorData_id,
-            inventoryId: reco.inventory_id,
-            generatedDate: reco.reco_generatedDATE
-          });
-        });
+        // Open assign dialog automatically
+        setAssignDialogOpen(true);
       }
-    });
+    }
+  }, [recoId, plantingRequests]);
+
+  // Get recommended seedlings for location based on recommendation data
+  const getRecommendedSeedlings = (request) => {
+    console.log(`🔍 Getting recommendations for request: ${request.id}`);
     
-    console.log(`🎯 Final recommended seedlings: ${recommendedSeedlings.length}`);
+    // Find if there's a recommendation for this request
+    const recommendation = recommendations.find(reco => 
+      reco.locationRef === request.locationRef
+    );
     
-    return recommendedSeedlings
-      .sort((a, b) => b.confidence - a.confidence)
-      .slice(0, 5); // Show top 5 recommendations
+    if (!recommendation || !recommendation.seedlingOptions) {
+      return [];
+    }
+    
+    // Extract seedling IDs from the recommendation's seedlingOptions
+    const recommendedSeedlingIds = recommendation.seedlingOptions.map(option => 
+      option.split('/').pop()
+    );
+    
+    // Filter seedlings to only show the recommended ones
+    const recommendedSeedlings = seedlings.filter(seedling =>
+      recommendedSeedlingIds.includes(seedling.id)
+    );
+    
+    console.log(`✅ Found ${recommendedSeedlings.length} recommended seedlings`);
+    return recommendedSeedlings;
   };
 
-  // Enhanced filtering
-  const filteredRecords = approvedRecords.filter(record => {
-    const planter = getPlanterDetails(record.user_id);
-    const planterName = planter.firstName && planter.lastName 
-      ? `${planter.firstName} ${planter.lastName}` 
-      : planter.email || record.user_id;
-    const location = getLocationDetails(record.location_id);
-    const locationName = location.location_name || record.location_id;
+  // Enhanced filtering for planting requests
+  const filteredRequests = plantingRequests.filter(request => {
+    const userData = request.resolvedUser || {};
+    const planterName = userData.firstName && userData.lastName 
+      ? `${userData.firstName} ${userData.lastName}` 
+      : userData.email || 'Unknown User';
+    const locationData = request.resolvedLocation || {};
+    const locationName = locationData.location_name || 'Unknown Location';
     
-    const matchesSearch = record.record_id?.toLowerCase().includes(filter.toLowerCase()) ||
-                         planterName.toLowerCase().includes(filter.toLowerCase()) ||
-                         locationName.toLowerCase().includes(filter.toLowerCase());
-    
-    const hasNoSeedling = !record.seedling_id || record.seedling_id === '';
-    const matchesAssignmentFilter = !showOnlyUnassigned || hasNoSeedling;
+    const matchesSearch =
+      (request.id?.toLowerCase() || "").includes(filter.toLowerCase()) ||
+      (planterName?.toLowerCase() || "").includes(filter.toLowerCase()) ||
+      (locationName?.toLowerCase() || "").includes(filter.toLowerCase()) ||
+      (request.request_notes?.toLowerCase() || "").includes(filter.toLowerCase());
+
+    const hasAssignment = isRequestAssigned(request.id, request.locationRef, request.userRef);
+    const matchesAssignmentFilter = !showOnlyUnassigned || !hasAssignment;
     
     return matchesSearch && matchesAssignmentFilter;
   });
 
-  // Statistics
+  // Statistics for planting requests
   const stats = {
-    total: approvedRecords.length,
-    unassigned: approvedRecords.filter(r => !r.seedling_id).length,
-    assigned: approvedRecords.filter(r => r.seedling_id).length,
-    urgent: approvedRecords.filter(r => {
-      const plantDate = new Date(r.preferred_date || r.record_datePlanted);
+    total: plantingRequests.length,
+    unassigned: plantingRequests.filter(request => !isRequestAssigned(request.id, request.locationRef, request.userRef)).length,
+    assigned: plantingRequests.filter(request => isRequestAssigned(request.id, request.locationRef, request.userRef)).length,
+    urgent: plantingRequests.filter(request => {
+      const plantDate = new Date(request.preferred_date || request.request_date);
       const today = new Date();
       const daysUntil = Math.ceil((plantDate - today) / (1000 * 60 * 60 * 24));
       return daysUntil <= 7;
@@ -281,85 +434,157 @@ const SeedlingAssignmentPage = () => {
   };
 
   // Create notification for planter when seedling is assigned
-  const createSeedlingAssignmentNotification = async (record, seedlingDetails) => {
+  const createSeedlingAssignmentNotification = async (request, seedlingDetails) => {
     try {
       const notificationData = {
-        type: 'seedling_assigned',
-        title: 'Seedling Assigned to Your Planting Request',
-        message: `Your seedling ${seedlingDetails.seedling_commonName} has been assigned for planting at ${getLocationDetails(record.location_id).location_name}`,
-        data: {
-          recordId: record.id,
-          seedlingId: seedlingDetails.id,
-          locationId: record.location_id,
-          plantingDate: record.record_datePlanted
-        },
-        targetUserId: record.user_id,
-        read: false,
-        resolved: false,
-        priority: 'medium',
-        createdAt: serverTimestamp()
+        userRef: request.userRef,
+        notif_message: `Your seedling ${seedlingDetails.seedling_commonName} has been assigned for planting at ${request.resolvedLocation?.location_name}`,
+        notif_timestamp: serverTimestamp(),
+        notification_type: 'seedling_assigned',
+        read: false
       };
 
-      await addDoc(collection(firestore, 'Notifications'), notificationData);
+      await addDoc(collection(firestore, 'notifications'), notificationData);
     } catch (error) {
       console.error('Error creating notification:', error);
     }
   };
 
   // Handle seedling assignment
-  const handleAssignSeedling = (record) => {
-    setSelectedRecord(record);
-    setSelectedSeedling(record.seedling_id || '');
+  const handleAssignSeedling = (request) => {
+    setSelectedRequest(request);
+    const currentAssignment = getAssignedSeedling(request.locationRef, request.userRef);
+    const currentSeedlingId = currentAssignment ? currentAssignment.split('/').pop() : '';
+    setSelectedSeedling(currentSeedlingId);
     setAssignDialogOpen(true);
   };
 
   const handleSaveSeedlingAssignment = async () => {
     try {
-      const seedlingDetails = getSeedlingDetails(selectedSeedling);
-      
-      const requestRef = doc(firestore, 'PlantingRequest', selectedRecord.id);
-      await updateDoc(requestRef, {
-        seedling_id: selectedSeedling,
-        request_status: 'assigned',
-        assigned_by: user.uid,
-        assignment_date: serverTimestamp(),
-        updated_at: serverTimestamp()
+      if (!selectedRequest || !selectedSeedling) return;
+
+      // 1. Create planting record
+      const recordData = {
+        userRef: selectedRequest.userRef,
+        locationRef: selectedRequest.locationRef,
+        seedlingRef: doc(firestore, 'treeseedlings', selectedSeedling),
+        record_date: selectedRequest.preferred_date || selectedRequest.request_date
+      };
+
+      // Check if planting record exists
+      const existingRecord = plantingRecords.find(record => {
+        const recordLocationStr = typeof record.locationRef === 'string' 
+          ? record.locationRef 
+          : record.locationRef?.path || '';
+        
+        const recordUserStr = typeof record.userRef === 'string'
+          ? record.userRef
+          : record.userRef?.path || '';
+        
+        const requestLocationStr = typeof selectedRequest.locationRef === 'string'
+          ? selectedRequest.locationRef
+          : selectedRequest.locationRef?.path || '';
+        
+        const requestUserStr = typeof selectedRequest.userRef === 'string'
+          ? selectedRequest.userRef
+          : selectedRequest.userRef?.path || '';
+        
+        return recordLocationStr === requestLocationStr && 
+               recordUserStr === requestUserStr;
       });
 
-      // Create notification for planter
-      await createSeedlingAssignmentNotification(selectedRecord, seedlingDetails);
+      if (existingRecord) {
+        await updateDoc(doc(firestore, 'plantingrecords', existingRecord.id), recordData);
+      } else {
+        await addDoc(collection(firestore, 'plantingrecords'), recordData);
+      }
+
+      // 2. Create or update planting task
+      const taskData = {
+        userRef: selectedRequest.userRef,
+        locationRef: selectedRequest.locationRef,
+        seedlingRef: doc(firestore, 'treeseedlings', selectedSeedling),
+        task_status: 'assigned',
+        task_date: selectedRequest.preferred_date || selectedRequest.request_date
+      };
+
+      // Find if there's a recommendation for this request to link to planting task
+      const relatedRecommendation = recommendations.find(reco => 
+        reco.locationRef === selectedRequest.locationRef
+      );
+
+      if (relatedRecommendation) {
+        taskData.recoRef = doc(firestore, 'recommendations', relatedRecommendation.id);
+      }
+
+      // Check if planting task exists
+      const existingTask = plantingTasks.find(task => {
+        const taskLocationStr = typeof task.locationRef === 'string' 
+          ? task.locationRef 
+          : task.locationRef?.path || '';
+        
+        const taskUserStr = typeof task.userRef === 'string'
+          ? task.userRef
+          : task.userRef?.path || '';
+        
+        const requestLocationStr = typeof selectedRequest.locationRef === 'string'
+          ? selectedRequest.locationRef
+          : selectedRequest.locationRef?.path || '';
+        
+        const requestUserStr = typeof selectedRequest.userRef === 'string'
+          ? selectedRequest.userRef
+          : selectedRequest.userRef?.path || '';
+        
+        return taskLocationStr === requestLocationStr && 
+               taskUserStr === requestUserStr;
+      });
+
+      if (existingTask) {
+        await updateDoc(doc(firestore, 'plantingtasks', existingTask.id), taskData);
+      } else {
+        await addDoc(collection(firestore, 'plantingtasks'), taskData);
+      }
+
+      // 3. Update the planting request status
+      await updateDoc(doc(firestore, 'plantingrequests', selectedRequest.id), {
+        request_status: 'assigned_seedling'
+      });
+
+      // 4. Create notification
+      await createSeedlingAssignmentNotification(selectedRequest, seedlings.find(s => s.id === selectedSeedling));
 
       setAssignDialogOpen(false);
-      setSelectedRecord(null);
+      setSelectedRequest(null);
       setSelectedSeedling('');
-      
-      setAlert({ 
-        open: true, 
-        message: `Seedling "${seedlingDetails.seedling_commonName}" successfully assigned! Notification sent to planter.`, 
-        severity: 'success' 
-      });
-    } catch (error) {
-      console.error('Error assigning seedling:', error);
-      setAlert({ 
-        open: true, 
-        message: 'Failed to assign seedling: ' + error.message, 
-        severity: 'error' 
-      });
+      setAlert({ open: true, message: 'Seedling assigned successfully!', severity: 'success' });
+    } catch (err) {
+      console.error(err);
+      setAlert({ open: true, message: err.message, severity: 'error' });
     }
   };
 
-  const handleViewRecord = (record) => {
-    setSelectedRecord(record);
+  const handleViewRequest = (request) => {
+    setSelectedRequest(request);
     setDetailDialogOpen(true);
   };
 
-  const formatDate = (date) => {
-    if (!date) return 'N/A';
-    return new Date(date).toLocaleDateString();
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    const options = {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+      timeZoneName: 'short'
+    };
+    return new Date(dateString).toLocaleString('en-US', options);
   };
 
-  const getPriorityLevel = (record) => {
-    const plantDate = new Date(record.preferred_date || record.record_datePlanted);
+  const getPriorityLevel = (request) => {
+    const plantDate = new Date(request.preferred_date || request.request_date);
     const today = new Date();
     const daysUntil = Math.ceil((plantDate - today) / (1000 * 60 * 60 * 24));
     
@@ -377,7 +602,7 @@ const SeedlingAssignmentPage = () => {
         <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - ${drawerWidth}px)` } }}>
           <Toolbar />
           <LinearProgress />
-          <Typography sx={{ mt: 2 }}>Loading approved planting requests...</Typography>
+          <Typography sx={{ mt: 2 }}>Loading planting requests...</Typography>
         </Box>
       </Box>
     );
@@ -410,7 +635,7 @@ const SeedlingAssignmentPage = () => {
                 Tree Seedling Assignment
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                Assign suitable tree seedlings to approved planting requests
+                Assign suitable tree seedlings to planting requests
               </Typography>
             </Box>
             
@@ -430,74 +655,7 @@ const SeedlingAssignmentPage = () => {
               )}
             </Box>
           </Box>
-
-          {/* Stats Cards */}
-          <Grid container spacing={2} sx={{ mb: 3 }}>
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ borderRadius: 2, boxShadow: 2 }}>
-                <CardContent>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <Box sx={{ bgcolor: alpha(theme.palette.primary.main, 0.2), p: 1.5, borderRadius: 2, mr: 2 }}>
-                      <TaskIcon color="primary" />
-                    </Box>
-                    <Box>
-                      <Typography variant="h5" fontWeight="bold">{stats.total}</Typography>
-                      <Typography variant="body2" color="text.secondary">Approved Requests</Typography>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
             
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ borderRadius: 2, boxShadow: 2 }}>
-                <CardContent>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <Box sx={{ bgcolor: alpha(theme.palette.warning.main, 0.2), p: 1.5, borderRadius: 2, mr: 2 }}>
-                      <SeedlingIcon color="warning" />
-                    </Box>
-                    <Box>
-                      <Typography variant="h5" fontWeight="bold">{stats.unassigned}</Typography>
-                      <Typography variant="body2" color="text.secondary">Need Assignment</Typography>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-            
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ borderRadius: 2, boxShadow: 2 }}>
-                <CardContent>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <Box sx={{ bgcolor: alpha(theme.palette.success.main, 0.2), p: 1.5, borderRadius: 2, mr: 2 }}>
-                      <TreeIcon color="success" />
-                    </Box>
-                    <Box>
-                      <Typography variant="h5" fontWeight="bold">{stats.assigned}</Typography>
-                      <Typography variant="body2" color="text.secondary">Assigned</Typography>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-            
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ borderRadius: 2, boxShadow: 2 }}>
-                <CardContent>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <Box sx={{ bgcolor: alpha(theme.palette.error.main, 0.2), p: 1.5, borderRadius: 2, mr: 2 }}>
-                      <CalendarIcon color="error" />
-                    </Box>
-                    <Box>
-                      <Typography variant="h5" fontWeight="bold">{stats.urgent}</Typography>
-                      <Typography variant="body2" color="text.secondary">Urgent (7 days)</Typography>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
-
           {/* Filters */}
           <Paper sx={{ mb: 3, p: 2, borderRadius: 2 }}>
             <Grid container spacing={2} alignItems="center">
@@ -505,11 +663,11 @@ const SeedlingAssignmentPage = () => {
                 <TextField
                   fullWidth
                   size="small"
-                  label="Search assignments"
+                  label="Search requests"
                   variant="outlined"
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
-                  placeholder="Search by Record ID, Planter, or Location"
+                  placeholder="Search by Request ID, Planter, Location, or Notes"
                   InputProps={{
                     startAdornment: <SearchIcon sx={{ color: 'action.active', mr: 1 }} />
                   }}
@@ -528,41 +686,44 @@ const SeedlingAssignmentPage = () => {
               </Grid>
               <Grid item xs={12} md={2}>
                 <Typography variant="body2" color="text.secondary">
-                  {filteredRecords.length} result{filteredRecords.length !== 1 ? 's' : ''}
+                  {filteredRequests.length} result{filteredRequests.length !== 1 ? 's' : ''}
                 </Typography>
               </Grid>
             </Grid>
           </Paper>
 
-          {/* Assignment Cards */}
+          {/* Request Cards */}
           <Grid container spacing={3}>
-            {filteredRecords.length === 0 ? (
+            {filteredRequests.length === 0 ? (
               <Grid item xs={12}>
                 <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 2 }}>
                   <TreeIcon sx={{ fontSize: 64, color: '#ccc', mb: 2 }} />
                   <Typography variant="h6" color="text.secondary">
-                    No approved requests found
+                    No planting requests found
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     {showOnlyUnassigned 
-                      ? "All approved requests have been assigned seedlings!"
-                      : "No approved planting requests match your search criteria."}
+                      ? "All requests have been assigned seedlings!"
+                      : "No planting requests match your search criteria."}
                   </Typography>
                 </Paper>
               </Grid>
             ) : (
-              filteredRecords.map((record) => {
-                const planter = getPlanterDetails(record.user_id);
-                const planterName = planter.firstName && planter.lastName 
-                  ? `${planter.firstName} ${planter.lastName}` 
-                  : planter.email || record.user_id;
-                const location = getLocationDetails(record.location_id);
-                const seedling = getSeedlingDetails(record.seedling_id);
-                const priority = getPriorityLevel(record);
-                const recommendedSeedlings = getRecommendedSeedlings(record.location_id);
+              filteredRequests.map((request) => {
+                const userData = request.resolvedUser || {};
+                const planterName = userData.firstName && userData.lastName 
+                  ? `${userData.firstName} ${userData.lastName}` 
+                  : userData.email || 'Unknown User';
+                const locationData = request.resolvedLocation || {};
+                const priority = getPriorityLevel(request);
+                const recommendedSeedlings = getRecommendedSeedlings(request);
+                const isAssigned = isRequestAssigned(request.id, request.locationRef, request.userRef);
+                const assignedSeedlingRef = getAssignedSeedling(request.locationRef, request.userRef);
+                const assignedSeedlingId = assignedSeedlingRef ? assignedSeedlingRef.split('/').pop() : null;
+                const assignedSeedling = assignedSeedlingId ? seedlings.find(s => s.id === assignedSeedlingId) : null;
 
                 return (
-                  <Grid item xs={12} md={6} lg={4} key={record.id}>
+                  <Grid item xs={12} md={6} lg={4} key={request.id}>
                     <Card sx={{ 
                       borderRadius: 2, 
                       height: '100%',
@@ -589,7 +750,7 @@ const SeedlingAssignmentPage = () => {
                         }
                         title={
                           <Typography variant="h6" noWrap>
-                            {record.record_id}
+                            Request {request.id}
                           </Typography>
                         }
                         subheader={
@@ -611,7 +772,7 @@ const SeedlingAssignmentPage = () => {
                               {planterName}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
-                              {planter.role || 'Community Member'}
+                              {userData.role || 'Community Member'}
                             </Typography>
                           </Box>
                         </Box>
@@ -621,10 +782,10 @@ const SeedlingAssignmentPage = () => {
                           <LocationIcon sx={{ mr: 1, color: 'action.active' }} />
                           <Box>
                             <Typography variant="body2" fontWeight="medium">
-                              {location.location_name || 'Unknown Location'}
+                              {locationData.location_name || 'Unknown Location'}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
-                              {location.location_type || 'Planting Site'}
+                              {locationData.location_type || 'Planting Site'}
                             </Typography>
                           </Box>
                         </Box>
@@ -633,12 +794,24 @@ const SeedlingAssignmentPage = () => {
                         <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                           <CalendarIcon sx={{ mr: 1, color: 'action.active' }} />
                           <Typography variant="body2">
-                            {formatDate(record.record_datePlanted)}
+                            {formatDate(request.preferred_date)}
                           </Typography>
                         </Box>
 
+                        {/* Request Notes */}
+                        {request.request_notes && (
+                          <Box sx={{ mb: 2 }}>
+                            <Typography variant="caption" color="text.secondary" display="block">
+                              Notes:
+                            </Typography>
+                            <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
+                              {request.request_notes}
+                            </Typography>
+                          </Box>
+                        )}
+
                         {/* Current Assignment Status */}
-                        {record.seedling_id ? (
+                        {isAssigned && assignedSeedling ? (
                           <Box sx={{ bgcolor: 'success.light', p: 2, borderRadius: 1, mb: 2 }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                               <TreeIcon sx={{ mr: 1, color: 'success.main' }} />
@@ -647,10 +820,10 @@ const SeedlingAssignmentPage = () => {
                               </Typography>
                             </Box>
                             <Typography variant="body2">
-                              {seedling.seedling_commonName || seedling.id}
+                              {assignedSeedling.seedling_commonName || assignedSeedling.id}
                             </Typography>
                             <Typography variant="caption" color="success.main">
-                              {seedling.seedling_scientificName || 'Scientific name not available'}
+                              {assignedSeedling.seedling_scientificName || 'Scientific name not available'}
                             </Typography>
                           </Box>
                         ) : (
@@ -661,38 +834,46 @@ const SeedlingAssignmentPage = () => {
                           </Alert>
                         )}
 
-                        {/* Recommendations Preview */}
-                        {recommendedSeedlings.length > 0 && !record.seedling_id && (
-                          <Box sx={{ bgcolor: 'primary.light', p: 2, borderRadius: 1, mb: 2 }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                              <RecommendIcon sx={{ mr: 1, color: 'primary.main' }} />
-                              <Typography variant="body2" fontWeight="bold" color="primary.main">
-                                AI Recommendations Available
-                              </Typography>
-                            </Box>
-                            <Typography variant="caption">
-                              {recommendedSeedlings.length} suitable species found
+                        {/* Show recommended seedlings if available */}
+                        {recommendedSeedlings.length > 0 && !isAssigned && (
+                          <Box sx={{ bgcolor: 'info.light', p: 1.5, borderRadius: 1, mb: 2 }}>
+                            <Typography variant="caption" fontWeight="bold" display="block" color="info.main">
+                              AI Recommended Species:
+                            </Typography>
+                            <Typography variant="caption" display="block">
+                              {recommendedSeedlings.map(s => s.seedling_commonName).join(', ')}
                             </Typography>
                           </Box>
                         )}
+
+                        {/* Request Status */}
+                        <Chip 
+                          label={request.request_status || 'pending'} 
+                          color={
+                            request.request_status === 'assigned_seedling' ? 'success' :
+                            request.request_status === 'pending' ? 'warning' : 'default'
+                          }
+                          size="small"
+                          variant="outlined"
+                        />
                       </CardContent>
 
                       <CardActions sx={{ justifyContent: 'space-between', px: 2, pb: 2 }}>
                         <Button
                           size="small"
                           startIcon={<ViewIcon />}
-                          onClick={() => handleViewRecord(record)}
+                          onClick={() => handleViewRequest(request)}
                         >
                           View Details
                         </Button>
                         <Button
                           variant="contained"
                           size="small"
-                          startIcon={record.seedling_id ? <TreeIcon /> : <AssignIcon />}
-                          onClick={() => handleAssignSeedling(record)}
-                          color={record.seedling_id ? "success" : "primary"}
+                          startIcon={isAssigned ? <TreeIcon /> : <AssignIcon />}
+                          onClick={() => handleAssignSeedling(request)}
+                          color={isAssigned ? "success" : "primary"}
                         >
-                          {record.seedling_id ? "Reassign" : "Assign Tree"}
+                          {isAssigned ? "Reassign" : "Assign Tree"}
                         </Button>
                       </CardActions>
                     </Card>
@@ -703,58 +884,52 @@ const SeedlingAssignmentPage = () => {
           </Grid>
         </Box>
 
-        {/* Enhanced Seedling Assignment Dialog */}
         <Dialog open={assignDialogOpen} onClose={() => setAssignDialogOpen(false)} maxWidth="lg" fullWidth>
           <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <TreeIcon /> Assign Tree Seedling
-              {selectedRecord && (
+              {selectedRequest && (
                 <Chip 
-                  label={selectedRecord.record_id} 
+                  label={`Request ${selectedRequest.id}`} 
                   sx={{ bgcolor: 'white', color: 'primary.main', ml: 1 }} 
                 />
               )}
             </Box>
           </DialogTitle>
           <DialogContent>
-            {selectedRecord && (
+            {selectedRequest && (
               <Box sx={{ mt: 2 }}>
                 {/* Request Summary */}
                 <Alert severity="info" sx={{ mb: 3 }}>
                   <Typography variant="body2">
-                    <strong>Planter:</strong> {getPlanterDetails(selectedRecord.user_id).firstName} {getPlanterDetails(selectedRecord.user_id).lastName} • 
-                    <strong> Location:</strong> {getLocationDetails(selectedRecord.location_id).location_name} • 
-                    <strong> Date:</strong> {formatDate(selectedRecord.record_datePlanted)}
+                    <strong>Planter:</strong> {selectedRequest.resolvedUser?.firstName} {selectedRequest.resolvedUser?.lastName} • 
+                    <strong> Location:</strong> {selectedRequest.resolvedLocation?.location_name} • 
+                    <strong> Preferred Date:</strong> {formatDate(selectedRequest.preferred_date)}
                   </Typography>
+                  {selectedRequest.request_notes && (
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      <strong>Notes:</strong> {selectedRequest.request_notes}
+                    </Typography>
+                  )}
                 </Alert>
 
                 <Grid container spacing={3}>
-                  {/* AI Recommendations */}
-                  <Grid item xs={12}>
-                    <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
-                      <RecommendIcon sx={{ mr: 1, color: 'primary.main' }} />
-                      AI-Powered Recommendations
-                    </Typography>
-                    
-                    {(() => {
-                      const recommendedSeedlings = getRecommendedSeedlings(selectedRecord.location_id);
-                      
-                      if (recommendedSeedlings.length === 0) {
-                        return (
-                          <Alert severity="warning" sx={{ mb: 2 }}>
-                            No AI recommendations available for this location. Please select from all available seedlings below.
-                          </Alert>
-                        );
-                      }
-
+                  {/* Show recommended seedlings if available */}
+                  {(() => {
+                    const recommendedSeedlings = getRecommendedSeedlings(selectedRequest);
+                    if (recommendedSeedlings.length > 0) {
                       return (
-                        <Box sx={{ mb: 3 }}>
+                        <Grid item xs={12}>
+                          <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                            <RecommendIcon sx={{ mr: 1, color: 'primary.main' }} />
+                            AI Recommended Seedlings
+                          </Typography>
                           <Typography variant="body2" color="text.secondary" gutterBottom>
-                            Based on environmental analysis and location characteristics:
+                            Based on environmental analysis of this location
                           </Typography>
                           <Grid container spacing={2}>
-                            {recommendedSeedlings.map((seedling, index) => (
-                              <Grid item xs={12} md={6} key={index}>
+                            {recommendedSeedlings.map((seedling) => (
+                              <Grid item xs={12} md={4} key={seedling.id}>
                                 <Card 
                                   variant={selectedSeedling === seedling.id ? "elevation" : "outlined"}
                                   sx={{ 
@@ -766,107 +941,44 @@ const SeedlingAssignmentPage = () => {
                                   onClick={() => setSelectedSeedling(seedling.id)}
                                 >
                                   <CardContent>
-                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-                                      <Box sx={{ flex: 1 }}>
-                                        <Typography variant="h6" gutterBottom>
-                                          {seedling.seedling_commonName || seedling.commonName || 'Unknown Species'}
-                                        </Typography>
-                                        <Typography variant="body2" color="text.secondary" gutterBottom>
-                                          {seedling.seedling_scientificName || seedling.scientificName || 'Scientific name not available'}
-                                        </Typography>
-                                      </Box>
-                                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                                        <Typography variant="caption" color="text.secondary">
-                                          Suitability
-                                        </Typography>
-                                        <Rating 
-                                          value={seedling.confidence || 0} 
-                                          max={1} 
-                                          precision={0.1} 
-                                          readOnly 
-                                          size="small"
-                                        />
-                                        <Typography variant="caption" color="success.main" fontWeight="bold">
-                                          {Math.round((seedling.confidence || 0) * 100)}%
-                                        </Typography>
-                                      </Box>
-                                    </Box>
-
-                                    {/* Environmental Factors */}
-                                    {seedling.environmentalMatch && (
-                                      <Box sx={{ mb: 2 }}>
-                                        <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                                          Environmental Match:
-                                        </Typography>
-                                        <Stack direction="row" spacing={1} flexWrap="wrap">
-                                          {seedling.environmentalMatch.soilType && (
-                                            <Chip 
-                                              icon={<TerrainIcon />} 
-                                              label={`Soil: ${seedling.environmentalMatch.soilType}`}
-                                              size="small" 
-                                              variant="outlined"
-                                            />
-                                          )}
-                                          {seedling.environmentalMatch.waterLevel && (
-                                            <Chip 
-                                              icon={<WaterIcon />} 
-                                              label={`Water: ${seedling.environmentalMatch.waterLevel}`}
-                                              size="small" 
-                                              variant="outlined"
-                                            />
-                                          )}
-                                          {seedling.environmentalMatch.sunlight && (
-                                            <Chip 
-                                              icon={<SunIcon />} 
-                                              label={`Sun: ${seedling.environmentalMatch.sunlight}`}
-                                              size="small" 
-                                              variant="outlined"
-                                            />
-                                          )}
-                                        </Stack>
-                                      </Box>
-                                    )}
-
-                                    {/* Growth Projection */}
-                                    {seedling.growthProjection && (
-                                      <Accordion>
-                                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                          <Typography variant="caption">
-                                            Growth Projection & Benefits
-                                          </Typography>
-                                        </AccordionSummary>
-                                        <AccordionDetails>
-                                          <Typography variant="body2" color="text.secondary">
-                                            <strong>Mature Height:</strong> {seedling.growthProjection.matureHeight || 'Unknown'}<br/>
-                                            <strong>Growth Rate:</strong> {seedling.growthProjection.growthRate || 'Unknown'}<br/>
-                                            <strong>Carbon Absorption:</strong> {seedling.growthProjection.carbonAbsorption || 'Unknown'}<br/>
-                                            <strong>Ecological Benefits:</strong> {seedling.growthProjection.ecologicalBenefits || 'Various environmental benefits'}
-                                          </Typography>
-                                        </AccordionDetails>
-                                      </Accordion>
+                                    <Typography variant="h6" gutterBottom>
+                                      {seedling.seedling_commonName || seedling.id}
+                                    </Typography>
+                                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                                      {seedling.seedling_scientificName || 'Scientific name not available'}
+                                    </Typography>
+                                    {seedling.seedling_isNative && (
+                                      <Chip 
+                                        icon={<EcoIcon />} 
+                                        label="Native Species" 
+                                        color="success" 
+                                        size="small"
+                                        variant="outlined"
+                                        sx={{ mt: 1 }}
+                                      />
                                     )}
                                   </CardContent>
                                 </Card>
                               </Grid>
                             ))}
                           </Grid>
-                        </Box>
+                          <Divider sx={{ my: 3 }} />
+                        </Grid>
                       );
-                    })()}
-                  </Grid>
+                    }
+                    return null;
+                  })()}
 
-                  <Divider sx={{ width: '100%', my: 2 }} />
-
-                  {/* All Available Seedlings */}
+                  {/* All Available Seedlings (only the 3 specific ones) */}
                   <Grid item xs={12}>
                     <Typography variant="h6" gutterBottom>
-                      All Available Seedlings
+                      Available Seedlings
                     </Typography>
                     <FormControl fullWidth size="small">
-                      <InputLabel>Select or confirm seedling assignment</InputLabel>
+                      <InputLabel>Select seedling to assign</InputLabel>
                       <Select
                         value={selectedSeedling}
-                        label="Select or confirm seedling assignment"
+                        label="Select seedling to assign"
                         onChange={(e) => setSelectedSeedling(e.target.value)}
                       >
                         <MenuItem value="">
@@ -881,9 +993,11 @@ const SeedlingAssignmentPage = () => {
                               <Typography variant="caption" color="text.secondary">
                                 {seedling.seedling_scientificName || 'Scientific name not available'}
                               </Typography>
-                              <Typography variant="caption" color="primary">
-                                Stock: {seedling.stock || 'Unknown'} available
-                              </Typography>
+                              {seedling.seedling_isNative && (
+                                <Typography variant="caption" color="success.main">
+                                  Native Species
+                                </Typography>
+                              )}
                             </Box>
                           </MenuItem>
                         ))}
@@ -908,70 +1022,73 @@ const SeedlingAssignmentPage = () => {
           </DialogActions>
         </Dialog>
 
-        {/* Record Detail Dialog */}
+        {/* Request Detail Dialog */}
         <Dialog open={detailDialogOpen} onClose={() => setDetailDialogOpen(false)} maxWidth="md" fullWidth>
           <DialogTitle>
-            Request Details: {selectedRecord?.record_id}
+            Request Details: {selectedRequest?.id}
           </DialogTitle>
           <DialogContent>
-            {selectedRecord && (
+            {selectedRequest && (
               <Grid container spacing={2} sx={{ mt: 1 }}>
                 <Grid item xs={12} md={6}>
                   <Typography variant="subtitle2" color="text.secondary">Planter Information</Typography>
                   <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
-                    {(() => {
-                      const planter = getPlanterDetails(selectedRecord.user_id);
-                      return (
-                        <>
-                          <Typography><strong>Name:</strong> {planter.firstName} {planter.lastName}</Typography>
-                          <Typography><strong>Email:</strong> {planter.email}</Typography>
-                          <Typography><strong>Phone:</strong> {planter.phoneNumber || 'N/A'}</Typography>
-                          <Typography><strong>Role:</strong> {planter.role || 'Community Member'}</Typography>
-                        </>
-                      );
-                    })()}
+                    <Typography><strong>Name:</strong> {selectedRequest.resolvedUser?.firstName} {selectedRequest.resolvedUser?.lastName}</Typography>
+                    <Typography><strong>Email:</strong> {selectedRequest.resolvedUser?.email}</Typography>
+                    <Typography><strong>Phone:</strong> {selectedRequest.resolvedUser?.phoneNumber || 'N/A'}</Typography>
+                    <Typography><strong>Role:</strong> {selectedRequest.resolvedUser?.role || 'Community Member'}</Typography>
                   </Box>
                 </Grid>
                 
                 <Grid item xs={12} md={6}>
                   <Typography variant="subtitle2" color="text.secondary">Location Information</Typography>
                   <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
-                    {(() => {
-                      const location = getLocationDetails(selectedRecord.location_id);
-                      return (
-                        <>
-                          <Typography><strong>Name:</strong> {location.location_name}</Typography>
-                          <Typography><strong>Type:</strong> {location.location_type || 'Planting Site'}</Typography>
-                          <Typography><strong>Area:</strong> {location.area || 'Unknown'} hectares</Typography>
-                          <Typography><strong>Soil Type:</strong> {location.soilType || 'Unknown'}</Typography>
-                        </>
-                      );
-                    })()}
+                    <Typography><strong>Name:</strong> {selectedRequest.resolvedLocation?.location_name}</Typography>
+                    <Typography><strong>Coordinates:</strong> {selectedRequest.resolvedLocation?.location_latitude}, {selectedRequest.resolvedLocation?.location_longitude}</Typography>
                   </Box>
                 </Grid>
                 
                 <Grid item xs={12}>
-                  <Typography variant="subtitle2" color="text.secondary">Planting Details</Typography>
+                  <Typography variant="subtitle2" color="text.secondary">Request Details</Typography>
                   <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
-                    <Typography><strong>Proposed Date:</strong> {formatDate(selectedRecord.record_datePlanted)}</Typography>
-                    <Typography><strong>Priority:</strong> {getPriorityLevel(selectedRecord).label}</Typography>
-                    <Typography><strong>Status:</strong> {selectedRecord.status}</Typography>
-                    {selectedRecord.approved_at && (
-                      <Typography><strong>Approved:</strong> {formatDate(selectedRecord.approved_at.toDate())}</Typography>
-                    )}
+                    <Typography><strong>Preferred Date:</strong> {formatDate(selectedRequest.preferred_date)}</Typography>
+                    <Typography><strong>Request Date:</strong> {formatDate(selectedRequest.request_date)}</Typography>
+                    <Typography><strong>Priority:</strong> {getPriorityLevel(selectedRequest).label}</Typography>
+                    <Typography><strong>Status:</strong> {selectedRequest.request_status}</Typography>
+                    <Typography><strong>Notes:</strong> {selectedRequest.request_notes || 'N/A'}</Typography>
                   </Box>
                 </Grid>
+
+                {/* Show assigned seedling if exists */}
+                {(() => {
+                  const assignedSeedlingRef = getAssignedSeedling(selectedRequest.locationRef, selectedRequest.userRef);
+                  if (assignedSeedlingRef) {
+                    const seedlingId = assignedSeedlingRef.split('/').pop();
+                    const seedling = seedlings.find(s => s.id === seedlingId);
+                    return (
+                      <Grid item xs={12}>
+                        <Typography variant="subtitle2" color="text.secondary">Assigned Seedling</Typography>
+                        <Box sx={{ mt: 1, p: 2, bgcolor: '#e8f5e8', borderRadius: 1 }}>
+                          <Typography><strong>Species:</strong> {seedling?.seedling_commonName || 'Unknown'}</Typography>
+                          <Typography><strong>Scientific Name:</strong> {seedling?.seedling_scientificName || 'N/A'}</Typography>
+                          <Typography><strong>Native:</strong> {seedling?.seedling_isNative ? 'Yes' : 'No'}</Typography>
+                        </Box>
+                      </Grid>
+                    );
+                  }
+                  return null;
+                })()}
               </Grid>
             )}
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setDetailDialogOpen(false)}>Close</Button>
-            {selectedRecord && (
+            {selectedRequest && (
               <Button 
                 variant="contained" 
                 onClick={() => {
                   setDetailDialogOpen(false);
-                  handleAssignSeedling(selectedRecord);
+                  handleAssignSeedling(selectedRequest);
                 }}
               >
                 Assign Seedling

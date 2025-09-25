@@ -1,4 +1,4 @@
-// src/pages/Login.js - Corrected version with email verification checks
+// src/pages/Login.js
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -12,102 +12,44 @@ import {
   Alert,
   IconButton,
   InputAdornment,
-  CircularProgress,
 } from '@mui/material';
 import { Visibility, VisibilityOff, Email, Lock } from '@mui/icons-material';
-import { Link as RouterLink, useNavigate, useLocation } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.js';
 
 const Login = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  const { 
-    login, 
-    user, 
-    loading: authLoading, 
-    error: authError, 
-    setError: clearAuthError,
-    sendVerificationEmail 
-  } = useAuth();
+  const { login, user, error, setError } = useAuth();
 
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
-  const [showResendVerification, setShowResendVerification] = useState(false);
-  const [verificationSent, setVerificationSent] = useState(false);
-  const [resendLoading, setResendLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  // Check for verification success from URL params
   useEffect(() => {
-    const urlParams = new URLSearchParams(location.search);
-    if (urlParams.get('verified') === 'true') {
-      // User came from email verification link
-      window.history.replaceState({}, document.title, "/login");
-    }
-  }, [location]);
-
-  // Redirect if user is already logged in and verified
-  useEffect(() => {
-    if (user && user.emailVerified) {
-      navigate('/dashboard');
-    }
-  }, [user, navigate]);
-
-  // Clear auth errors when component mounts
-  useEffect(() => {
-    clearAuthError();
-  }, [clearAuthError]);
+    if (user) navigate('/dashboard');
+    setError('');
+  }, [user, navigate, setError]);
 
   const handleChange = (e) => {
-    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-    
-    // Clear errors and verification states when user types
-    if (authError) clearAuthError();
-    if (showResendVerification) setShowResendVerification(false);
+    setFormData((s) => ({ ...s, [e.target.name]: e.target.value }));
+    if (error) setError('');
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    // Clear previous states
-    clearAuthError();
-    setShowResendVerification(false);
-    setVerificationSent(false);
-    
-    // Validate form
-    if (!formData.email.trim() || !formData.password.trim()) {
-      return; // Let HTML5 validation handle this
-    }
-
-    try {
-      const result = await login(formData.email, formData.password);
-      
-      if (result.success) {
-        navigate('/dashboard');
-      } else if (result.requiresVerification) {
-        // Show resend verification option
-        setShowResendVerification(true);
-      }
-      // Errors are handled by AuthContext and shown via authError
-    } catch (error) {
-      console.error('Login error:', error);
-    }
-  };
-
-  const handleResendVerification = async () => {
-    setResendLoading(true);
-    
-    try {
-      const result = await sendVerificationEmail();
-      if (result.success) {
-        setVerificationSent(true);
-        setShowResendVerification(false);
-      }
-    } catch (error) {
-      console.error('Resend verification error:', error);
-    } finally {
-      setResendLoading(false);
-    }
-  };
+  e.preventDefault();
+  setLoading(true);
+  setError(''); // Clear previous errors
+  
+  const result = await login(formData.email, formData.password);
+  
+  if (result.success) {
+    navigate('/dashboard');
+  } else {
+    setError(result.error);
+  }
+  
+  setLoading(false);
+};
 
   return (
     <Box
@@ -120,7 +62,7 @@ const Login = () => {
       }}
     >
       <Grid container sx={{ flex: 1, minHeight: '100vh', margin: 0 }}>
-        {/* Left Panel - Login Form */}
+        {/* Left Panel (Login Form) */}
         <Grid
           item
           xs={12}
@@ -132,6 +74,9 @@ const Login = () => {
             bgcolor: '#f8f9fa',
             p: { xs: 3, md: 6 },
             minHeight: '100vh',
+            margin: 0,
+            width: '100%',
+            flex: 1,
           }}
         >
           <Paper
@@ -145,6 +90,7 @@ const Login = () => {
               alignItems: 'center',
               borderRadius: 3,
               bgcolor: '#ffffff',
+              margin: 0,
             }}
           >
             <Typography 
@@ -162,11 +108,10 @@ const Login = () => {
               color="text.secondary"
               sx={{ mb: 4 }}
             >
-              Sign in to your ReForest account
+              Sign in to your account
             </Typography>
 
-            {/* Error Alert */}
-            {authError && (
+            {error && (
               <Alert 
                 severity="error" 
                 sx={{ 
@@ -175,47 +120,15 @@ const Login = () => {
                   borderRadius: 1
                 }}
               >
-                {authError}
+                {error}
               </Alert>
             )}
 
-            {/* Email Verification Alert */}
-            {showResendVerification && (
-              <Alert 
-                severity="warning"
-                sx={{ mb: 3, width: '100%', borderRadius: 1 }}
-                action={
-                  <Button 
-                    color="inherit" 
-                    size="small" 
-                    onClick={handleResendVerification}
-                    disabled={resendLoading}
-                  >
-                    {resendLoading ? <CircularProgress size={16} color="inherit" /> : 'Resend'}
-                  </Button>
-                }
-              >
-                Please verify your email before logging in. Check your inbox for the verification link.
-              </Alert>
-            )}
-
-            {/* Verification Sent Alert */}
-            {verificationSent && (
-              <Alert 
-                severity="success" 
-                sx={{ mb: 3, width: '100%', borderRadius: 1 }}
-              >
-                Verification email sent! Please check your inbox and click the verification link.
-              </Alert>
-            )}
-
-            {/* Login Form */}
             <Box
               component="form"
               onSubmit={handleSubmit}
               sx={{ width: '100%' }}
             >
-              {/* Email Field */}
               <TextField
                 fullWidth
                 required
@@ -227,7 +140,6 @@ const Login = () => {
                 autoFocus
                 value={formData.email}
                 onChange={handleChange}
-                disabled={authLoading}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -243,7 +155,6 @@ const Login = () => {
                 }}
               />
 
-              {/* Password Field */}
               <TextField
                 fullWidth
                 required
@@ -254,7 +165,6 @@ const Login = () => {
                 autoComplete="current-password"
                 value={formData.password}
                 onChange={handleChange}
-                disabled={authLoading}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -265,10 +175,9 @@ const Login = () => {
                     <InputAdornment position="end">
                       <IconButton
                         size="small"
-                        onClick={() => setShowPassword(!showPassword)}
+                        onClick={() => setShowPassword((s) => !s)}
                         edge="end"
                         aria-label="toggle password visibility"
-                        disabled={authLoading}
                       >
                         {showPassword ? <VisibilityOff /> : <Visibility />}
                       </IconButton>
@@ -279,25 +188,14 @@ const Login = () => {
                   mb: 2,
                   '& .MuiOutlinedInput-root': {
                     borderRadius: 1.5,
-                  },
-                  // Hide browser's native password toggles
-                  '& input[type="password"]::-ms-reveal': {
-                    display: 'none',
-                  },
-                  '& input[type="password"]::-webkit-credentials-auto-fill-button': {
-                    display: 'none',
-                  },
-                  '& input[type="password"]::-webkit-strong-password-auto-fill-button': {
-                    display: 'none',
                   }
                 }}
               />
 
-              {/* Forgot Password Link */}
               <Box sx={{ textAlign: 'right', mb: 3 }}>
                 <Link 
                   component={RouterLink} 
-                  to="/forgot-password" 
+                  to="/forgotpassword" 
                   variant="body2"
                   sx={{ 
                     color: '#2e7d32',
@@ -311,12 +209,11 @@ const Login = () => {
                 </Link>
               </Box>
 
-              {/* Submit Button */}
               <Button
                 type="submit"
                 fullWidth
                 variant="contained"
-                disabled={authLoading || !formData.email.trim() || !formData.password.trim()}
+                disabled={loading}
                 sx={{
                   backgroundColor: '#2e7d32',
                   '&:hover': { backgroundColor: '#1b5e20' },
@@ -333,17 +230,9 @@ const Login = () => {
                   }
                 }}
               >
-                {authLoading ? (
-                  <>
-                    <CircularProgress size={20} color="inherit" sx={{ mr: 1 }} />
-                    Signing In...
-                  </>
-                ) : (
-                  'Sign In'
-                )}
+                {loading ? 'Signing In...' : 'Sign In'}
               </Button>
 
-              {/* Sign Up Link */}
               <Box sx={{ textAlign: 'center', mt: 3 }}>
                 <Typography variant="body2" color="text.secondary">
                   Don't have an account?{' '}
@@ -367,7 +256,7 @@ const Login = () => {
           </Paper>
         </Grid>
 
-        {/* Right Panel - Background Image */}
+        {/* Right Panel (Background Image) */}
         <Grid
           item
           xs={12}
@@ -379,6 +268,8 @@ const Login = () => {
             justifyContent: 'center',
             minHeight: '100vh',
             overflow: 'hidden',
+            width: '500%',
+            flex: 1,
           }}
         >
           <Box

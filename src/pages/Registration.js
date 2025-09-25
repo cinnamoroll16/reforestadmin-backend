@@ -1,5 +1,5 @@
-// src/pages/Registration.js - Fixed version with no double password icons
-import React, { useState, useEffect } from 'react';
+// src/pages/Registration.js
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Paper,
@@ -18,8 +18,6 @@ import {
   Alert,
   IconButton,
   InputAdornment,
-  CircularProgress,
-  Chip,
 } from '@mui/material';
 import {
   Visibility,
@@ -29,26 +27,20 @@ import {
   Lock,
   Nature,
   Security,
-  Business,
-  CheckCircle,
-  Warning,
+  Business
 } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext.js';
+
+// ✅ Firebase imports
+import { auth, firestore } from '../firebase.js';
+import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
 
 const Registration = () => {
   const navigate = useNavigate();
-  const { 
-    register, 
-    validateEmail, 
-    loading: authLoading, 
-    error: authError, 
-    setError: clearAuthError,
-    user 
-  } = useAuth();
-  
   const [formData, setFormData] = useState({
-    name: '',
+    firstName: '',
+    lastName: '',
     email: '',
     password: '',
     confirmPassword: '',
@@ -59,237 +51,118 @@ const Registration = () => {
   const [errors, setErrors] = useState({});
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  
-  // Email validation states
-  const [emailValidation, setEmailValidation] = useState({
-    isValidating: false,
-    isValid: null,
-    isDisposable: false,
-    emailExists: false,
-    suggestion: null
-  });
-
-  // Redirect if user is already logged in
-  useEffect(() => {
-    if (user) {
-      navigate('/dashboard');
-    }
-  }, [user, navigate]);
-
-  // Clear auth errors when component mounts
-  useEffect(() => {
-    clearAuthError();
-  }, [clearAuthError]);
+  const [loading, setLoading] = useState(false);
+  const [serverError, setServerError] = useState('');
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-    
-    // Clear field errors
-    if (errors[name]) {
-      setErrors((prev) => ({ ...prev, [name]: '' }));
-    }
-
-    // Real-time email validation
-    if (name === 'email' && value.trim()) {
-      debounceEmailValidation(value.trim());
-    }
-  };
-
-  // Debounce email validation
-  const debounceEmailValidation = (() => {
-    let timeoutId;
-    return (email) => {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        validateEmailReal(email);
-      }, 500);
-    };
-  })();
-
-  const validateEmailReal = async (email) => {
-    if (!email || !/\S+@\S+\.\S+/.test(email)) {
-      setEmailValidation({ 
-        isValidating: false, 
-        isValid: false, 
-        isDisposable: false, 
-        emailExists: false,
-        suggestion: null 
-      });
-      return;
-    }
-
-    setEmailValidation(prev => ({ ...prev, isValidating: true }));
-
-    try {
-      const validation = await validateEmail(email);
-      setEmailValidation({
-        isValidating: false,
-        isValid: validation.isValid,
-        isDisposable: validation.isDisposable,
-        emailExists: validation.emailExists,
-        suggestion: validation.suggestion
-      });
-    } catch (error) {
-      console.error('Email validation error:', error);
-      setEmailValidation({
-        isValidating: false,
-        isValid: null,
-        isDisposable: false,
-        emailExists: false,
-        suggestion: null
-      });
-    }
+    setFormData((s) => ({ ...s, [name]: value }));
+    if (errors[name]) setErrors((s) => ({ ...s, [name]: '' }));
   };
 
   const validateForm = () => {
-    const newErrors = {};
-    
-    // Name validation
-    if (!formData.name.trim()) {
-      newErrors.name = 'Name is required';
-    } else if (formData.name.trim().length < 2) {
-      newErrors.name = 'Name must be at least 2 characters';
-    }
-
-    // Email validation
+    const errors = {};
+    if (!formData.firstName.trim()) errors.firstName = 'First name is required';
+    if (!formData.lastName.trim()) errors.lastName = 'Last name is required';
     if (!formData.email.trim()) {
-      newErrors.email = 'Email is required';
+      errors.email = 'Email is required';
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'Email is invalid';
-    } else if (emailValidation.emailExists) {
-      newErrors.email = 'This email is already registered';
-    } else if (emailValidation.isDisposable) {
-      newErrors.email = 'Please use a permanent email address';
+      errors.email = 'Email is invalid';
     }
-
-    // Password validation
     if (!formData.password) {
-      newErrors.password = 'Password is required';
+      errors.password = 'Password is required';
     } else if (formData.password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters';
-    } else if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(formData.password)) {
-      newErrors.password = 'Password must contain uppercase, lowercase, and number';
+      errors.password = 'Password must be at least 8 characters';
     }
-
-    // Confirm password validation
     if (formData.password !== formData.confirmPassword) {
-      newErrors.confirmPassword = 'Passwords do not match';
+      errors.confirmPassword = 'Passwords do not match';
     }
+    if (!formData.role) errors.role = 'Please select a role';
+    if (!acceptedTerms) errors.terms = 'You must accept the terms and conditions';
+    return errors;
+  };
 
-    // Role validation
-    if (!formData.role) {
-      newErrors.role = 'Please select a role';
-    }
-
-    // Terms validation
-    if (!acceptedTerms) {
-      newErrors.terms = 'You must accept the terms and conditions';
-    }
-
-    return newErrors;
+  // Function to convert role value to roleRef path
+  const getRoleRef = (roleValue) => {
+    const roleMapping = {
+      'admin': '/roles/admin',
+      'officer': '/roles/officer', 
+      'stakeholder': '/roles/stakeholder'
+    };
+    return roleMapping[roleValue] || `/roles/${roleValue}`;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    // Clear previous auth errors
-    clearAuthError();
-    
-    // Wait for email validation to complete
-    if (emailValidation.isValidating) {
-      setErrors({ email: 'Please wait for email validation to complete' });
-      return;
-    }
-
+    setServerError('');
     const validationErrors = validateForm();
-    setErrors(validationErrors);
 
     if (Object.keys(validationErrors).length === 0) {
+      setLoading(true);
+
       try {
-        const result = await register(formData);
-        
-        if (result.success) {
-          setSubmitted(true);
-          // Reset form
-          setFormData({ name: '', email: '', password: '', confirmPassword: '', role: '' });
-          setAcceptedTerms(false);
-        } else {
-          // Error will be handled by AuthContext and displayed via authError
-        }
-      } catch (error) {
-        console.error('Registration error:', error);
+        // ✅ Create user in Firebase Auth
+        const userCredential = await createUserWithEmailAndPassword(
+          auth,
+          formData.email,
+          formData.password
+        );
+        const user = userCredential.user;
+
+        // ✅ Update display name in Auth profile
+        const fullName = `${formData.firstName} ${formData.lastName}`;
+        await updateProfile(user, {
+          displayName: fullName,
+        });
+
+        // ✅ Save user data in Firestore with the specified structure
+        await setDoc(doc(firestore, 'users', user.uid), {
+          user_lastname: formData.lastName.trim(),
+          user_firstname: formData.firstName.trim(),
+          user_email: formData.email.toLowerCase().trim(),
+          roleRef: getRoleRef(formData.role),
+          user_password: "hashed_password", // Note: In practice, Firebase Auth handles passwords
+          createdAt: new Date(),
+          status: 'active',
+          uid: user.uid // Keep uid for easy reference
+        });
+
+        setSubmitted(true);
+        setFormData({ 
+          firstName: '', 
+          lastName: '', 
+          email: '', 
+          password: '', 
+          confirmPassword: '', 
+          role: '' 
+        });
+        setAcceptedTerms(false);
+
+        // Redirect after success
+        setTimeout(() => {
+          navigate('/login');
+        }, 2000);
+      } catch (err) {
+        console.error('Registration error:', err);
+        setServerError(err.message);
       }
+
+      setLoading(false);
+    } else {
+      setErrors(validationErrors);
     }
   };
 
   const roleOptions = [
-    { 
-      value: 'planter', 
-      label: 'Planter', 
-      description: 'Plant trees and track progress', 
-      icon: <Nature sx={{ fontSize: 20, color: '#2e7d32' }} /> 
-    },
-    { 
-      value: 'officer', 
-      label: 'DENR Officer', 
-      description: 'Monitor and verify plantations', 
-      icon: <Security sx={{ fontSize: 20, color: '#2e7d32' }} /> 
-    },
-    { 
-      value: 'stakeholder', 
-      label: 'Stakeholder', 
-      description: 'Support and fund initiatives', 
-      icon: <Business sx={{ fontSize: 20, color: '#2e7d32' }} /> 
-    }
+    { value: 'admin', label: 'Admin', description: 'Dako-dako ni HAHAHA', icon: <Nature sx={{ fontSize: 20, color: '#2e7d32' }} /> },
+    { value: 'officer', label: 'DENR Officer', description: 'Monitor and verify plantations', icon: <Security sx={{ fontSize: 20, color: '#2e7d32' }} /> },
+    { value: 'stakeholder', label: 'Stakeholder', description: 'Support and fund initiatives', icon: <Business sx={{ fontSize: 20, color: '#2e7d32' }} /> }
   ];
 
-  // Success state - show email verification message
-  if (submitted) {
-    return (
-      <Box sx={{ 
-        minHeight: '100vh', 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center', 
-        bgcolor: '#f8f9fa', 
-        p: 3 
-      }}>
-        <Paper elevation={3} sx={{ maxWidth: 500, p: 4, textAlign: 'center', borderRadius: 3 }}>
-          <CheckCircle sx={{ fontSize: 80, color: '#2e7d32', mb: 2 }} />
-          <Typography variant="h4" fontWeight="600" gutterBottom>
-            Check Your Email
-          </Typography>
-          <Typography variant="body1" color="text.secondary" sx={{ mb: 3, lineHeight: 1.6 }}>
-            We've sent a verification link to <strong>{formData.email}</strong>.
-            Please click the link in your email to activate your account.
-          </Typography>
-          <Alert severity="info" sx={{ mb: 3 }}>
-            You must verify your email before you can log in. Check your spam folder if you don't see the email.
-          </Alert>
-          <Button
-            variant="contained"
-            onClick={() => navigate('/login')}
-            sx={{
-              backgroundColor: '#2e7d32',
-              '&:hover': { backgroundColor: '#1b5e20' },
-              px: 4,
-              py: 1.5,
-              borderRadius: 1.5,
-              textTransform: 'none',
-            }}
-          >
-            Go to Login
-          </Button>
-        </Paper>
-      </Box>
-    );
-  }
-
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', width: '100%', m: 0, p: 0, overflow: 'hidden' }}>
-      <Grid container sx={{ flex: 1, minHeight: '100vh', m: 0, width: '100%' }}>
-        {/* Left Panel - Background Image */}
+    <Box sx={{ minHeight: '100vh', display: 'flex', width: '100%', m: 0, p: 0 }}>
+      <Grid container sx={{ flex: 1, minHeight: '100vh', m: 0 }}>
+        {/* Left Panel */}
         <Grid
           item
           xs={12}
@@ -301,6 +174,8 @@ const Registration = () => {
             justifyContent: 'center',
             minHeight: '100vh',
             overflow: 'hidden',
+            width: '100%',
+            flex: 1,
           }}
         >
           <Box
@@ -347,7 +222,7 @@ const Registration = () => {
           </Box>
         </Grid>
 
-        {/* Right Panel - Registration Form */}
+        {/* Right Panel */}
         <Grid
           item
           xs={12}
@@ -359,6 +234,8 @@ const Registration = () => {
             bgcolor: '#f8f9fa',
             p: { xs: 2, md: 3 },
             minHeight: '100vh',
+            width: '100%',
+            flex: 1,
           }}
         >
           <Paper
@@ -367,9 +244,11 @@ const Registration = () => {
               width: '100%',
               maxWidth: 450,
               p: { xs: 2.5, md: 3 },
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
               borderRadius: 3,
               bgcolor: '#ffffff',
-              mx: 'auto',
             }}
           >
             <Typography 
@@ -390,39 +269,62 @@ const Registration = () => {
               Create your account to start making a difference
             </Typography>
 
-            {/* Error Alert */}
-            {authError && (
-              <Alert severity="error" sx={{ mb: 2, width: '100%', borderRadius: 1 }}>
-                {authError}
+            {submitted && (
+              <Alert severity="success" sx={{ mb: 2, width: '100%', borderRadius: 1 }}>
+                Account created successfully! You can now log in.
               </Alert>
             )}
 
-            {/* Registration Form */}
-            <Box component="form" onSubmit={handleSubmit} sx={{ width: '100%' }}>
-              {/* Name Field */}
-              <TextField
-                fullWidth
-                required
-                id="name"
-                label="Full Name"
-                name="name"
-                autoComplete="name"
-                value={formData.name}
-                onChange={handleChange}
-                error={!!errors.name}
-                helperText={errors.name}
-                disabled={authLoading}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <AccountCircle fontSize="small" color="action" />
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
-              />
+            {serverError && (
+              <Alert severity="error" sx={{ mb: 2, width: '100%', borderRadius: 1 }}>
+                {serverError}
+              </Alert>
+            )}
 
-              {/* Email Field with Real-time Validation */}
+            {/* Form */}
+            <Box component="form" onSubmit={handleSubmit} sx={{ width: '100%' }}>
+              {/* First Name and Last Name Row */}
+              <Grid container spacing={2} sx={{ mb: 2 }}>
+                <Grid item xs={6}>
+                  <TextField
+                    fullWidth
+                    required
+                    id="firstName"
+                    label="First Name"
+                    name="firstName"
+                    autoComplete="given-name"
+                    value={formData.firstName}
+                    onChange={handleChange}
+                    error={!!errors.firstName}
+                    helperText={errors.firstName}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <AccountCircle fontSize="small" color="action" />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
+                  />
+                </Grid>
+                <Grid item xs={6}>
+                  <TextField
+                    fullWidth
+                    required
+                    id="lastName"
+                    label="Last Name"
+                    name="lastName"
+                    autoComplete="family-name"
+                    value={formData.lastName}
+                    onChange={handleChange}
+                    error={!!errors.lastName}
+                    helperText={errors.lastName}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
+                  />
+                </Grid>
+              </Grid>
+
+              {/* Email */}
               <TextField
                 fullWidth
                 required
@@ -433,63 +335,19 @@ const Registration = () => {
                 autoComplete="email"
                 value={formData.email}
                 onChange={handleChange}
-                error={!!errors.email || emailValidation.isDisposable || emailValidation.emailExists}
-                helperText={
-                  errors.email || 
-                  (emailValidation.isDisposable && 'Please use a permanent email address') ||
-                  (emailValidation.emailExists && 'This email is already registered') ||
-                  (emailValidation.suggestion && emailValidation.suggestion)
-                }
-                disabled={authLoading}
+                error={!!errors.email}
+                helperText={errors.email}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
                       <Email fontSize="small" color="action" />
                     </InputAdornment>
                   ),
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      {emailValidation.isValidating && <CircularProgress size={20} />}
-                      {emailValidation.isValid === true && <CheckCircle fontSize="small" color="success" />}
-                      {(emailValidation.isDisposable || emailValidation.emailExists) && 
-                        <Warning fontSize="small" color="error" />}
-                    </InputAdornment>
-                  ),
                 }}
                 sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
               />
 
-              {/* Email Validation Chips */}
-              {formData.email && (
-                <Box sx={{ mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                  {emailValidation.isDisposable && (
-                    <Chip 
-                      label="Disposable Email Detected" 
-                      color="error" 
-                      size="small" 
-                      variant="outlined" 
-                    />
-                  )}
-                  {emailValidation.emailExists && (
-                    <Chip 
-                      label="Email Already Registered" 
-                      color="error" 
-                      size="small" 
-                      variant="outlined" 
-                    />
-                  )}
-                  {emailValidation.isValid === true && (
-                    <Chip 
-                      label="Valid Email" 
-                      color="success" 
-                      size="small" 
-                      variant="outlined" 
-                    />
-                  )}
-                </Box>
-              )}
-
-              {/* Password Field - FIXED: No more double eye icons */}
+              {/* Password */}
               <TextField
                 fullWidth
                 required
@@ -501,8 +359,7 @@ const Registration = () => {
                 value={formData.password}
                 onChange={handleChange}
                 error={!!errors.password}
-                helperText={errors.password || 'Must contain uppercase, lowercase, and number'}
-                disabled={authLoading}
+                helperText={errors.password}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -513,32 +370,19 @@ const Registration = () => {
                     <InputAdornment position="end">
                       <IconButton
                         size="small"
-                        onClick={() => setShowPassword(!showPassword)}
+                        onClick={() => setShowPassword((s) => !s)}
                         edge="end"
-                        disabled={authLoading}
+                        aria-label="toggle password visibility"
                       >
                         {showPassword ? <VisibilityOff /> : <Visibility />}
                       </IconButton>
                     </InputAdornment>
                   ),
                 }}
-                sx={{ 
-                  mb: 2, 
-                  '& .MuiOutlinedInput-root': { borderRadius: 1.5 },
-                  // Hide browser's native password toggles
-                  '& input[type="password"]::-ms-reveal': {
-                    display: 'none',
-                  },
-                  '& input[type="password"]::-webkit-credentials-auto-fill-button': {
-                    display: 'none',
-                  },
-                  '& input[type="password"]::-webkit-strong-password-auto-fill-button': {
-                    display: 'none',
-                  }
-                }}
+                sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
               />
 
-              {/* Confirm Password Field - FIXED: No more double eye icons */}
+              {/* Confirm Password */}
               <TextField
                 fullWidth
                 required
@@ -550,7 +394,6 @@ const Registration = () => {
                 onChange={handleChange}
                 error={!!errors.confirmPassword}
                 helperText={errors.confirmPassword}
-                disabled={authLoading}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -561,29 +404,16 @@ const Registration = () => {
                     <InputAdornment position="end">
                       <IconButton
                         size="small"
-                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        onClick={() => setShowConfirmPassword((s) => !s)}
                         edge="end"
-                        disabled={authLoading}
+                        aria-label="toggle confirm password visibility"
                       >
                         {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
                       </IconButton>
                     </InputAdornment>
                   ),
                 }}
-                sx={{ 
-                  mb: 2, 
-                  '& .MuiOutlinedInput-root': { borderRadius: 1.5 },
-                  // Hide browser's native password toggles
-                  '& input[type="password"]::-ms-reveal': {
-                    display: 'none',
-                  },
-                  '& input[type="password"]::-webkit-credentials-auto-fill-button': {
-                    display: 'none',
-                  },
-                  '& input[type="password"]::-webkit-strong-password-auto-fill-button': {
-                    display: 'none',
-                  }
-                }}
+                sx={{ mb: 2, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
               />
 
               {/* Role Selection */}
@@ -595,7 +425,6 @@ const Registration = () => {
                   value={formData.role}
                   label="Select Your Role"
                   onChange={handleChange}
-                  disabled={authLoading}
                 >
                   {roleOptions.map((option) => (
                     <MenuItem key={option.value} value={option.value}>
@@ -620,7 +449,7 @@ const Registration = () => {
                 )}
               </FormControl>
 
-              {/* Terms and Conditions */}
+              {/* Terms */}
               <FormControlLabel
                 sx={{ mb: 2, alignItems: 'flex-start' }}
                 control={
@@ -628,7 +457,6 @@ const Registration = () => {
                     checked={acceptedTerms}
                     onChange={(e) => setAcceptedTerms(e.target.checked)}
                     color="primary"
-                    disabled={authLoading}
                   />
                 }
                 label={
@@ -650,17 +478,12 @@ const Registration = () => {
                 </Typography>
               )}
 
-              {/* Submit Button */}
+              {/* Submit */}
               <Button
                 type="submit"
                 fullWidth
                 variant="contained"
-                disabled={
-                  authLoading || 
-                  emailValidation.isValidating || 
-                  emailValidation.isDisposable || 
-                  emailValidation.emailExists
-                }
+                disabled={loading}
                 sx={{
                   backgroundColor: '#2e7d32',
                   '&:hover': { backgroundColor: '#1b5e20' },
@@ -674,30 +497,13 @@ const Registration = () => {
                   '&:hover': { backgroundColor: '#1b5e20', boxShadow: 4 },
                 }}
               >
-                {authLoading ? (
-                  <>
-                    <CircularProgress size={20} color="inherit" sx={{ mr: 1 }} />
-                    Creating Account...
-                  </>
-                ) : (
-                  'Create Account'
-                )}
+                {loading ? 'Creating Account...' : 'Create Account'}
               </Button>
 
-              {/* Sign In Link */}
               <Box sx={{ textAlign: 'center', mt: 2 }}>
                 <Typography variant="body2" color="text.secondary">
                   Already have an account?{' '}
-                  <Link 
-                    component={RouterLink} 
-                    to="/login" 
-                    sx={{ 
-                      color: '#2e7d32', 
-                      textDecoration: 'none', 
-                      fontWeight: 600, 
-                      '&:hover': { textDecoration: 'underline' } 
-                    }}
-                  >
+                  <Link component={RouterLink} to="/login" sx={{ color: '#2e7d32', textDecoration: 'none', fontWeight: 600, '&:hover': { textDecoration: 'underline' } }}>
                     Sign in
                   </Link>
                 </Typography>

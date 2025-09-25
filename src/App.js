@@ -110,7 +110,7 @@ function App() {
               } 
             />
             <Route 
-              path="/forgot-password" 
+              path="/forgotpassword" 
               element={
                 <PublicRoute>
                   <ForgotPassword />
@@ -156,6 +156,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Recommendations />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/tasks/:id" 
+              element={
+                <ProtectedRoute>
+                  <Tasks />
                 </ProtectedRoute>
               } 
             />
