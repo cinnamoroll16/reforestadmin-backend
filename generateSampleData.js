@@ -102,11 +102,12 @@ const seedData = {
 
   plantingtasks: {
     task001: {
-      userRef: "/users/u12345",
+      reqRef: "/plantingrequests/P0e9z8HVuPcA067emaYx",
       recoRef: "/recommendations/reco001",
       locationRef: "/locations/locA",
       task_status: "assigned",
-      task_date: "2025-09-25"
+      task_date: "2025-09-25",
+      taskapprovedby: "/users/u12345"
     }
   },
 
@@ -133,9 +134,17 @@ const seedData = {
   notifications: {
     notif001: {
       userRef: "/users/u12345",
+      taskRef: "/plantingtasks/0C95Ioeti2gPvqBVIcBZ",
       notif_message: "Your planting task has been assigned.",
       notif_timestamp: "2025-09-24T12:45:00Z",
-      notification_type: "task"
+      notification_type: "assigned"
+    },
+    notif002: {
+      userRef: "/users/u12345",
+      reqRef: "/plantingrequests/P0e9z8HVuPcA067emaYx",
+      notif_message: "Your planting task has been assigned.",
+      notif_timestamp: "2025-09-24T12:45:00Z",
+      notification_type: "request"
     }
   }
 };

@@ -1,11 +1,10 @@
 // src/pages/Notification.js
 import React, { useState, useEffect } from 'react';
 import {
-  Box, Typography, Paper, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, Button, Chip, Dialog, DialogTitle, DialogContent,
+  Box, Typography, Paper, Button, Chip, Dialog, DialogTitle, DialogContent,
   DialogActions, TextField, Grid, Card, CardContent, Alert, IconButton,
-  Badge, useMediaQuery, useTheme, Avatar, LinearProgress, alpha,
-  Tabs, Tab, List, ListItem, ListItemIcon, ListItemText, ListItemSecondaryAction, Tooltip,
+  Badge, useMediaQuery, useTheme, Avatar, LinearProgress, alpha, handleMarkNotificationAsRead,
+  Tabs, Tab, useScrollTrigger, Slide, Fab, Zoom
 } from '@mui/material';
 import { 
   collection, getDocs, doc, updateDoc, addDoc, deleteDoc,
@@ -18,21 +17,21 @@ import Navigation from './Navigation.js';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
-import VisibilityIcon from '@mui/icons-material/Visibility';
 import PersonIcon from '@mui/icons-material/Person';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
-import PendingActionsIcon from '@mui/icons-material/PendingActions';
 import SensorsIcon from '@mui/icons-material/Sensors';
 import WarningIcon from '@mui/icons-material/Warning';
 import NewReleasesIcon from '@mui/icons-material/NewReleases';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DeleteIcon from '@mui/icons-material/Delete';
+import MarkAsReadIcon from '@mui/icons-material/DoneAll';
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 
 const drawerWidth = 240;
 
 // =============================================================================
-// NOTIFICATION HELPER FUNCTIONS
+// NOTIFICATION HELPER FUNCTIONS (Keep the same as original)
 // =============================================================================
 
 // Function to create notification when plant request is submitted
@@ -40,23 +39,24 @@ export const createPlantRequestNotification = async (plantRequestData, plantRequ
   try {
     const notificationData = {
       type: 'plant_request',
+      notification_type: 'pending',
       title: 'New Planting Request',
-      message: `New planting request from ${plantRequestData.userEmail || 'user'} at ${plantRequestData.location_name || 'location'}`,
+      notif_message: `New planting request from ${plantRequestData.fullName || plantRequestData.userEmail || 'user'} at ${plantRequestData.location || 'location'}`,
       data: {
         plantRequestId: plantRequestId,
-        userId: plantRequestData.user_id,
-        locationId: plantRequestData.location_id,
-        preferredDate: plantRequestData.preferred_date
+        userId: plantRequestData.userId,
+        location: plantRequestData.location,
+        preferredDate: plantRequestData.preferredDate
       },
       targetRole: 'admin',
       read: false,
       resolved: false,
       priority: 'medium',
-      createdAt: serverTimestamp(),
+      notif_timestamp: serverTimestamp(),
       updatedAt: serverTimestamp()
     };
 
-    const docRef = await addDoc(collection(firestore, 'Notifications'), notificationData);
+    const docRef = await addDoc(collection(firestore, 'notifications'), notificationData);
     console.log('Notification created with ID:', docRef.id);
     return docRef.id;
   } catch (error) {
@@ -70,6 +70,7 @@ export const createSensorAlertNotification = async (alertData) => {
   try {
     const notificationData = {
       type: 'sensor_alert',
+      notification_type: 'pending',
       title: `Sensor Alert - ${alertData.severity.toUpperCase()}`,
       message: alertData.message,
       data: {
@@ -87,7 +88,7 @@ export const createSensorAlertNotification = async (alertData) => {
       updatedAt: serverTimestamp()
     };
 
-    const docRef = await addDoc(collection(firestore, 'Notifications'), notificationData);
+    const docRef = await addDoc(collection(firestore, 'notifications'), notificationData);
     return docRef.id;
   } catch (error) {
     console.error('Error creating sensor alert notification:', error);
@@ -98,7 +99,7 @@ export const createSensorAlertNotification = async (alertData) => {
 // Function to mark notification as read
 export const markNotificationAsRead = async (notificationId) => {
   try {
-    const notificationRef = doc(firestore, 'Notifications', notificationId);
+    const notificationRef = doc(firestore, 'notifications', notificationId);
     await updateDoc(notificationRef, {
       read: true,
       updatedAt: serverTimestamp()
@@ -112,9 +113,10 @@ export const markNotificationAsRead = async (notificationId) => {
 // Function to mark notification as resolved
 export const markNotificationAsResolved = async (notificationId) => {
   try {
-    const notificationRef = doc(firestore, 'Notifications', notificationId);
+    const notificationRef = doc(firestore, 'notifications', notificationId);
     await updateDoc(notificationRef, {
       resolved: true,
+      notification_type: 'resolved',
       resolvedAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
@@ -124,58 +126,58 @@ export const markNotificationAsResolved = async (notificationId) => {
   }
 };
 
-// Enhanced approval function that also manages notifications
+// Enhanced approval function
 export const approveRequestWithNotification = async (plantRequest, approvalNotes = '') => {
   try {
-    // 1. Update the plant request
-    const requestRef = doc(firestore, 'PlantingRequest', plantRequest.id);
+    const requestRef = doc(firestore, 'plantingrequests', plantRequest.id);
     await updateDoc(requestRef, {
-      request_status: 'approved',
-      request_remarks: approvalNotes || 'Request approved by administrator',
-      approved_at: serverTimestamp()
+      requestStatus: 'approved',
+      approvalNotes: approvalNotes || 'Request approved by administrator',
+      approvedAt: serverTimestamp()
     });
 
-    // 2. Create planting record
     const plantingRecordData = {
-      record_id: `REC-${Date.now()}`,
-      user_id: plantRequest.user_id,
-      location_id: plantRequest.location_id,
-      seedling_id: null,
-      record_datePlanted: new Date(),
-      created_at: serverTimestamp(),
+      userId: plantRequest.userId,
+      location: plantRequest.location,
+      recordDatePlanted: new Date().toISOString(),
+      createdAt: serverTimestamp(),
       status: 'planted',
-      request_id: plantRequest.id
+      requestId: plantRequest.id,
+      userEmail: plantRequest.userEmail,
+      fullName: plantRequest.fullName
     };
-    await addDoc(collection(firestore, 'PlantingRecord'), plantingRecordData);
+    await addDoc(collection(firestore, 'PlantingRecords'), plantingRecordData);
 
-    // 3. Mark related notification as resolved
     const notificationsQuery = query(
-      collection(firestore, 'Notifications'),
+      collection(firestore, 'notifications'),
       where('type', '==', 'plant_request'),
       where('data.plantRequestId', '==', plantRequest.id),
-      where('resolved', '==', false)
+      where('notification_type', '==', 'pending')
     );
     
     const notificationSnapshot = await getDocs(notificationsQuery);
     const updatePromises = notificationSnapshot.docs.map(doc => 
       updateDoc(doc.ref, {
         resolved: true,
+        notification_type: 'resolved',
         resolvedAt: serverTimestamp(),
         resolutionType: 'approved'
       })
     );
     await Promise.all(updatePromises);
 
-    // 4. Create approval notification for the user
-    await addDoc(collection(firestore, 'Notifications'), {
+    await addDoc(collection(firestore, 'notifications'), {
       type: 'request_approved',
+      notification_type: 'pending',
       title: 'Planting Request Approved',
-      message: `Your planting request has been approved. You can now proceed with planting.`,
+      message: `Your planting request for ${plantRequest.location} has been approved. You can now proceed with planting.`,
       data: {
         plantRequestId: plantRequest.id,
-        approvalNotes: approvalNotes
+        approvalNotes: approvalNotes,
+        location: plantRequest.location
       },
-      targetUserId: plantRequest.user_id,
+      targetUserId: plantRequest.userId,
+      userEmail: plantRequest.userEmail,
       read: false,
       resolved: false,
       priority: 'medium',
@@ -192,15 +194,13 @@ export const approveRequestWithNotification = async (plantRequest, approvalNotes
 // Enhanced rejection function
 export const rejectRequestWithNotification = async (plantRequest, rejectionReason) => {
   try {
-    // 1. Update the plant request
-    const requestRef = doc(firestore, 'PlantingRequest', plantRequest.id);
+    const requestRef = doc(firestore, 'plantingrequests', plantRequest.id);
     await updateDoc(requestRef, {
-      request_status: 'rejected',
-      request_remarks: rejectionReason,
-      rejected_at: serverTimestamp()
+      requestStatus: 'rejected',
+      rejectionReason: rejectionReason,
+      rejectedAt: serverTimestamp()
     });
 
-    // 2. Mark related notification as resolved
     const notificationsQuery = query(
       collection(firestore, 'Notifications'),
       where('type', '==', 'plant_request'),
@@ -218,16 +218,17 @@ export const rejectRequestWithNotification = async (plantRequest, rejectionReaso
     );
     await Promise.all(updatePromises);
 
-    // 3. Create rejection notification for the user
     await addDoc(collection(firestore, 'Notifications'), {
       type: 'request_rejected',
       title: 'Planting Request Rejected',
-      message: `Your planting request has been rejected. Reason: ${rejectionReason}`,
+      message: `Your planting request for ${plantRequest.location} has been rejected. Reason: ${rejectionReason}`,
       data: {
         plantRequestId: plantRequest.id,
-        rejectionReason: rejectionReason
+        rejectionReason: rejectionReason,
+        location: plantRequest.location
       },
-      targetUserId: plantRequest.user_id,
+      targetUserId: plantRequest.userId,
+      userEmail: plantRequest.userEmail,
       read: false,
       resolved: false,
       priority: 'high',
@@ -241,8 +242,41 @@ export const rejectRequestWithNotification = async (plantRequest, rejectionReaso
   }
 };
 
+// Scroll to top component
+function ScrollTop(props) {
+  const { children } = props;
+  const trigger = useScrollTrigger({
+    disableHysteresis: true,
+    threshold: 100,
+  });
+
+  const handleClick = (event) => {
+    const anchor = (event.target.ownerDocument || document).querySelector(
+      '#back-to-top-anchor',
+    );
+    if (anchor) {
+      anchor.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    }
+  };
+
+  return (
+    <Zoom in={trigger}>
+      <Box
+        onClick={handleClick}
+        role="presentation"
+        sx={{ position: 'fixed', bottom: 16, right: 16 }}
+      >
+        {children}
+      </Box>
+    </Zoom>
+  );
+}
+
 // =============================================================================
-// MAIN COMPONENT
+// MAIN COMPONENT WITH UPDATED UX/UI
 // =============================================================================
 
 const NotificationPanel = () => {
@@ -260,11 +294,8 @@ const NotificationPanel = () => {
   const [rejectionReason, setRejectionReason] = useState('');
   const [loading, setLoading] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [users, setUsers] = useState([]);
-  const [locations, setLocations] = useState([]);
   const [activeTab, setActiveTab] = useState(0);
   const [alert, setAlert] = useState({ open: false, message: '', severity: 'info' });
-  const [debugInfo, setDebugInfo] = useState({ show: false, data: {} });
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -281,36 +312,26 @@ const NotificationPanel = () => {
     setActiveTab(newValue);
   };
 
-  // Debug function to show data counts
-  const toggleDebugInfo = () => {
-    setDebugInfo(prev => ({ ...prev, show: !prev.show }));
-  };
-
-  // Helper function to create notifications for pending requests that don't have notifications yet
+  // Helper functions (keep the same as original)
   const createMissingRequestNotifications = async (requests) => {
     try {
       for (const request of requests) {
-        // Check if notification already exists for this request
         const existingQuery = query(
-          collection(firestore, 'Notifications'),
+          collection(firestore, 'notifications'),
           where('type', '==', 'plant_request'),
           where('data.plantRequestId', '==', request.id),
-          where('resolved', '==', false)
+          where('notification_type', '==', 'pending')
         );
         
         const existingSnapshot = await getDocs(existingQuery);
         
-        // If no notification exists, create one
         if (existingSnapshot.empty) {
-          const user = users.find(u => u.id === request.user_id) || {};
-          const location = locations.find(l => l.id === request.location_id) || {};
-          
           await createPlantRequestNotification({
-            userEmail: user.email || 'Unknown User',
-            location_name: location.location_name || 'Unknown Location',
-            user_id: request.user_id,
-            location_id: request.location_id,
-            preferred_date: request.preferred_date
+            fullName: request.fullName,
+            userEmail: request.userEmail,
+            location: request.location,
+            userId: request.userId,
+            preferredDate: request.preferredDate
           }, request.id);
         }
       }
@@ -319,15 +340,14 @@ const NotificationPanel = () => {
     }
   };
 
-  // Helper function to avoid duplicate sensor notifications
   const createSensorAlertNotificationIfNew = async (alertData) => {
     try {
       const existingQuery = query(
-        collection(firestore, 'Notifications'),
+        collection(firestore, 'notifications'),
         where('type', '==', 'sensor_alert'),
         where('data.sensorId', '==', alertData.sensorId),
         where('data.parameter', '==', alertData.parameter || ''),
-        where('resolved', '==', false)
+        where('notification_type', '==', 'pending')
       );
       
       const existingSnapshot = await getDocs(existingQuery);
@@ -340,7 +360,7 @@ const NotificationPanel = () => {
     }
   };
 
-  // FIXED: Simplified useEffect with proper cleanup
+  // Main data fetching effect (keep the same as original)
   useEffect(() => {
     let unsubscribeRequests = null;
     let unsubscribeNotifications = null;
@@ -351,8 +371,7 @@ const NotificationPanel = () => {
         console.log('🚀 Starting data fetch...');
         setLoading(true);
 
-        // Fetch planting requests
-        const requestsQuery = query(collection(firestore, 'PlantingRequest'));
+        const requestsQuery = query(collection(firestore, 'plantingrequests'));
         
         unsubscribeRequests = onSnapshot(requestsQuery, 
           async (snapshot) => {
@@ -363,18 +382,15 @@ const NotificationPanel = () => {
               ...doc.data()
             }));
             
-            // Filter for pending requests
             const pendingRequests = allRequests.filter(req => {
-              const status = req.request_status || req.status || 'pending';
-              return status === 'pending' || status === '' || !req.request_status;
+              const status = req.requestStatus || 'pending';
+              return status === 'pending';
             });
             
             console.log(`📋 Filtered to ${pendingRequests.length} pending requests`);
             setPlantingRequests(pendingRequests);
 
-            // Create notifications for pending requests that don't have them yet
-            // Only do this if we have users and locations data
-            if (users.length > 0 && locations.length > 0 && pendingRequests.length > 0) {
+            if (pendingRequests.length > 0) {
               console.log('🔔 Creating missing notifications for pending requests...');
               await createMissingRequestNotifications(pendingRequests);
             }
@@ -389,23 +405,27 @@ const NotificationPanel = () => {
           }
         );
 
-        // Fetch notifications - SIMPLIFIED without orderBy to avoid index issues
-        const notificationsQuery = query(collection(firestore, 'Notifications'));
+        const notificationsQuery = query(
+          collection(firestore, 'notifications'),
+          where('notification_type', '==', 'pending')
+        );
 
         unsubscribeNotifications = onSnapshot(notificationsQuery, 
           (snapshot) => {
-            console.log(`🔔 Found ${snapshot.docs.length} total notifications`);
+            console.log(`🔔 Found ${snapshot.docs.length} pending notifications`);
             
-            const allNotifications = snapshot.docs.map(doc => ({
-              id: doc.id,
-              ...doc.data(),
-              timestamp: doc.data().createdAt?.toDate() || new Date()
-            }));
+            const allNotifications = snapshot.docs.map(doc => {
+              const data = doc.data();
+              return {
+                id: doc.id,
+                ...data,
+                timestamp: data.createdAt?.toDate() || new Date()
+              };
+            });
             
-            // Filter for admin notifications that are not resolved
             const adminNotifications = allNotifications
-              .filter(notification => notification.targetRole === 'admin' && !notification.resolved)
-              .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // Sort manually
+              .filter(notification => notification.targetRole === 'admin')
+              .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
             
             console.log(`🔔 Filtered to ${adminNotifications.length} admin notifications`);
             setNotifications(adminNotifications);
@@ -420,23 +440,6 @@ const NotificationPanel = () => {
           }
         );
 
-        // Fetch users and locations
-        try {
-          const [usersSnapshot, locationsSnapshot] = await Promise.all([
-            getDocs(collection(firestore, 'users')),
-            getDocs(collection(firestore, 'Location'))
-          ]);
-
-          const usersData = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          const locationsData = locationsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-          setUsers(usersData);
-          setLocations(locationsData);
-        } catch (error) {
-          console.error('❌ Error fetching users/locations:', error);
-        }
-
-        // Setup sensor listener
         const sensorRef = ref(rtdb, "sensors");
         unsubscribeSensors = onValue(sensorRef, (snapshot) => {
           if (snapshot.exists()) {
@@ -444,7 +447,6 @@ const NotificationPanel = () => {
             const alerts = generateSensorAlerts(sensorsData);
             setSensorAlerts(alerts);
             
-            // Create notifications for new sensor alerts
             alerts.forEach(alert => {
               createSensorAlertNotificationIfNew(alert);
             });
@@ -470,7 +472,6 @@ const NotificationPanel = () => {
 
     setupListeners();
 
-    // Cleanup function
     return () => {
       if (unsubscribeRequests) unsubscribeRequests();
       if (unsubscribeNotifications) unsubscribeNotifications();
@@ -478,15 +479,7 @@ const NotificationPanel = () => {
     };
   }, []);
 
-  // Effect to create notifications when users/locations data becomes available
-  useEffect(() => {
-    if (users.length > 0 && locations.length > 0 && plantingRequests.length > 0) {
-      console.log('🔔 Retrying notification creation now that user/location data is available...');
-      createMissingRequestNotifications(plantingRequests);
-    }
-  }, [users, locations, plantingRequests]);
-
-  // Generate sensor alerts based on sensor data
+  // Generate sensor alerts (keep the same as original)
   const generateSensorAlerts = (sensorsData) => {
     const alerts = [];
     const now = new Date();
@@ -503,7 +496,6 @@ const NotificationPanel = () => {
       const readingTime = new Date(latestReading.timestamp);
       const hoursDiff = (now - readingTime) / (1000 * 60 * 60);
       
-      // Check for offline sensors
       if (hoursDiff > 24) {
         alerts.push({
           id: `offline-${sensorId}`,
@@ -524,7 +516,6 @@ const NotificationPanel = () => {
         });
       }
 
-      // Check sensor readings
       if (latestReading.pH !== undefined && (latestReading.pH < 5.5 || latestReading.pH > 8.5)) {
         alerts.push({
           id: `ph-${sensorId}-${latestReading.timestamp}`,
@@ -574,17 +565,7 @@ const NotificationPanel = () => {
     });
   };
 
-  // Get user details
-  const getUserDetails = (userId) => {
-    return users.find(user => user.id === userId) || {};
-  };
-
-  // Get location details
-  const getLocationDetails = (locationId) => {
-    return locations.find(location => location.id === locationId) || {};
-  };
-
-  // Event handlers
+  // Updated event handlers for click-to-read functionality
   const handleViewDetails = (request) => {
     setSelectedRequest(request);
     setDetailDialogOpen(true);
@@ -595,11 +576,21 @@ const NotificationPanel = () => {
     setAlertDialogOpen(true);
   };
 
-  const handleViewNotification = (notification) => {
+  const handleViewNotification = async (notification) => {
     setSelectedNotification(notification);
     setNotificationDialogOpen(true);
+    
+    // Mark as read when clicked/opened
     if (!notification.read) {
-      markNotificationAsRead(notification.id);
+      try {
+        await markNotificationAsRead(notification.id);
+        // Update local state to reflect the change
+        setNotifications(prev => prev.map(n => 
+          n.id === notification.id ? { ...n, read: true } : n
+        ));
+      } catch (error) {
+        console.error('Error marking notification as read:', error);
+      }
     }
   };
 
@@ -625,19 +616,26 @@ const NotificationPanel = () => {
     });
   };
 
-  // Notification management functions
-  const handleMarkNotificationRead = async (notificationId) => {
+  const handleMarkAllAsRead = async () => {
     try {
-      await markNotificationAsRead(notificationId);
-      setAlert({ open: true, message: 'Notification marked as read', severity: 'info' });
+      const unreadNotifications = notifications.filter(n => !n.read);
+      const updatePromises = unreadNotifications.map(notification => 
+        markNotificationAsRead(notification.id)
+      );
+      await Promise.all(updatePromises);
+      
+      // Update local state
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      setAlert({ open: true, message: 'All notifications marked as read', severity: 'success' });
     } catch (error) {
-      setAlert({ open: true, message: 'Error updating notification', severity: 'error' });
+      setAlert({ open: true, message: 'Error marking notifications as read', severity: 'error' });
     }
   };
 
   const handleResolveNotification = async (notificationId) => {
     try {
       await markNotificationAsResolved(notificationId);
+      setNotifications(prev => prev.filter(n => n.id !== notificationId));
       setAlert({ open: true, message: 'Notification resolved', severity: 'success' });
     } catch (error) {
       setAlert({ open: true, message: 'Error resolving notification', severity: 'error' });
@@ -646,22 +644,20 @@ const NotificationPanel = () => {
 
   const handleDeleteNotification = async (notificationId) => {
     try {
-      await deleteDoc(doc(firestore, 'Notifications', notificationId));
+      await deleteDoc(doc(firestore, 'notifications', notificationId));
+      setNotifications(prev => prev.filter(n => n.id !== notificationId));
       setAlert({ open: true, message: 'Notification deleted', severity: 'success' });
     } catch (error) {
       setAlert({ open: true, message: 'Error deleting notification', severity: 'error' });
     }
   };
 
-  // Enhanced approval function
   const confirmApprove = async () => {
     try {
       const result = await approveRequestWithNotification(selectedRequest, rejectionReason);
-      
       setApprovalDialogOpen(false);
       setSelectedRequest(null);
       setRejectionReason('');
-      
       setAlert({ open: true, message: result.message, severity: 'success' });
     } catch (error) {
       console.error('Error approving request:', error);
@@ -669,15 +665,12 @@ const NotificationPanel = () => {
     }
   };
 
-  // Enhanced rejection function
   const confirmReject = async () => {
     try {
       const result = await rejectRequestWithNotification(selectedRequest, rejectionReason);
-      
       setRejectionDialogOpen(false);
       setRejectionReason('');
       setSelectedRequest(null);
-      
       setAlert({ open: true, message: result.message, severity: 'warning' });
     } catch (error) {
       console.error('Error rejecting request:', error);
@@ -685,10 +678,8 @@ const NotificationPanel = () => {
     }
   };
 
-  // Utility functions
   const getStatusColor = (status) => {
     if (!status) return 'default';
-    
     switch (status.toLowerCase()) {
       case 'pending': return 'warning';
       case 'approved': return 'success';
@@ -707,29 +698,30 @@ const NotificationPanel = () => {
     }
   };
 
-  // SIMPLIFIED date formatting
+  const getNotificationIcon = (type) => {
+    switch (type) {
+      case 'plant_request': return <NewReleasesIcon />;
+      case 'sensor_alert': return <WarningIcon />;
+      case 'request_approved': return <CheckCircleIcon />;
+      case 'request_rejected': return <CancelIcon />;
+      default: return <NotificationsIcon />;
+    }
+  };
+
   const formatDate = (date) => {
     if (!date) return 'N/A';
-    
     try {
-      if (date instanceof Timestamp) {
-        return date.toDate().toLocaleDateString();
-      }
-      if (typeof date === 'string') {
-        return new Date(date).toLocaleDateString();
-      }
-      if (date.toDate) {
-        return date.toDate().toLocaleDateString();
-      }
+      if (date instanceof Timestamp) return date.toDate().toLocaleDateString();
+      if (typeof date === 'string') return new Date(date).toLocaleDateString();
+      if (date.toDate) return date.toDate().toLocaleDateString();
       return new Date(date).toLocaleDateString();
     } catch (error) {
-      return 'Invalid Date';
+      return date;
     }
   };
 
   const formatDateTime = (date) => {
     if (!date) return 'N/A';
-    
     try {
       const dateObj = date instanceof Timestamp ? date.toDate() : new Date(date);
       return dateObj.toLocaleString();
@@ -738,11 +730,9 @@ const NotificationPanel = () => {
     }
   };
 
-  const getStatusText = (request) => {
-    return request.request_status || request.status || 'pending';
-  };
+  const getStatusText = (request) => request.requestStatus || 'pending';
 
-  // Count calculations
+  const unreadCount = notifications.filter(n => !n.read).length;
   const pendingCount = plantingRequests.length;
   const alertCount = sensorAlerts.length;
   const notificationCount = notifications.length;
@@ -782,7 +772,8 @@ const NotificationPanel = () => {
           mt: '64px'
         }}
       >      
-        {/* Alert Notification */}
+        <div id="back-to-top-anchor" />
+        
         {alert.open && (
           <Alert 
             severity={alert.severity} 
@@ -794,250 +785,281 @@ const NotificationPanel = () => {
         )}
 
         <Box sx={{ width: '100%' }}>
-          {/* Header */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
             <Box>
               <Typography variant="h4" sx={{ color: '#2e7d32', fontWeight: 600 }}>
                 Notifications Center
               </Typography>
-              
+              <Typography variant="body1" color="text.secondary">
+                Manage and review system notifications
+              </Typography>
             </Box>
+            {activeTab === 0 && unreadCount > 0 && (
+              <Button
+                startIcon={<MarkAsReadIcon />}
+                onClick={handleMarkAllAsRead}
+                variant="outlined"
+                color="primary"
+              >
+                Mark All as Read ({unreadCount})
+              </Button>
+            )}
           </Box>
         </Box>
 
-        {/* FIXED: Tab structure with correct order */}
-        <Paper sx={{ mb: 3, borderRadius: 2 }}>
-          <Tabs value={activeTab} onChange={handleTabChange} centered>
-            <Tab label={`All Notifications (${notificationCount})`} />
+        <Paper sx={{ mb: 3, borderRadius: 2, boxShadow: 2 }}>
+          <Tabs 
+            value={activeTab} 
+            onChange={handleTabChange} 
+            centered
+            sx={{
+              '& .MuiTab-root': { fontWeight: 600 },
+              '& .Mui-selected': { color: '#2e7d32' }
+            }}
+          >
+            <Tab 
+              label={
+                <Badge badgeContent={unreadCount} color="error" sx={{ mr: 1 }}>
+                  All Notifications ({notificationCount})
+                </Badge>
+              } 
+            />
             <Tab label={`Planting Requests (${pendingCount})`} />
             <Tab label={`Sensor Alerts (${alertCount})`} />
           </Tabs>
         </Paper>
 
-        {/* FIXED: Tab Content with correct logic */}
         {activeTab === 0 && (
-          /* All Notifications Tab */
           <>
             <Typography variant="h6" sx={{ color: '#2e7d32', fontWeight: 600, mb: 3 }}>
               All Notifications
             </Typography>
 
-            <Paper sx={{ borderRadius: 2 }}>
-              <List>
-                {notifications.length === 0 ? (
-                  <ListItem>
-                    <Box sx={{ width: '100%', textAlign: 'center', py: 4 }}>
-                      <NotificationsIcon sx={{ fontSize: 48, color: '#ccc', mb: 2 }} />
-                      <Typography color="text.secondary">
+            <Grid container spacing={2}>
+              {notifications.length === 0 ? (
+                <Grid item xs={12}>
+                  <Card sx={{ textAlign: 'center', py: 6, borderRadius: 2 }}>
+                    <CardContent>
+                      <NotificationsIcon sx={{ fontSize: 64, color: '#ccc', mb: 2 }} />
+                      <Typography variant="h6" color="text.secondary" gutterBottom>
                         No notifications available
                       </Typography>
-                    </Box>
-                  </ListItem>
-                ) : (
-                  notifications.map((notification, index) => (
-                    <React.Fragment key={notification.id}>
-                      <ListItem 
-                        sx={{ 
-                          bgcolor: notification.read ? 'transparent' : alpha(theme.palette.primary.main, 0.05),
-                          borderRadius: 1,
-                          mb: 1,
-                          mx: 1,
-                          cursor: 'pointer',
-                          '&:hover': { 
-                            backgroundColor: alpha(theme.palette.primary.main, 0.08) 
-                          }
-                        }}
-                        onClick={() => handleViewNotification(notification)}
-                      >
-                        <ListItemIcon>
-                          {notification.type === 'plant_request' && <NewReleasesIcon color="warning" />}
-                          {notification.type === 'sensor_alert' && <WarningIcon color="error" />}
-                          {notification.type === 'request_approved' && <CheckCircleIcon color="success" />}
-                          {notification.type === 'request_rejected' && <CancelIcon color="error" />}
-                        </ListItemIcon>
-                        <ListItemText
-                          primary={
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <Typography variant="subtitle2" sx={{ fontWeight: notification.read ? 'normal' : 'bold' }}>
+                      <Typography variant="body2" color="text.secondary">
+                        New notifications will appear here when available
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              ) : (
+                notifications.map((notification) => (
+                  <Grid item xs={12} key={notification.id}>
+                    <Card 
+                      sx={{ 
+                        borderRadius: 2,
+                        borderLeft: `4px solid ${
+                          notification.priority === 'high' ? theme.palette.error.main :
+                          notification.priority === 'medium' ? theme.palette.warning.main :
+                          theme.palette.info.main
+                        }`,
+                        backgroundColor: notification.read ? 'background.paper' : alpha(theme.palette.primary.main, 0.04),
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease-in-out',
+                        '&:hover': { 
+                          transform: 'translateY(-2px)',
+                          boxShadow: 3,
+                          backgroundColor: notification.read ? 
+                            alpha(theme.palette.primary.main, 0.02) : 
+                            alpha(theme.palette.primary.main, 0.08)
+                        }
+                      }}
+                      onClick={() => handleViewNotification(notification)}
+                    >
+                      <CardContent sx={{ p: 2 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+                          <Box sx={{ 
+                            color: notification.read ? 'text.secondary' : 
+                              notification.priority === 'high' ? 'error.main' :
+                              notification.priority === 'medium' ? 'warning.main' : 'primary.main'
+                          }}>
+                            {getNotificationIcon(notification.type)}
+                          </Box>
+                          
+                          <Box sx={{ flex: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                              <Typography 
+                                variant="subtitle1" 
+                                sx={{ 
+                                  fontWeight: notification.read ? 'normal' : 'bold',
+                                  color: notification.read ? 'text.primary' : 'primary.main'
+                                }}
+                              >
                                 {notification.title}
                               </Typography>
                               <Chip 
                                 label={notification.priority} 
                                 size="small" 
-                                color={notification.priority === 'high' ? 'error' : notification.priority === 'medium' ? 'warning' : 'default'}
+                                color={
+                                  notification.priority === 'high' ? 'error' : 
+                                  notification.priority === 'medium' ? 'warning' : 'default'
+                                }
                                 variant="outlined"
                               />
+                              {!notification.read && (
+                                <Chip 
+                                  label="New" 
+                                  size="small" 
+                                  color="primary"
+                                  variant="filled"
+                                />
+                              )}
                             </Box>
-                          }
-                          secondary={
-                            <Box>
-                              <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                                {notification.message}
-                              </Typography>
+                            
+                            <Typography 
+                              variant="body2" 
+                              color="text.secondary" 
+                              sx={{ 
+                                mb: 1,
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden'
+                              }}
+                            >
+                              {notification.message || notification.notif_message}
+                            </Typography>
+                            
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
                               <Typography variant="caption" color="text.secondary">
                                 {formatDateTime(notification.timestamp)}
                               </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                • {notification.type.replace('_', ' ')}
+                              </Typography>
                             </Box>
-                          }
-                        />
-                        <ListItemSecondaryAction>
-                          <Box sx={{ display: 'flex', gap: 1 }} onClick={(e) => e.stopPropagation()}>
-                            {!notification.read && (
-                              <Tooltip title="Mark as Read">
-                                <IconButton 
-                                  size="small" 
-                                  onClick={() => handleMarkNotificationRead(notification.id)}
-                                  color="primary"
-                                >
-                                  <CheckCircleIcon />
-                                </IconButton>
-                              </Tooltip>
-                            )}
-                            <Tooltip title="Resolve">
-                              <IconButton 
-                                size="small" 
-                                onClick={() => handleResolveNotification(notification.id)}
-                                color="success"
-                              >
-                                <CheckCircleIcon />
-                              </IconButton>
-                            </Tooltip>
-                            <Tooltip title="Delete">
-                              <IconButton 
-                                size="small" 
-                                onClick={() => handleDeleteNotification(notification.id)}
-                                color="error"
-                              >
-                                <DeleteIcon />
-                              </IconButton>
-                            </Tooltip>
                           </Box>
-                        </ListItemSecondaryAction>
-                      </ListItem>
-                      {index < notifications.length - 1 && <Box sx={{ height: 8 }} />}
-                    </React.Fragment>
-                  ))
-                )}
-              </List>
-            </Paper>
+                          
+                          <Box onClick={(e) => e.stopPropagation()}>
+                            <IconButton 
+                              size="small" 
+                              onClick={() => handleDeleteNotification(notification.id)}
+                              color="error"
+                              sx={{ opacity: 0.7, '&:hover': { opacity: 1 } }}
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          </Box>
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                ))
+              )}
+            </Grid>
           </>
         )}
 
         {activeTab === 1 && (
-          /* Planting Requests Tab */
           <>
             <Typography variant="h6" sx={{ color: '#2e7d32', fontWeight: 600, mb: 3 }}>
               Planting Requests
             </Typography>
 
-            {/* Planting Requests Table */}
-            <Paper sx={{ borderRadius: 2, overflow: 'hidden' }}>
-              <TableContainer>
-                <Table>
-                  <TableHead sx={{ bgcolor: '#f5f5f5' }}>
-                    <TableRow>
-                      <TableCell><strong>Requester</strong></TableCell>
-                      <TableCell><strong>Location</strong></TableCell>
-                      <TableCell><strong>Preferred Date</strong></TableCell>
-                      <TableCell><strong>Status</strong></TableCell>
-                      <TableCell><strong>Actions</strong></TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {plantingRequests.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={5} align="center">
-                          <Typography color="text.secondary" sx={{ py: 4 }}>
-                            No pending planting requests
-                          </Typography>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      plantingRequests.map((request) => {
-                        const user = getUserDetails(request.user_id);
-                        const location = getLocationDetails(request.location_id);
+            <Grid container spacing={2}>
+              {plantingRequests.length === 0 ? (
+                <Grid item xs={12}>
+                  <Card sx={{ textAlign: 'center', py: 6, borderRadius: 2 }}>
+                    <CardContent>
+                      <CalendarTodayIcon sx={{ fontSize: 64, color: '#ccc', mb: 2 }} />
+                      <Typography variant="h6" color="text.secondary" gutterBottom>
+                        No pending planting requests
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        New planting requests will appear here for review
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              ) : (
+                plantingRequests.map((request) => (
+                  <Grid item xs={12} md={6} key={request.id}>
+                    <Card 
+                      sx={{ 
+                        borderRadius: 2,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease-in-out',
+                        '&:hover': { 
+                          transform: 'translateY(-2px)',
+                          boxShadow: 3
+                        }
+                      }}
+                      onClick={() => handleViewDetails(request)}
+                    >
+                      <CardContent>
+                        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, mb: 2 }}>
+                          <Avatar sx={{ bgcolor: '#2e7d32' }}>
+                            {(request.fullName || 'U').charAt(0)}
+                          </Avatar>
+                          <Box sx={{ flex: 1 }}>
+                            <Typography variant="subtitle1" fontWeight="bold">
+                              {request.fullName || 'Unknown User'}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              {request.userEmail}
+                            </Typography>
+                          </Box>
+                          <Chip 
+                            label={getStatusText(request)} 
+                            color={getStatusColor(getStatusText(request))}
+                            size="small"
+                          />
+                        </Box>
                         
-                        return (
-                          <TableRow 
-                            key={request.id} 
-                            hover 
-                            onClick={() => handleViewDetails(request)}
-                            sx={{ 
-                              cursor: 'pointer',
-                              '&:hover': { 
-                                backgroundColor: alpha(theme.palette.primary.main, 0.04) 
-                              }
-                            }}
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                          <LocationOnIcon fontSize="small" color="action" />
+                          <Typography variant="body2">
+                            {request.location || 'Unknown Location'}
+                          </Typography>
+                        </Box>
+                        
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                          <CalendarTodayIcon fontSize="small" color="action" />
+                          <Typography variant="body2">
+                            Preferred date: {formatDate(request.preferredDate)}
+                          </Typography>
+                        </Box>
+                        
+                        <Box sx={{ display: 'flex', gap: 1 }} onClick={(e) => e.stopPropagation()}>
+                          <Button
+                            startIcon={<CheckCircleIcon />}
+                            onClick={() => handleApprove(request)}
+                            variant="contained"
+                            color="success"
+                            size="small"
+                            fullWidth
                           >
-                            <TableCell>
-                              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                <Avatar sx={{ mr: 2, bgcolor: '#2e7d32' }}>
-                                  {(user.firstName || 'U').charAt(0)}
-                                </Avatar>
-                                <Box>
-                                  <Typography variant="body2" fontWeight="bold">
-                                    {user.firstName && user.lastName 
-                                      ? `${user.firstName} ${user.lastName}` 
-                                      : user.email || 'Unknown User'}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    {user.email}
-                                  </Typography>
-                                </Box>
-                              </Box>
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="body2">
-                                {location.location_name || 'Unknown Location'}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="body2">
-                                {formatDate(request.preferred_date)}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Chip 
-                                label={getStatusText(request)} 
-                                color={getStatusColor(getStatusText(request))}
-                                size="small"
-                              />
-                            </TableCell>
-                            <TableCell onClick={(e) => e.stopPropagation()}>
-                              <Box sx={{ display: 'flex', gap: 1 }}>
-                                <Tooltip title="Approve">
-                                  <IconButton 
-                                    size="small" 
-                                    onClick={() => handleApprove(request)}
-                                    sx={{ color: '#2e7d32' }}
-                                  >
-                                    <CheckCircleIcon />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="Reject">
-                                  <IconButton 
-                                    size="small" 
-                                    onClick={() => handleReject(request)}
-                                    sx={{ color: '#d32f2f' }}
-                                  >
-                                    <CancelIcon />
-                                  </IconButton>
-                                </Tooltip>
-                              </Box>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Paper>
+                            Approve
+                          </Button>
+                          <Button
+                            startIcon={<CancelIcon />}
+                            onClick={() => handleReject(request)}
+                            variant="outlined"
+                            color="error"
+                            size="small"
+                            fullWidth
+                          >
+                            Reject
+                          </Button>
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                ))
+              )}
+            </Grid>
           </>
         )}
 
         {activeTab === 2 && (
-          /* Sensor Alerts Tab */
           <>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
               <Typography variant="h6" sx={{ color: '#2e7d32', fontWeight: 600 }}>
@@ -1056,53 +1078,69 @@ const NotificationPanel = () => {
             <Grid container spacing={2}>
               {sensorAlerts.length === 0 ? (
                 <Grid item xs={12}>
-                  <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 2 }}>
-                    <SensorsIcon sx={{ fontSize: 48, color: '#ccc', mb: 2 }} />
-                    <Typography color="text.secondary">
-                      No sensor alerts at this time
-                    </Typography>
-                  </Paper>
+                  <Card sx={{ textAlign: 'center', py: 6, borderRadius: 2 }}>
+                    <CardContent>
+                      <SensorsIcon sx={{ fontSize: 64, color: '#ccc', mb: 2 }} />
+                      <Typography variant="h6" color="text.secondary" gutterBottom>
+                        No sensor alerts
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        All sensors are functioning normally
+                      </Typography>
+                    </CardContent>
+                  </Card>
                 </Grid>
               ) : (
                 sensorAlerts.map((alert) => (
                   <Grid item xs={12} md={6} lg={4} key={alert.id}>
-                    <Card sx={{ 
-                      borderRadius: 2, 
-                      borderLeft: `4px solid ${theme.palette[getAlertColor(alert.severity)].main}`,
-                      transition: 'transform 0.2s',
-                      cursor: 'pointer',
-                      '&:hover': { 
-                        transform: 'translateY(-2px)',
-                        backgroundColor: alpha(theme.palette.primary.main, 0.04)
-                      }
-                    }}
-                    onClick={() => handleViewAlert(alert)}
+                    <Card 
+                      sx={{ 
+                        borderRadius: 2,
+                        borderLeft: `4px solid ${theme.palette[getAlertColor(alert.severity)].main}`,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease-in-out',
+                        '&:hover': { 
+                          transform: 'translateY(-2px)',
+                          boxShadow: 3
+                        }
+                      }}
+                      onClick={() => handleViewAlert(alert)}
                     >
                       <CardContent>
-                        <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
-                          <Box sx={{ mr: 2 }}>
-                            {alert.severity === 'high' && <WarningIcon color="error" />}
-                            {alert.severity === 'medium' && <WarningIcon color="warning" />}
-                            {alert.severity === 'low' && <SensorsIcon color="info" />}
+                        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, mb: 2 }}>
+                          <Box sx={{ 
+                            color: theme.palette[getAlertColor(alert.severity)].main 
+                          }}>
+                            <WarningIcon />
                           </Box>
                           <Box sx={{ flex: 1 }}>
-                            <Typography variant="h6" gutterBottom>
+                            <Typography variant="subtitle1" fontWeight="bold">
                               Sensor {alert.sensorId}
                             </Typography>
                             <Chip 
                               label={alert.severity.toUpperCase()} 
                               color={getAlertColor(alert.severity)}
                               size="small"
-                              sx={{ mb: 1 }}
                             />
                           </Box>
                         </Box>
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        
+                        <Typography 
+                          variant="body2" 
+                          color="text.secondary" 
+                          sx={{ mb: 2 }}
+                        >
                           {alert.message}
                         </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {formatDateTime(alert.timestamp)}
-                        </Typography>
+                        
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="caption" color="text.secondary">
+                            {formatDateTime(alert.timestamp)}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {alert.parameter && `• ${alert.parameter}`}
+                          </Typography>
+                        </Box>
                       </CardContent>
                     </Card>
                   </Grid>
@@ -1112,9 +1150,7 @@ const NotificationPanel = () => {
           </>
         )}
 
-        {/* Dialogs remain the same but simplified */}
-        
-        {/* Detail Dialog for Planting Requests */}
+        {/* Dialogs (keep the same as original but with updated styling) */}
         <Dialog open={detailDialogOpen} onClose={() => setDetailDialogOpen(false)} maxWidth="md" fullWidth>
           <DialogTitle>Planting Request Details</DialogTitle>
           <DialogContent>
@@ -1123,25 +1159,24 @@ const NotificationPanel = () => {
                 <Grid item xs={12} md={6}>
                   <Typography variant="subtitle2" color="text.secondary">Requester Information</Typography>
                   <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
-                    <Typography><strong>Name:</strong> {(() => {
-                      const user = getUserDetails(selectedRequest.user_id);
-                      return user.firstName && user.lastName 
-                        ? `${user.firstName} ${user.lastName}` 
-                        : user.email || 'Unknown User';
-                    })()}</Typography>
-                    <Typography><strong>Email:</strong> {getUserDetails(selectedRequest.user_id).email || 'N/A'}</Typography>
+                    <Typography><strong>Name:</strong> {selectedRequest.fullName || 'Unknown User'}</Typography>
+                    <Typography><strong>Email:</strong> {selectedRequest.userEmail || 'N/A'}</Typography>
+                    {selectedRequest.organization && (
+                      <Typography><strong>Organization:</strong> {selectedRequest.organization}</Typography>
+                    )}
                   </Box>
                 </Grid>
                 <Grid item xs={12} md={6}>
                   <Typography variant="subtitle2" color="text.secondary">Location Information</Typography>
                   <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
-                    <Typography><strong>Location:</strong> {getLocationDetails(selectedRequest.location_id).location_name || 'Unknown Location'}</Typography>
+                    <Typography><strong>Location:</strong> {selectedRequest.location || 'Unknown Location'}</Typography>
                   </Box>
                 </Grid>
                 <Grid item xs={12}>
                   <Typography variant="subtitle2" color="text.secondary">Request Details</Typography>
                   <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
-                    <Typography><strong>Preferred Date:</strong> {formatDate(selectedRequest.preferred_date)}</Typography>
+                    <Typography><strong>Preferred Date:</strong> {formatDate(selectedRequest.preferredDate)}</Typography>
+                    <Typography><strong>Submitted At:</strong> {formatDateTime(selectedRequest.submittedAt)}</Typography>
                     <Typography><strong>Status:</strong> 
                       <Chip 
                         label={getStatusText(selectedRequest)} 
@@ -1150,8 +1185,11 @@ const NotificationPanel = () => {
                         sx={{ ml: 1 }}
                       />
                     </Typography>
-                    {selectedRequest.request_remarks && (
-                      <Typography><strong>Remarks:</strong> {selectedRequest.request_remarks}</Typography>
+                    {selectedRequest.approvalNotes && (
+                      <Typography><strong>Notes:</strong> {selectedRequest.approvalNotes}</Typography>
+                    )}
+                    {selectedRequest.rejectionReason && (
+                      <Typography><strong>Rejection Reason:</strong> {selectedRequest.rejectionReason}</Typography>
                     )}
                   </Box>
                 </Grid>
@@ -1260,7 +1298,7 @@ const NotificationPanel = () => {
                   <Grid item xs={12}>
                     <Typography variant="subtitle2" color="text.secondary">Message</Typography>
                     <Typography variant="body1" sx={{ mt: 1 }}>
-                      {selectedNotification.message}
+                      {selectedNotification.message || selectedNotification.notif_message}
                     </Typography>
                   </Grid>
                   <Grid item xs={6}>
@@ -1283,10 +1321,10 @@ const NotificationPanel = () => {
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setNotificationDialogOpen(false)}>Close</Button>
-            {selectedNotification && !selectedNotification.read && (
+            {!selectedNotification?.read && (
               <Button 
                 onClick={() => {
-                  handleMarkNotificationRead(selectedNotification.id);
+                  handleMarkNotificationAsRead(selectedNotification.id);
                   setNotificationDialogOpen(false);
                 }} 
                 color="primary"
@@ -1294,21 +1332,10 @@ const NotificationPanel = () => {
                 Mark as Read
               </Button>
             )}
-            {selectedNotification && !selectedNotification.resolved && (
-              <Button 
-                onClick={() => {
-                  handleResolveNotification(selectedNotification.id);
-                  setNotificationDialogOpen(false);
-                }} 
-                color="success"
-              >
-                Resolve
-              </Button>
-            )}
           </DialogActions>
         </Dialog>
 
-        {/* Approval Dialog */}
+        {/* Approval and Rejection Dialogs (keep the same as original) */}
         <Dialog open={approvalDialogOpen} onClose={() => setApprovalDialogOpen(false)} maxWidth="sm" fullWidth>
           <DialogTitle>Approve Planting Request</DialogTitle>
           <DialogContent>
@@ -1333,7 +1360,6 @@ const NotificationPanel = () => {
           </DialogActions>
         </Dialog>
 
-        {/* Rejection Dialog */}
         <Dialog open={rejectionDialogOpen} onClose={() => setRejectionDialogOpen(false)} maxWidth="sm" fullWidth>
           <DialogTitle>Reject Planting Request</DialogTitle>
           <DialogContent>
@@ -1363,6 +1389,12 @@ const NotificationPanel = () => {
             </Button>
           </DialogActions>
         </Dialog>
+
+        <ScrollTop>
+          <Fab color="primary" size="small" aria-label="scroll back to top">
+            <KeyboardArrowUpIcon />
+          </Fab>
+        </ScrollTop>
       </Box>
     </Box>
   );
