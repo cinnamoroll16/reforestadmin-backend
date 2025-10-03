@@ -202,8 +202,8 @@ function Recommendations() {
         }
       };
 
-      // Add document to PlantingTask collection
-      await addDoc(collection(firestore, 'PlantingTask'), taskData);
+      // Add document to plantingtasks collection
+      await addDoc(collection(firestore, 'plantingtasks'), taskData);
 
       console.log('Planting task created for Recommendation ID:', reco.reco_id);
 
