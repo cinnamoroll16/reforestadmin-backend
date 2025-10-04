@@ -297,21 +297,16 @@
     const createSeedlingAssignmentNotification = async (request, seedlingDetails) => {
       try {
         await addDoc(collection(firestore, 'notifications'), {
-          type: 'seedling_assigned',
           notification_type: 'pending',
-          title: 'Tree Seedling Assigned',
-          notif_message: `Your seedling ${seedlingDetails.seedling_commonName} has been assigned for planting at ${request.locationName}`,
+          notif_message: `Your seedling has been assigned for planting at ${request.locationName}`,
           data: {
             requestId: request.id,
-            seedlingId: seedlingDetails.id,
             locationName: request.locationName,
             recommendationId: currentRecommendation.id
           },
           targetUser: request.userRef,
           targetRole: 'planter',
           read: false,
-          resolved: false,
-          hidden: false,
           priority: 'high',
           notif_timestamp: serverTimestamp(),
           createdAt: serverTimestamp()

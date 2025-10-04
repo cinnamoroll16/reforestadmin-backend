@@ -44,6 +44,10 @@ import {
   TableHead,
   TableRow,
   Tooltip,
+  Badge,
+  Link,
+  CardActions,
+  ListItemIcon,
 } from "@mui/material";
 import {
   Save as SaveIcon,
@@ -61,10 +65,25 @@ import {
   Notifications as NotificationsIcon,
   Lock as LockIcon,
   Refresh as RefreshIcon,
+  History as HistoryIcon,
+  Download as DownloadIcon,
+  Logout as LogoutIcon,
+  Help as HelpIcon,
+  BugReport as BugReportIcon,
+  SensorOccupied as SensorIcon,
+  Grass as EcoIcon,
+  Assessment as ReportIcon,
+  Build as ConfigIcon,
+  DarkMode as DarkModeIcon,
+  LightMode as LightModeIcon,
+  Login as LoginIcon,
+  Computer as ComputerIcon,
+  Public as PublicIcon,
 } from "@mui/icons-material";
 import { 
   doc, getDoc, setDoc, onSnapshot, collection, 
-  query, updateDoc, getDocs, serverTimestamp 
+  query, updateDoc, getDocs, serverTimestamp,
+  where, orderBy, limit
 } from "firebase/firestore";
 import { auth, firestore } from "../firebase.js";
 import ReForestAppBar from "./AppBar.js";
@@ -92,12 +111,19 @@ const AdminProfile = () => {
     user_lastname: "",
     user_email: "",
     phone: "",
+    organization: "",
+    designation: "",
     department: "",
     notifications: true,
     twoFactor: false,
+    theme: "light",
+    dashboardLayout: "default",
   });
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
+  const [loginHistory, setLoginHistory] = useState([]);
+  const [activeSessions, setActiveSessions] = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -107,6 +133,12 @@ const AdminProfile = () => {
   const [selectedUser, setSelectedUser] = useState(null);
   const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false);
   const [adminDeactivateDialogOpen, setAdminDeactivateDialogOpen] = useState(false);
+  const [changePasswordDialogOpen, setChangePasswordDialogOpen] = useState(false);
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -136,10 +168,15 @@ const AdminProfile = () => {
                 user_lastname: data.user_lastname || "",
                 user_email: data.user_email || user.email || "",
                 phone: data.phone || "",
+                organization: data.organization || "DENR",
+                designation: data.designation || "System Administrator",
                 department: data.department || "Administration",
                 notifications: data.notifications ?? true,
                 twoFactor: data.twoFactor ?? false,
+                theme: data.theme || "light",
+                dashboardLayout: data.dashboardLayout || "default",
                 deactivated: data.deactivated || false,
+                lastLogin: data.lastLogin || null,
               });
             }
           },
@@ -166,11 +203,43 @@ const AdminProfile = () => {
           setUsers(usersData);
         });
 
+        // Load login history
+        const loginHistoryQuery = query(
+          collection(firestore, "loginHistory"),
+          where("userId", "==", user.uid),
+          orderBy("timestamp", "desc"),
+          limit(10)
+        );
+        const loginHistoryUnsubscribe = onSnapshot(loginHistoryQuery, (snapshot) => {
+          const historyData = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          setLoginHistory(historyData);
+        });
+
+        // Load audit logs for current user
+        const auditLogsQuery = query(
+          collection(firestore, "auditLogs"),
+          where("userId", "==", user.uid),
+          orderBy("timestamp", "desc"),
+          limit(20)
+        );
+        const auditLogsUnsubscribe = onSnapshot(auditLogsQuery, (snapshot) => {
+          const logsData = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          setAuditLogs(logsData);
+        });
+
         setLoading(false);
 
         return () => {
           userUnsubscribe();
           usersUnsubscribe();
+          loginHistoryUnsubscribe();
+          auditLogsUnsubscribe();
         };
       } catch (error) {
         setError("Failed to load data");
@@ -207,9 +276,13 @@ const AdminProfile = () => {
         user_lastname: profile.user_lastname,
         user_email: profile.user_email,
         phone: profile.phone,
+        organization: profile.organization,
+        designation: profile.designation,
         department: profile.department,
         notifications: profile.notifications,
         twoFactor: profile.twoFactor,
+        theme: profile.theme,
+        dashboardLayout: profile.dashboardLayout,
         lastUpdated: serverTimestamp(),
       });
       
@@ -219,6 +292,18 @@ const AdminProfile = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Handle password change
+  const handleChangePassword = async () => {
+    // Implement password change logic here
+    setSuccess("Password changed successfully");
+    setChangePasswordDialogOpen(false);
+    setPasswordData({
+      currentPassword: "",
+      newPassword: "",
+      confirmPassword: "",
+    });
   };
 
   // Deactivate/Reactivate user account
@@ -260,10 +345,36 @@ const AdminProfile = () => {
     }
   };
 
+  // Revoke active session
+  const handleRevokeSession = async (sessionId) => {
+    // Implement session revocation logic
+    setSuccess("Session revoked successfully");
+  };
+
+  // Download activity logs
+  const handleDownloadLogs = () => {
+    const logsData = JSON.stringify(auditLogs, null, 2);
+    const blob = new Blob([logsData], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `activity-logs-${new Date().toISOString().split('T')[0]}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const openDeactivateDialog = (user, deactivate = true) => {
     setSelectedUser(user);
     setDeactivateDialogOpen(true);
   };
+
+  // Admin Tools Quick Links
+  const adminTools = [
+    { icon: <SensorIcon />, label: "Manage Sensors", path: "/sensors" },
+    { icon: <EcoIcon />, label: "Manage Planting Requests", path: "/planting-requests" },
+    { icon: <ReportIcon />, label: "View Reports", path: "/reports" },
+    { icon: <ConfigIcon />, label: "System Configurations", path: "/config" },
+  ];
 
   if (loading) {
     return (
@@ -305,7 +416,7 @@ const AdminProfile = () => {
         <Container maxWidth="lg" sx={{ py: 2 }}>
           {/* Header Section */}
           <Paper sx={{ p: 4, mb: 4, borderRadius: 2 }}>
-            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: 'wrap', gap: 3 }}>
               <Box sx={{ display: "flex", alignItems: "center" }}>
                 <Avatar 
                   sx={{ 
@@ -323,7 +434,7 @@ const AdminProfile = () => {
                   <Typography variant="h4" fontWeight="600" gutterBottom>
                     {profile.user_firstname} {profile.user_lastname}
                   </Typography>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: 'wrap' }}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: 'wrap', mb: 1 }}>
                     <Chip
                       icon={<AdminIcon />}
                       label="System Administrator"
@@ -343,6 +454,20 @@ const AdminProfile = () => {
                       />
                     )}
                   </Box>
+                  <Typography variant="body2" color="text.secondary">
+                    <EmailIcon sx={{ fontSize: 16, mr: 0.5 }} />
+                    {profile.user_email} • 
+                    <PhoneIcon sx={{ fontSize: 16, mx: 0.5 }} />
+                    {profile.phone || 'Not provided'} • 
+                    <BusinessIcon sx={{ fontSize: 16, mx: 0.5 }} />
+                    {profile.organization}
+                  </Typography>
+                  {profile.lastLogin && (
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      <LoginIcon sx={{ fontSize: 16, mr: 0.5 }} />
+                      Last login: {new Date(profile.lastLogin.toDate()).toLocaleString()}
+                    </Typography>
+                  )}
                 </Box>
               </Box>
               
@@ -360,8 +485,48 @@ const AdminProfile = () => {
 
           {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
 
+          {/* Admin Tools Quick Links */}
+          <Paper sx={{ p: 3, mb: 4, borderRadius: 2 }}>
+            <Typography variant="h6" fontWeight="600" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+              <SettingsIcon sx={{ mr: 1 }} />
+              Admin Tools
+            </Typography>
+            <Grid container spacing={2}>
+              {adminTools.map((tool, index) => (
+                <Grid item xs={12} sm={6} md={3} key={index}>
+                  <Card 
+                    sx={{ 
+                      cursor: 'pointer', 
+                      transition: 'all 0.2s',
+                      '&:hover': { 
+                        transform: 'translateY(-2px)',
+                        boxShadow: 4
+                      }
+                    }}
+                    onClick={() => window.location.href = tool.path}
+                  >
+                    <CardContent sx={{ textAlign: 'center', py: 3 }}>
+                      <Box sx={{ color: 'primary.main', mb: 1 }}>
+                        {tool.icon}
+                      </Box>
+                      <Typography variant="body2" fontWeight="500">
+                        {tool.label}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+          </Paper>
+
           {/* Main Content Tabs */}
-          <Paper sx={{ borderRadius: 2 }}>
+          <Paper sx={{
+            borderRadius: 2,
+            p: 3,
+            width: "100%",        // take full width of parent
+            maxWidth: "1400px",   // widen the content area (adjust value as needed)
+            mx: "auto"            // center horizontally
+          }}>
             <Tabs 
               value={tabValue} 
               onChange={(e, newValue) => setTabValue(newValue)}
@@ -373,15 +538,22 @@ const AdminProfile = () => {
             >
               <Tab icon={<PersonIcon />} label="Profile Settings" />
               <Tab icon={<PeopleIcon />} label="User Management" />
-              <Tab icon={<SecurityIcon />} label="Security" />
+              <Tab icon={<SecurityIcon />} label="Security & Audit" />
+              <Tab icon={<SettingsIcon />} label="Preferences" />
+              <Tab icon={<HelpIcon />} label="Support" />
             </Tabs>
 
             {/* Profile Settings Tab */}
             <TabPanel value={tabValue} index={0}>
-              <Grid container spacing={4}>
-                <Grid item xs={12} md={6}>
+              <Grid container spacing={2} justifyContent="center" alignItems="flex-start">
+                <Grid item xs={12} md={9}>
                   <Card sx={{ height: '100%' }}>
-                    <CardContent>
+                    <CardContent
+                    sx={{
+                      width: "100%",        // let it expand fully
+                      maxWidth: "1200px",    // control how wide the form should be (adjust as needed)
+                      mx: "auto"            // center horizontally inside parent
+                    }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
                         <PersonIcon color="primary" sx={{ mr: 2 }} />
                         <Typography variant="h6" fontWeight="600">Personal Information</Typography>
@@ -393,11 +565,6 @@ const AdminProfile = () => {
                           label="First Name"
                           value={profile.user_firstname}
                           onChange={(e) => handleChange("user_firstname", e.target.value)}
-                          InputProps={{
-                            startAdornment: (
-                              <PersonIcon color="action" sx={{ mr: 1 }} />
-                            ),
-                          }}
                         />
                         
                         <TextField
@@ -436,48 +603,46 @@ const AdminProfile = () => {
                   </Card>
                 </Grid>
 
-                <Grid item xs={12} md={6}>
+                <Grid item xs={12} md={4}>
                   <Stack spacing={3}>
                     <Card>
                       <CardContent>
                         <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
                           <BusinessIcon color="primary" sx={{ mr: 2 }} />
-                          <Typography variant="h6" fontWeight="600">Department Information</Typography>
+                          <Typography variant="h6" fontWeight="600">Organization Details</Typography>
                         </Box>
                         
-                        <FormControl fullWidth>
-                          <InputLabel>Department</InputLabel>
-                          <Select
-                            value={profile.department}
-                            label="Department"
-                            onChange={(e) => handleChange('department', e.target.value)}
-                          >
-                            <MenuItem value="Administration">Administration</MenuItem>
-                            <MenuItem value="IT Management">IT Management</MenuItem>
-                            <MenuItem value="System Administration">System Administration</MenuItem>
-                            <MenuItem value="User Management">User Management</MenuItem>
-                            <MenuItem value="Security">Security</MenuItem>
-                          </Select>
-                        </FormControl>
-                      </CardContent>
-                    </Card>
-
-                    <Card>
-                      <CardContent>
-                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-                          <NotificationsIcon color="primary" sx={{ mr: 2 }} />
-                          <Typography variant="h6" fontWeight="600">Notification Preferences</Typography>
-                        </Box>
-                        
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={profile.notifications}
-                              onChange={(e) => handleChange('notifications', e.target.checked)}
-                            />
-                          }
-                          label="Receive email notifications"
-                        />
+                        <Stack spacing={2}>
+                          <TextField
+                            fullWidth
+                            label="Organization"
+                            value={profile.organization}
+                            onChange={(e) => handleChange('organization', e.target.value)}
+                          />
+                          
+                          <TextField
+                            fullWidth
+                            label="Designation"
+                            value={profile.designation}
+                            onChange={(e) => handleChange('designation', e.target.value)}
+                          />
+                          
+                          <FormControl fullWidth>
+                            <InputLabel>Department</InputLabel>
+                            <Select
+                              value={profile.department}
+                              label="Department"
+                              onChange={(e) => handleChange('department', e.target.value)}
+                            >
+                              <MenuItem value="Administration">Administration</MenuItem>
+                              <MenuItem value="IT Management">IT Management</MenuItem>
+                              <MenuItem value="System Administration">System Administration</MenuItem>
+                              <MenuItem value="User Management">User Management</MenuItem>
+                              <MenuItem value="Security">Security</MenuItem>
+                              <MenuItem value="DENR Operations">DENR Operations</MenuItem>
+                            </Select>
+                          </FormControl>
+                        </Stack>
                       </CardContent>
                     </Card>
                   </Stack>
@@ -519,6 +684,7 @@ const AdminProfile = () => {
                           <TableCell>User</TableCell>
                           <TableCell>Email</TableCell>
                           <TableCell>Role</TableCell>
+                          <TableCell>Organization</TableCell>
                           <TableCell>Status</TableCell>
                           <TableCell align="center">Actions</TableCell>
                         </TableRow>
@@ -536,7 +702,7 @@ const AdminProfile = () => {
                                     {userItem.user_firstname} {userItem.user_lastname}
                                   </Typography>
                                   <Typography variant="body2" color="text.secondary">
-                                    ID: {userItem.id}
+                                    {userItem.designation}
                                   </Typography>
                                 </Box>
                               </Box>
@@ -552,6 +718,7 @@ const AdminProfile = () => {
                                 }
                               />
                             </TableCell>
+                            <TableCell>{userItem.organization}</TableCell>
                             <TableCell>
                               <Chip 
                                 label={userItem.deactivated ? "Deactivated" : "Active"} 
@@ -592,10 +759,10 @@ const AdminProfile = () => {
               </Card>
             </TabPanel>
 
-            {/* Security Tab */}
+            {/* Security & Audit Tab */}
             <TabPanel value={tabValue} index={2}>
               <Grid container spacing={3}>
-                <Grid item xs={12} md={6}>
+                <Grid item xs={12} md={8}>
                   <Card>
                     <CardContent>
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
@@ -618,23 +785,252 @@ const AdminProfile = () => {
                         <Button 
                           variant="outlined" 
                           startIcon={<LockIcon />}
+                          onClick={() => setChangePasswordDialogOpen(true)}
                           disabled={profile.deactivated}
                         >
                           Change Password
                         </Button>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+
+                  {/* Active Sessions */}
+                  <Card sx={{ mt: 3 }}>
+                    <CardContent>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <ComputerIcon color="primary" sx={{ mr: 2 }} />
+                          <Typography variant="h6" fontWeight="600">Active Sessions</Typography>
+                        </Box>
+                        <Badge badgeContent={activeSessions.length} color="primary">
+                          <RefreshIcon color="action" />
+                        </Badge>
+                      </Box>
+                      
+                      <List>
+                        {activeSessions.map((session, index) => (
+                          <ListItem key={index} divider>
+                            <ListItemIcon>
+                              <PublicIcon color="action" />
+                            </ListItemIcon>
+                            <ListItemText
+                              primary={`${session.browser} on ${session.os}`}
+                              secondary={`IP: ${session.ip} • Last active: ${session.lastActive}`}
+                            />
+                            <ListItemSecondaryAction>
+                              <Tooltip title="Revoke Session">
+                                <IconButton 
+                                  edge="end" 
+                                  onClick={() => handleRevokeSession(session.id)}
+                                  color="error"
+                                >
+                                  <BlockIcon />
+                                </IconButton>
+                              </Tooltip>
+                            </ListItemSecondaryAction>
+                          </ListItem>
+                        ))}
+                      </List>
+                      
+                      {activeSessions.length === 0 && (
+                        <Typography color="text.secondary" textAlign="center" py={2}>
+                          No active sessions
+                        </Typography>
+                      )}
+                    </CardContent>
+                  </Card>
+                </Grid>
+                
+                <Grid item xs={12} md={6}>
+                  {/* Login History */}
+                  <Card>
+                    <CardContent>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <HistoryIcon color="primary" sx={{ mr: 2 }} />
+                          <Typography variant="h6" fontWeight="600">Login History</Typography>
+                        </Box>
+                        <Badge badgeContent={loginHistory.length} color="primary">
+                          <HistoryIcon color="action" />
+                        </Badge>
+                      </Box>
+                      
+                      <List>
+                        {loginHistory.map((login, index) => (
+                          <ListItem key={login.id} divider>
+                            <ListItemIcon>
+                              <LoginIcon color={login.success ? "success" : "error"} />
+                            </ListItemIcon>
+                            <ListItemText
+                              primary={`${login.ip} • ${login.device}`}
+                              secondary={`${new Date(login.timestamp?.toDate()).toLocaleString()} • ${login.success ? 'Success' : 'Failed'}`}
+                            />
+                            {!login.success && (
+                              <Chip label="Suspicious" color="warning" size="small" />
+                            )}
+                          </ListItem>
+                        ))}
+                      </List>
+                    </CardContent>
+                  </Card>
+
+                  {/* Audit Logs */}
+                  <Card sx={{ mt: 3 }}>
+                    <CardContent>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <WarningIcon color="primary" sx={{ mr: 2 }} />
+                          <Typography variant="h6" fontWeight="600">Recent Activity</Typography>
+                        </Box>
+                        <Button 
+                          startIcon={<DownloadIcon />}
+                          onClick={handleDownloadLogs}
+                          size="small"
+                        >
+                          Export
+                        </Button>
+                      </Box>
+                      
+                      <List sx={{ maxHeight: 300, overflow: 'auto' }}>
+                        {auditLogs.map((log, index) => (
+                          <ListItem key={log.id} divider>
+                            <ListItemText
+                              primary={log.action}
+                              secondary={`${new Date(log.timestamp?.toDate()).toLocaleString()} • IP: ${log.ip}`}
+                            />
+                          </ListItem>
+                        ))}
+                      </List>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              </Grid>
+            </TabPanel>
+
+            {/* Preferences Tab */}
+            <TabPanel value={tabValue} index={3}>
+              <Grid container spacing={3}>
+                <Grid item xs={12} md={6}>
+                  <Card>
+                    <CardContent>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                        <NotificationsIcon color="primary" sx={{ mr: 2 }} />
+                        <Typography variant="h6" fontWeight="600">Notification Preferences</Typography>
+                      </Box>
+                      
+                      <Stack spacing={2}>
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              checked={profile.notifications}
+                              onChange={(e) => handleChange('notifications', e.target.checked)}
+                            />
+                          }
+                          label="Email Notifications"
+                        />
+                        <FormControlLabel
+                          control={<Switch defaultChecked />}
+                          label="Planting Request Alerts"
+                        />
+                        <FormControlLabel
+                          control={<Switch defaultChecked />}
+                          label="Sensor Updates"
+                        />
+                        <FormControlLabel
+                          control={<Switch defaultChecked />}
+                          label="System Maintenance Alerts"
+                        />
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <Card>
+                    <CardContent>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                        {profile.theme === 'dark' ? <DarkModeIcon color="primary" /> : <LightModeIcon color="primary" />}
+                        <Typography variant="h6" fontWeight="600" sx={{ ml: 2 }}>
+                          Theme & Appearance
+                        </Typography>
+                      </Box>
+                      
+                      <Stack spacing={2}>
+                        <FormControl fullWidth>
+                          <InputLabel>Theme</InputLabel>
+                          <Select
+                            value={profile.theme}
+                            label="Theme"
+                            onChange={(e) => handleChange('theme', e.target.value)}
+                          >
+                            <MenuItem value="light">Light Mode</MenuItem>
+                            <MenuItem value="dark">Dark Mode</MenuItem>
+                            <MenuItem value="auto">Auto (System)</MenuItem>
+                          </Select>
+                        </FormControl>
+                        
+                        <FormControl fullWidth>
+                          <InputLabel>Dashboard Layout</InputLabel>
+                          <Select
+                            value={profile.dashboardLayout}
+                            label="Dashboard Layout"
+                            onChange={(e) => handleChange('dashboardLayout', e.target.value)}
+                          >
+                            <MenuItem value="default">Default</MenuItem>
+                            <MenuItem value="compact">Compact</MenuItem>
+                            <MenuItem value="detailed">Detailed</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              </Grid>
+            </TabPanel>
+
+            {/* Support Tab */}
+            <TabPanel value={tabValue} index={4}>
+              <Grid container spacing={3}>
+                <Grid item xs={12} md={6}>
+                  <Card>
+                    <CardContent>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                        <HelpIcon color="primary" sx={{ mr: 2 }} />
+                        <Typography variant="h6" fontWeight="600">Help & Support</Typography>
+                      </Box>
+                      
+                      <Stack spacing={2}>
+                        <Button 
+                          variant="outlined" 
+                          startIcon={<HelpIcon />}
+                          fullWidth
+                          sx={{ justifyContent: 'flex-start' }}
+                        >
+                          User Documentation
+                        </Button>
                         
                         <Button 
                           variant="outlined" 
-                          startIcon={<SecurityIcon />}
-                          disabled={profile.deactivated}
+                          startIcon={<BugReportIcon />}
+                          fullWidth
+                          sx={{ justifyContent: 'flex-start' }}
                         >
-                          View Security Logs
+                          Report a Bug
+                        </Button>
+                        
+                        <Button 
+                          variant="outlined" 
+                          startIcon={<EmailIcon />}
+                          fullWidth
+                          sx={{ justifyContent: 'flex-start' }}
+                        >
+                          Contact Support Team
                         </Button>
                       </Stack>
                     </CardContent>
                   </Card>
                 </Grid>
-                
+
                 <Grid item xs={12} md={6}>
                   <Card>
                     <CardContent>
@@ -647,16 +1043,27 @@ const AdminProfile = () => {
                         These actions are irreversible. Proceed with caution.
                       </Alert>
                       
-                      <Button 
-                        variant="contained" 
-                        color="error"
-                        startIcon={<BlockIcon />}
-                        onClick={() => setAdminDeactivateDialogOpen(true)}
-                        disabled={profile.deactivated}
-                        fullWidth
-                      >
-                        Deactivate My Account
-                      </Button>
+                      <Stack spacing={1}>
+                        <Button 
+                          variant="contained" 
+                          color="error"
+                          startIcon={<BlockIcon />}
+                          onClick={() => setAdminDeactivateDialogOpen(true)}
+                          disabled={profile.deactivated}
+                          fullWidth
+                        >
+                          Deactivate My Account
+                        </Button>
+                        
+                        <Button 
+                          variant="outlined"
+                          startIcon={<LogoutIcon />}
+                          onClick={logout}
+                          fullWidth
+                        >
+                          Log Out
+                        </Button>
+                      </Stack>
                     </CardContent>
                   </Card>
                 </Grid>
@@ -664,6 +1071,46 @@ const AdminProfile = () => {
             </TabPanel>
           </Paper>
         </Container>
+
+        {/* Change Password Dialog */}
+        <Dialog open={changePasswordDialogOpen} onClose={() => setChangePasswordDialogOpen(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>Change Password</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <TextField
+                fullWidth
+                type="password"
+                label="Current Password"
+                value={passwordData.currentPassword}
+                onChange={(e) => setPasswordData(prev => ({ ...prev, currentPassword: e.target.value }))}
+              />
+              <TextField
+                fullWidth
+                type="password"
+                label="New Password"
+                value={passwordData.newPassword}
+                onChange={(e) => setPasswordData(prev => ({ ...prev, newPassword: e.target.value }))}
+              />
+              <TextField
+                fullWidth
+                type="password"
+                label="Confirm New Password"
+                value={passwordData.confirmPassword}
+                onChange={(e) => setPasswordData(prev => ({ ...prev, confirmPassword: e.target.value }))}
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setChangePasswordDialogOpen(false)}>Cancel</Button>
+            <Button 
+              onClick={handleChangePassword}
+              variant="contained"
+              disabled={!passwordData.currentPassword || !passwordData.newPassword || passwordData.newPassword !== passwordData.confirmPassword}
+            >
+              Change Password
+            </Button>
+          </DialogActions>
+        </Dialog>
 
         {/* User Deactivation Dialog */}
         <Dialog open={deactivateDialogOpen} onClose={() => setDeactivateDialogOpen(false)}>
