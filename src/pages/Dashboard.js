@@ -1,5 +1,5 @@
-// src/pages/Dashboard.js
-import React, { useState } from 'react';
+// src/pages/AdminDashboard.js
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Toolbar,
@@ -9,367 +9,1056 @@ import {
   Card,
   CardContent,
   Typography,
-  Chip,
+  Button,
   IconButton,
-  Tabs,
-  Tab,
   Paper,
-  LinearProgress,
-  Alert
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  List,
+  ListItem,
+  ListItemText,
+  Divider,
+  CircularProgress as MuiCircularProgress,
+  Alert,
+  Snackbar,
+  Chip,
+  ToggleButtonGroup,
+  ToggleButton
 } from '@mui/material';
 import {
+  People,
+  PendingActions,
+  Assignment,
+  CheckCircle,
+  LocationOn,
+  ListAlt,
+  BarChart,
   TrendingUp,
-  Sensors,
-  Lightbulb,
-  Warning,
   Refresh,
-  NotificationsActive,
-  Grass, // Replaced Eco with Grass
-  Dashboard as DashboardIcon
+  Check,
+  Clear,
+  Sensors,
+  Nature
 } from '@mui/icons-material';
+import { collection, getDocs,  getDoc, query, where, updateDoc, doc, Timestamp } from 'firebase/firestore';
+import { ref, get, query as rtdbQuery, orderByChild, limitToLast } from 'firebase/database'; // ADD RTDB functions
+import { firestore, rtdb } from '../firebase.js';
 import ReForestAppBar from "../pages/AppBar.js";
 import Navigation from "./Navigation.js";
 import { useAuth } from '../context/AuthContext.js';
 
-// Tab panel component
-function TabPanel({ children, value, index, ...other }) {
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`dashboard-tabpanel-${index}`}
-      aria-labelledby={`dashboard-tab-${index}`}
-      {...other}
-    >
-      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
-    </div>
-  );
-}
+// Recharts components
+import {
+  BarChart as RechartsBar,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer
+} from 'recharts';
 
-// Mock data for demonstration
-const mockAnalytics = {
-  overview: {
-    totalProjects: 12,
-    activeSensors: 45,
-    alerts: 3,
-    efficiency: 87
-  },
-  sensors: {
-    online: 42,
-    offline: 3,
-    critical: 2,
-    data: [
-      { id: 1, name: 'Soil Moisture A', status: 'online', value: '65%', trend: 'up' },
-      { id: 2, name: 'Temperature B', status: 'online', value: '24°C', trend: 'stable' },
-      { id: 3, name: 'Humidity C', status: 'critical', value: '15%', trend: 'down' },
-      { id: 4, name: 'pH Sensor D', status: 'offline', value: 'N/A', trend: 'none' }
-    ]
-  },
-  recommendations: [
-    { id: 1, type: 'irrigation', priority: 'high', message: 'Increase watering frequency for Zone 4', action: 'pending' },
-    { id: 2, type: 'maintenance', priority: 'medium', message: 'Schedule sensor calibration', action: 'completed' },
-    { id: 3, type: 'optimization', priority: 'low', message: 'Consider adding sensors in north sector', action: 'pending' }
-  ]
+// Leaflet map components
+import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+// Fix Leaflet default marker icon issue
+import icon from 'leaflet/dist/images/marker-icon.png';
+import iconShadow from 'leaflet/dist/images/marker-shadow.png';
+
+// Create custom icons for sensors and planting sites
+const createCustomIcon = (color) => {
+  return L.divIcon({
+    className: 'custom-marker',
+    html: `
+      <div style="
+        background-color: ${color};
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        border: 3px solid white;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      ">
+        <div style="
+          width: 10px;
+          height: 10px;
+          background-color: white;
+          border-radius: 50%;
+        "></div>
+      </div>
+    `,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15]
+  });
 };
 
-function Dashboard() {
+const sensorIcon = createCustomIcon('#2196f3'); // Blue for sensors
+const plantingSiteIcon = createCustomIcon('#4caf50'); // Green for planting sites
+
+let DefaultIcon = L.icon({
+  iconUrl: icon,
+  shadowUrl: iconShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41]
+});
+
+L.Marker.prototype.options.icon = DefaultIcon;
+
+const COLORS = ['#4caf50', '#2196f3', '#ff9800', '#f44336', '#9c27b0'];
+
+function AdminDashboard() {
   const { user, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState(0);
-  const [lastUpdated, setLastUpdated] = useState(new Date());
+  const [loading, setLoading] = useState(true);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [mapView, setMapView] = useState('both'); // 'sensors', 'sites', or 'both'
+  const [dashboardData, setDashboardData] = useState({
+    users: {
+      total: 0,
+      admins: 0,
+      fieldUsers: 0,
+      denrStaff: 0
+    },
+    pendingRequests: [],
+    plantingTasks: {
+      active: 0,
+      completed: 0,
+      pending: 0,
+      cancelled: 0
+    },
+    activityLog: [],
+    plantingSites: [],
+    sensors: [], // NEW: Array to store sensor locations
+    monthlyRequestsData: [],
+    userTrendData: []
+  });
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
-  const handleDrawerToggle = () => {
-    setMobileOpen(!mobileOpen);
-  };
+  // NEW: Fetch sensor locations from Firestore + RTDB sensor data
+const fetchSensorLocations = async () => {
+  try {
+    console.log('Fetching sensors from Firestore...');
+    const sensorsSnapshot = await getDocs(collection(firestore, 'sensors'));
+    
+    const sensorsWithLocations = await Promise.all(
+      sensorsSnapshot.docs.map(async (sensorDoc) => {
+        const sensorData = sensorDoc.data();
+        const sensorId = sensorDoc.id; // e.g., "s101"
+        
+        console.log(`Processing sensor: ${sensorId}`, sensorData);
+        
+        // ========== 1. FETCH LOCATION FROM FIRESTORE ==========
+        let locationData = null;
+        let locationDocId = null;
+        
+        if (sensorData.sensor_location) {
+          const locationPath = typeof sensorData.sensor_location === 'string' 
+            ? sensorData.sensor_location 
+            : sensorData.sensor_location.path;
+          
+          locationDocId = locationPath.split('/').pop();
+          
+          try {
+            const locationDocRef = doc(firestore, 'locations', locationDocId);
+            const locationDocSnap = await getDoc(locationDocRef);
+            
+            if (locationDocSnap.exists()) {
+              locationData = locationDocSnap.data();
+              console.log(`✓ Location found for ${sensorId}:`, locationData.location_name);
+            } else {
+              console.warn(`✗ Location not found: ${locationDocId}`);
+            }
+          } catch (err) {
+            console.error(`Error fetching location for ${sensorId}:`, err);
+          }
+        }
 
-  const handleLogout = () => {
-    logout();
-  };
+        // ========== 2. FETCH LATEST SENSOR READING FROM RTDB ==========
+        let latestReading = null;
+        
+        try {
+          // CORRECTED PATH: /sensors/s101
+          const rtdbPath = `sensors/${sensorId}`;
+          console.log(`Checking RTDB path: ${rtdbPath}`);
+          
+          const sensorDataRef = ref(rtdb, rtdbPath);
+          const snapshot = await get(sensorDataRef);
+          
+          if (snapshot.exists()) {
+            const data = snapshot.val();
+            console.log(`✓ RTDB data found for ${sensorId}:`, data);
+            
+            // Check if data has nested readings or direct values
+            if (data && typeof data === 'object') {
+              // If it has keys like 'SENSOR_123456', get the latest one
+              const readings = Object.keys(data)
+                .filter(key => key.startsWith('SENSOR_') || key.includes('reading'))
+                .map(key => ({
+                  id: key,
+                  ...data[key]
+                }));
+              
+              if (readings.length > 0) {
+                // Get most recent reading
+                latestReading = readings[readings.length - 1];
+                console.log(`✓ Latest reading extracted:`, latestReading);
+              } else {
+                // Data might be direct sensor values (no nested structure)
+                latestReading = data;
+                console.log(`✓ Using direct sensor data:`, latestReading);
+              }
+            }
+          } else {
+            console.warn(`✗ No data found at RTDB path: ${rtdbPath}`);
+          }
+          
+        } catch (err) {
+          console.error(`Error fetching RTDB data for ${sensorId}:`, err);
+        }
 
-  const handleTabChange = (event, newValue) => {
-    setActiveTab(newValue);
-  };
+        // ========== 3. BUILD SENSOR OBJECT ==========
+        const sensor = {
+          id: sensorId,
+          name: locationData?.location_name || `Sensor ${sensorId}`,
+          lat: locationData ? parseFloat(locationData.location_latitude) : null,
+          lng: locationData ? parseFloat(locationData.location_longitude) : null,
+          sensorType: sensorData.sensor_type || 'Multi-parameter',
+          status: sensorData.sensor_status || 'unknown',
+          lastCalibration: sensorData.sensor_lastCalibrationDate,
+          latestReading: latestReading,
+          locationId: locationDocId,
+          locationPath: sensorData.sensor_location,
+          ...sensorData
+        };
+        
+        console.log(`✓ Sensor object created for ${sensorId}:`, sensor);
+        return sensor;
+      })
+    );
 
-  const handleRefresh = () => {
-    setLastUpdated(new Date());
-    // In real app, this would trigger data refetch
-  };
+    // Filter sensors with valid coordinates
+    const validSensors = sensorsWithLocations.filter(
+      sensor => sensor.lat && sensor.lng && !isNaN(sensor.lat) && !isNaN(sensor.lng)
+    );
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'online': return 'success';
-      case 'offline': return 'default';
-      case 'critical': return 'error';
-      default: return 'default';
+    console.log('========================================');
+    console.log(`✓ Total sensors processed: ${sensorsWithLocations.length}`);
+    console.log(`✓ Valid sensors with coordinates: ${validSensors.length}`);
+    console.log('Sensor details:', validSensors);
+    console.log('========================================');
+    
+    return validSensors;
+
+  } catch (error) {
+    console.error('❌ Error fetching sensors:', error);
+    return [];
+  }
+};
+
+  // Fetch all dashboard data
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+      
+      // 1. Fetch Users
+      console.log('Fetching users...');
+      const usersSnapshot = await getDocs(collection(firestore, 'users'));
+      const usersData = usersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      console.log('Users fetched:', usersData.length);
+
+      // Calculate user breakdown by role
+      const userBreakdown = usersData.reduce((acc, userData) => {
+        acc.total++;
+        const role = userData.role_id || userData.roles || 'unknown';
+        const roleLower = role.toLowerCase();
+        if (roleLower.includes('admin')) acc.admins++;
+        else if (roleLower.includes('field') || roleLower.includes('planter')) acc.fieldUsers++;
+        else if (roleLower.includes('denr')) acc.denrStaff++;
+        return acc;
+      }, { total: 0, admins: 0, fieldUsers: 0, denrStaff: 0 });
+
+      // 2. Fetch ALL Planting Requests
+      console.log('Fetching planting requests...');
+      const allRequestsSnapshot = await getDocs(collection(firestore, 'plantingrequests'));
+      console.log('Total requests found:', allRequestsSnapshot.docs.length);
+      
+      // Map all requests with user and location data
+      const allRequests = await Promise.all(
+        allRequestsSnapshot.docs.map(async (docSnap) => {
+          const data = docSnap.data();
+          
+          // Fetch user name if user_id exists
+          let requesterName = 'Unknown User';
+          if (data.user_id) {
+            try {
+              const userQuery = query(collection(firestore, 'users'), where('user_id', '==', data.user_id));
+              const userSnapshot = await getDocs(userQuery);
+              if (!userSnapshot.empty) {
+                const userData = userSnapshot.docs[0].data();
+                requesterName = `${userData.user_Firstname || ''} ${userData.user_Lastname || ''}`.trim() || 'Unknown User';
+              }
+            } catch (err) {
+              console.error('Error fetching user:', err);
+            }
+          }
+
+          // Fetch location name if location_id exists
+          let locationName = 'Not specified';
+          if (data.location_id) {
+            try {
+              const locationQuery = query(collection(firestore, 'locations'), where('location_id', '==', data.location_id));
+              const locationSnapshot = await getDocs(locationQuery);
+              if (!locationSnapshot.empty) {
+                locationName = locationSnapshot.docs[0].data().location_name || 'Unknown Location';
+              }
+            } catch (err) {
+              console.error('Error fetching location:', err);
+            }
+          }
+
+          return {
+            id: docSnap.id,
+            requesterName,
+            type: 'Planting Request',
+            site: locationName,
+            date: data.request_date,
+            preferredDate: data.preferred_date,
+            remarks: data.request_remarks,
+            status: data.request_status || 'pending',
+            ...data
+          };
+        })
+      );
+
+      // Filter only pending requests
+      const pendingRequests = allRequests.filter(req => 
+        (req.request_status || '').toLowerCase() === 'pending'
+      );
+      console.log('Pending requests:', pendingRequests.length);
+
+      // 3. Fetch Planting Tasks
+      console.log('Fetching planting tasks...');
+      const tasksSnapshot = await getDocs(collection(firestore, 'plantingrecords'));
+      const tasksData = tasksSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      console.log('Tasks fetched:', tasksData.length);
+
+      const plantingTasks = tasksData.reduce((acc, task) => {
+        const status = (task.task_status || '').toLowerCase();
+        if (status === 'completed') acc.completed++;
+        else if (status === 'pending') acc.pending++;
+        else if (status === 'cancelled') acc.cancelled++;
+        else acc.active++;
+        return acc;
+      }, { active: 0, completed: 0, pending: 0, cancelled: 0 });
+
+      // 4. Create Activity Log from requests
+      const activityLog = allRequests
+        .sort((a, b) => {
+          const dateA = a.request_date?.toDate?.() || new Date(0);
+          const dateB = b.request_date?.toDate?.() || new Date(0);
+          return dateB - dateA;
+        })
+        .slice(0, 10)
+        .map(request => ({
+          id: request.id,
+          action: `${request.requesterName} submitted a planting request for ${request.site}`,
+          timestamp: request.request_date,
+          type: 'request'
+        }));
+
+      // 5. Fetch Planting Sites from locations collection
+      console.log('Fetching locations...');
+      const locationsSnapshot = await getDocs(collection(firestore, 'locations'));
+      const plantingSites = locationsSnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          name: data.location_name || 'Unnamed Location',
+          lat: parseFloat(data.location_latitude) || null,
+          lng: parseFloat(data.location_longitude) || null,
+          status: 'active',
+          ...data
+        };
+      }).filter(site => site.lat && site.lng && !isNaN(site.lat) && !isNaN(site.lng));
+      console.log('Planting sites with valid coordinates:', plantingSites.length);
+
+      // 6. NEW: Fetch Sensor Locations
+      const sensors = await fetchSensorLocations();
+
+      // 7. Generate Monthly Requests Data (last 6 months)
+      const monthlyRequestsData = generateMonthlyData(allRequests);
+
+      // 8. Generate User Trend Data
+      const userTrendData = generateUserTrendData(usersData);
+
+      // 9. Task distribution for pie chart
+      const taskDistribution = [
+        { name: 'Active', value: plantingTasks.active, color: COLORS[0] },
+        { name: 'Completed', value: plantingTasks.completed, color: COLORS[1] },
+        { name: 'Pending', value: plantingTasks.pending, color: COLORS[2] },
+        { name: 'Cancelled', value: plantingTasks.cancelled, color: COLORS[3] }
+      ].filter(item => item.value > 0);
+
+      setDashboardData({
+        users: userBreakdown,
+        pendingRequests,
+        plantingTasks,
+        activityLog,
+        plantingSites,
+        sensors, // NEW: Add sensors to state
+        monthlyRequestsData,
+        userTrendData,
+        taskDistribution
+      });
+
+      console.log('Dashboard data loaded successfully');
+
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+      setSnackbar({
+        open: true,
+        message: 'Error loading dashboard data: ' + error.message,
+        severity: 'error'
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
-  const getPriorityColor = (priority) => {
-    switch (priority) {
-      case 'high': return 'error';
-      case 'medium': return 'warning';
-      case 'low': return 'info';
-      default: return 'default';
+  // Generate monthly data for charts
+  const generateMonthlyData = (requests) => {
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const currentDate = new Date();
+    const monthlyData = [];
+
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
+      const monthName = monthNames[date.getMonth()];
+      
+      const count = requests.filter(request => {
+        const docDate = request.request_date?.toDate?.();
+        return docDate && 
+               docDate.getMonth() === date.getMonth() && 
+               docDate.getFullYear() === date.getFullYear();
+      }).length;
+
+      monthlyData.push({
+        month: monthName,
+        requests: count
+      });
+    }
+
+    return monthlyData;
+  };
+
+  // Generate user trend data
+  const generateUserTrendData = (usersData) => {
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+    return monthNames.map((month, index) => ({
+      month,
+      users: Math.floor(usersData.length * (0.6 + index * 0.08))
+    }));
+  };
+
+  // Handle request approval/rejection
+  const handleRequestAction = async (requestId, action) => {
+    try {
+      const requestRef = doc(firestore, 'plantingrequests', requestId);
+      await updateDoc(requestRef, {
+        request_status: action,
+        reviewedBy: user?.name || 'Admin',
+        reviewedAt: Timestamp.now()
+      });
+      
+      setSnackbar({
+        open: true,
+        message: `Request ${action} successfully!`,
+        severity: 'success'
+      });
+      
+      // Refresh data
+      fetchDashboardData();
+    } catch (error) {
+      console.error('Error updating request:', error);
+      setSnackbar({
+        open: true,
+        message: 'Error updating request: ' + error.message,
+        severity: 'error'
+      });
     }
   };
+
+  useEffect(() => {
+    fetchDashboardData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
+  const handleLogout = () => logout();
+  const handleRefresh = () => fetchDashboardData();
+
+  // Overview Cards Data - Updated to include sensors
+  const overviewCards = [
+    {
+      title: 'Total Users',
+      value: dashboardData.users.total,
+      subtitle: `Admins: ${dashboardData.users.admins} | Field: ${dashboardData.users.fieldUsers} | DENR: ${dashboardData.users.denrStaff}`,
+      icon: <People sx={{ fontSize: 40 }} />,
+      color: '#4caf50'
+    },
+    {
+      title: 'Active Sensors',
+      value: dashboardData.sensors.length,
+      subtitle: `Monitoring ${dashboardData.plantingSites.length} locations`,
+      icon: <Sensors sx={{ fontSize: 40 }} />,
+      color: '#2196f3'
+    },
+    {
+      title: 'Pending Requests',
+      value: dashboardData.pendingRequests.length,
+      subtitle: 'Awaiting approval',
+      icon: <PendingActions sx={{ fontSize: 40 }} />,
+      color: '#ff9800'
+    },
+    {
+      title: 'Completed Tasks',
+      value: dashboardData.plantingTasks.completed,
+      subtitle: 'Successfully finished',
+      icon: <CheckCircle sx={{ fontSize: 40 }} />,
+      color: '#ffc107'
+    }
+  ];
+
+  // Calculate map center based on sensors or planting sites
+  const defaultCenter = [10.3157, 123.8854]; // Cebu City
+  let mapCenter = defaultCenter;
+  
+  if (mapView === 'sensors' && dashboardData.sensors.length > 0) {
+    mapCenter = [dashboardData.sensors[0].lat, dashboardData.sensors[0].lng];
+  } else if (mapView === 'sites' && dashboardData.plantingSites.length > 0) {
+    mapCenter = [dashboardData.plantingSites[0].lat, dashboardData.plantingSites[0].lng];
+  } else if (dashboardData.sensors.length > 0) {
+    mapCenter = [dashboardData.sensors[0].lat, dashboardData.sensors[0].lng];
+  } else if (dashboardData.plantingSites.length > 0) {
+    mapCenter = [dashboardData.plantingSites[0].lat, dashboardData.plantingSites[0].lng];
+  }
+
+  // Determine what to show on map
+  const showSensors = mapView === 'sensors' || mapView === 'both';
+  const showSites = mapView === 'sites' || mapView === 'both';
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+        <MuiCircularProgress size={60} />
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ display: "flex", minHeight: '100vh' }}>
-      {/* Top App Bar */}
       <ReForestAppBar
         handleDrawerToggle={handleDrawerToggle}
         user={user}
         onLogout={handleLogout}
       />
 
-      {/* Side Navigation */}
       <Navigation
         mobileOpen={mobileOpen}
         handleDrawerToggle={handleDrawerToggle}
         isMobile={isMobile}
       />
 
-      {/* Main Content */}
       <Box
         component="main"
         sx={{
           flexGrow: 1,
           p: { xs: 2, md: 3 },
-          width: { md: `calc(100% - 240px)` },
-          backgroundColor: '#f5f5f5'
+          width: { md: "calc(100% - 240px)" },
+          backgroundColor: '#f8f9fa'
         }}
       >
-        <Toolbar /> {/* Push content below AppBar */}
+        <Toolbar />
         
-        {/* Header Section */}
+        {/* Header */}
         <Box sx={{ mb: 4 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
             <Box>
-              <Typography variant="h4" component="h1" gutterBottom sx={{ fontWeight: 600 }}>
-                Analytics Dashboard
+              <Typography variant="h4" component="h1" gutterBottom sx={{ fontWeight: 600, color: '#2e7d32' }}>
+                ReForest Admin Dashboard
               </Typography>
               <Typography variant="subtitle1" color="text.secondary">
-                Welcome back, {user?.name || 'Admin'}! Here's your project overview.
+                Welcome back, {user?.name || 'Admin'}! Manage and monitor reforestation activities.
               </Typography>
             </Box>
-            <IconButton onClick={handleRefresh} color="primary" sx={{ mb: 1 }}>
-              <Refresh />
-            </IconButton>
+            <Button 
+              startIcon={<Refresh />} 
+              onClick={handleRefresh} 
+              variant="outlined"
+            >
+              Refresh Data
+            </Button>
           </Box>
-          <Typography variant="caption" color="text.secondary">
-            Last updated: {lastUpdated.toLocaleTimeString()}
-          </Typography>
         </Box>
 
-        {/* Alert Banner */}
-        {mockAnalytics.overview.alerts > 0 && (
-          <Alert 
-            severity="warning" 
-            sx={{ mb: 3 }}
-            action={
-              <IconButton color="inherit" size="small">
-                <NotificationsActive />
-              </IconButton>
-            }
-          >
-            {mockAnalytics.overview.alerts} critical alerts require your attention
-          </Alert>
-        )}
-
         {/* Overview Cards */}
-        <Grid container spacing={3} sx={{ mb: 4 }}>
-          <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ height: '100%', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
-              <CardContent sx={{ color: 'white' }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <Box>
-                    <Typography variant="h3" component="div" fontWeight="bold">
-                      {mockAnalytics.overview.totalProjects}
-                    </Typography>
-                    <Typography variant="body2">Active Projects</Typography>
+        <Grid container spacing={2} sx={{ mb: 3 }}>
+          {overviewCards.map((card, index) => (
+            <Grid item xs={12} sm={6} md={3} key={index}>
+              <Card 
+                sx={{ 
+                  height: '100%', 
+                  background: `linear-gradient(135deg, ${card.color}20 0%, ${card.color}10 100%)`,
+                  border: `1px solid ${card.color}30`,
+                  transition: 'transform 0.2s',
+                  '&:hover': {
+                    transform: 'translateY(-4px)',
+                    boxShadow: 3
+                  }
+                }}
+              >
+                <CardContent sx={{ p: 2 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <Box>
+                      <Typography variant="h4" fontWeight="bold" color={card.color}>
+                        {card.value}
+                      </Typography>
+                      <Typography variant="subtitle1" sx={{ mb: 0.5 }}>
+                        {card.title}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {card.subtitle}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ color: card.color }}>
+                      {card.icon}
+                    </Box>
                   </Box>
-                  <Grass sx={{ fontSize: 40, opacity: 0.8 }} /> {/* Replaced Eco with Grass */}
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
 
-          <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ height: '100%' }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <Box>
-                    <Typography variant="h3" component="div" fontWeight="bold" color="primary">
-                      {mockAnalytics.overview.activeSensors}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">Active Sensors</Typography>
-                  </Box>
-                  <Sensors color="primary" sx={{ fontSize: 40 }} />
-                </Box>
-                <LinearProgress 
-                  variant="determinate" 
-                  value={(mockAnalytics.sensors.online / mockAnalytics.overview.activeSensors) * 100} 
-                  sx={{ mt: 2 }}
-                />
-                <Typography variant="caption" color="text.secondary">
-                  {mockAnalytics.sensors.online} online
+        {/* Pending Requests Table */}
+        <Grid container spacing={3} sx={{ mb: 3 }}>
+          <Grid item xs={12}>
+            <Paper sx={{ p: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
+                  <PendingActions sx={{ mr: 1 }} />
+                  Pending Requests ({dashboardData.pendingRequests.length})
                 </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-
-          <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ height: '100%' }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <Box>
-                    <Typography variant="h3" component="div" fontWeight="bold" color="warning.main">
-                      {mockAnalytics.overview.alerts}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">Critical Alerts</Typography>
-                  </Box>
-                  <Warning color="warning" sx={{ fontSize: 40 }} />
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-
-          <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ height: '100%' }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <Box>
-                    <Typography variant="h3" component="div" fontWeight="bold" color="success.main">
-                      {mockAnalytics.overview.efficiency}%
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">System Efficiency</Typography>
-                  </Box>
-                  <TrendingUp color="success" sx={{ fontSize: 40 }} />
-                </Box>
-                <LinearProgress 
-                  variant="determinate" 
-                  value={mockAnalytics.overview.efficiency} 
-                  sx={{ mt: 2 }}
-                  color="success"
-                />
-              </CardContent>
-            </Card>
+              </Box>
+              <TableContainer sx={{ maxHeight: 400 }}>
+                <Table stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell><strong>Requester</strong></TableCell>
+                      <TableCell><strong>Site</strong></TableCell>
+                      <TableCell><strong>Preferred Date</strong></TableCell>
+                      <TableCell><strong>Remarks</strong></TableCell>
+                      <TableCell align="center"><strong>Actions</strong></TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {dashboardData.pendingRequests.map((request) => (
+                      <TableRow key={request.id} hover>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight="medium">
+                            {request.requesterName}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">
+                            {request.site}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">
+                            {request.preferredDate || 'Not specified'}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
+                            {request.remarks || '-'}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="center">
+                          <IconButton 
+                            color="success" 
+                            size="small"
+                            onClick={() => handleRequestAction(request.id, 'approved')}
+                            sx={{ mr: 1 }}
+                            title="Approve"
+                          >
+                            <Check />
+                          </IconButton>
+                          <IconButton 
+                            color="error" 
+                            size="small"
+                            onClick={() => handleRequestAction(request.id, 'declined')}
+                            title="Decline"
+                          >
+                            <Clear />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {dashboardData.pendingRequests.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} align="center">
+                          <Typography color="text.secondary" sx={{ py: 3 }}>
+                            No pending requests at this time
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
           </Grid>
         </Grid>
 
-        {/* Analytics Tabs */}
-        <Paper sx={{ width: '100%', mb: 3 }}>
-          <Tabs
-            value={activeTab}
-            onChange={handleTabChange}
-            indicatorColor="primary"
-            textColor="primary"
-            variant="fullWidth"
-          >
-            <Tab icon={<Sensors />} label="Sensor Analytics" />
-            <Tab icon={<Lightbulb />} label="Recommendations" />
-            <Tab icon={<DashboardIcon />} label="Project Overview" /> {/* Replaced TrendingUp with DashboardIcon */}
-          </Tabs>
+        {/* Map and Activity */}
+        <Grid container spacing={3} sx={{ mb: 3 }}>
+          {/* Interactive Map with Sensors */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 2, height: 500 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
+                  <LocationOn sx={{ mr: 1 }} />
+                  Location Map
+                </Typography>
+                
+                <ToggleButtonGroup
+                  value={mapView}
+                  exclusive
+                  onChange={(e, newView) => newView && setMapView(newView)}
+                  size="small"
+                >
+                  <ToggleButton value="both">
+                    Both
+                  </ToggleButton>
+                  <ToggleButton value="sensors">
+                    Sensors ({dashboardData.sensors.length})
+                  </ToggleButton>
+                  <ToggleButton value="sites">
+                    Sites ({dashboardData.plantingSites.length})
+                  </ToggleButton>
+                </ToggleButtonGroup>
+              </Box>
 
-          {/* Sensor Analytics Tab */}
-          <TabPanel value={activeTab} index={0}>
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                <Typography variant="h6" gutterBottom>Sensor Status Overview</Typography>
-                <Grid container spacing={2} sx={{ mb: 3 }}>
-                  <Grid item>
-                    <Chip label={`Online: ${mockAnalytics.sensors.online}`} color="success" variant="outlined" />
-                  </Grid>
-                  <Grid item>
-                    <Chip label={`Offline: ${mockAnalytics.sensors.offline}`} color="default" variant="outlined" />
-                  </Grid>
-                  <Grid item>
-                    <Chip label={`Critical: ${mockAnalytics.sensors.critical}`} color="error" variant="outlined" />
-                  </Grid>
-                </Grid>
-              </Grid>
+              <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+                <Chip 
+                  icon={<Sensors />} 
+                  label={`${dashboardData.sensors.length} Active Sensors`} 
+                  color="primary" 
+                  size="small"
+                  sx={{ display: showSensors ? 'flex' : 'none' }}
+                />
+                <Chip 
+                  icon={<Nature />} 
+                  label={`${dashboardData.plantingSites.length} Planting Sites`} 
+                  color="success" 
+                  size="small"
+                  sx={{ display: showSites ? 'flex' : 'none' }}
+                />
+              </Box>
               
-              <Grid item xs={12}>
-                <Typography variant="h6" gutterBottom>Sensor Details</Typography>
-                <Grid container spacing={2}>
-                  {mockAnalytics.sensors.data.map((sensor) => (
-                    <Grid item xs={12} sm={6} md={3} key={sensor.id}>
-                      <Card variant="outlined">
-                        <CardContent>
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                            <Typography variant="subtitle2">{sensor.name}</Typography>
-                            <Chip 
-                              label={sensor.status} 
+              <Box sx={{ height: 380, borderRadius: 1, overflow: 'hidden' }}>
+                {(dashboardData.sensors.length > 0 || dashboardData.plantingSites.length > 0) ? (
+                  <MapContainer
+                    center={mapCenter}
+                    zoom={13}
+                    style={{ height: '100%', width: '100%' }}
+                  >
+                    <TileLayer
+                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    />
+                    
+                    {/* Render IoT Sensors */}
+                    {showSensors && dashboardData.sensors.map((sensor) => (
+                      <React.Fragment key={`sensor-${sensor.id}`}>
+                        <Marker 
+                          position={[sensor.lat, sensor.lng]}
+                          icon={sensorIcon}
+                        >
+                          <Popup>
+                            <Box sx={{ minWidth: 200 }}>
+                              <Typography variant="subtitle1" fontWeight="bold" color="primary">
+                                🔵 IoT Sensor
+                              </Typography>
+                              <Divider sx={{ my: 1 }} />
+                              <Typography variant="body2"><strong>Location:</strong> {sensor.name}</Typography>
+                              <Typography variant="body2"><strong>Sensor ID:</strong> {sensor.id.slice(0, 12)}...</Typography>
+                              <Typography variant="body2"><strong>Type:</strong> {sensor.sensorType}</Typography>
+                              <Typography variant="body2">
+                                <strong>Status:</strong> {' '}
+                                <Chip 
+                                  label={sensor.status === 'active' ? 'Online' : 'Offline'} 
+                                  size="small" 
+                                  color={sensor.status === 'active' ? 'success' : 'error'}
+                                />
+                              </Typography>
+                              <Typography variant="body2" sx={{ mt: 1 }}>
+                                <strong>Coordinates:</strong><br />
+                                Lat: {sensor.lat.toFixed(6)}<br />
+                                Lng: {sensor.lng.toFixed(6)}
+                              </Typography>
+                              
+                              {sensor.latestReading && (
+                                <>
+                                  <Divider sx={{ my: 1 }} />
+                                  <Typography variant="caption" fontWeight="bold">Latest Reading:</Typography>
+                                  <Typography variant="caption" display="block">
+                                    Temp: {sensor.latestReading.sensorData_temperature}°C
+                                  </Typography>
+                                  <Typography variant="caption" display="block">
+                                    Moisture: {sensor.latestReading.sensorData_soilMoisture}%
+                                  </Typography>
+                                  <Typography variant="caption" display="block">
+                                    pH: {sensor.latestReading.sensorData_pH}
+                                  </Typography>
+                                </>
+                              )}
+                              
+                              <Button 
+                                size="small" 
+                                variant="outlined" 
+                                fullWidth 
+                                sx={{ mt: 1 }}
+                                onClick={() => window.open(
+                                  `https://www.google.com/maps/search/?api=1&query=${sensor.lat},${sensor.lng}`,
+                                  '_blank'
+                                )}
+                              >
+                                Open in Google Maps
+                              </Button>
+                            </Box>
+                          </Popup>
+                        </Marker>
+                        
+                        {/* Add a circle around sensor for coverage area */}
+                        <Circle
+                          center={[sensor.lat, sensor.lng]}
+                          radius={50} // 50 meters
+                          pathOptions={{
+                            color: '#2196f3',
+                            fillColor: '#2196f3',
+                            fillOpacity: 0.1
+                          }}
+                        />
+                      </React.Fragment>
+                    ))}
+                    
+                    {/* Render Planting Sites */}
+                    {showSites && dashboardData.plantingSites.map((site) => (
+                      <Marker 
+                        key={`site-${site.id}`} 
+                        position={[site.lat, site.lng]}
+                        icon={plantingSiteIcon}
+                      >
+                        <Popup>
+                          <Box sx={{ minWidth: 180 }}>
+                            <Typography variant="subtitle1" fontWeight="bold" color="success.main">
+                              🌱 Planting Site
+                            </Typography>
+                            <Divider sx={{ my: 1 }} />
+                            <Typography variant="body2"><strong>{site.name}</strong></Typography>
+                            <Typography variant="body2">Status: {site.status}</Typography>
+                            <Typography variant="body2" sx={{ mt: 1 }}>
+                              <strong>Coordinates:</strong><br />
+                              {site.lat.toFixed(6)}, {site.lng.toFixed(6)}
+                            </Typography>
+                            <Button 
                               size="small" 
-                              color={getStatusColor(sensor.status)}
-                            />
+                              variant="outlined" 
+                              color="success"
+                              fullWidth 
+                              sx={{ mt: 1 }}
+                              onClick={() => window.open(
+                                `https://waze.com/ul?ll=${site.lat},${site.lng}&navigate=yes`,
+                                '_blank'
+                              )}
+                            >
+                              Navigate with Waze
+                            </Button>
                           </Box>
-                          <Typography variant="h6">{sensor.value}</Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            Current reading
-                          </Typography>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  ))}
-                </Grid>
-              </Grid>
-            </Grid>
-          </TabPanel>
+                        </Popup>
+                      </Marker>
+                    ))}
+                  </MapContainer>
+                ) : (
+                  <Box
+                    sx={{
+                      height: '100%',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      bgcolor: '#f5f5f5',
+                      borderRadius: 1
+                    }}
+                  >
+                    <LocationOn sx={{ fontSize: 48, color: '#bdbdbd', mb: 2 }} />
+                    <Typography color="text.secondary">
+                      No sensors or planting sites with valid coordinates
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
+                      Deploy sensors and add locations with latitude and longitude
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+            </Paper>
+          </Grid>
 
-          {/* Recommendations Tab */}
-          <TabPanel value={activeTab} index={1}>
-            <Typography variant="h6" gutterBottom>Active Recommendations</Typography>
-            <Grid container spacing={2}>
-              {mockAnalytics.recommendations.map((rec) => (
-                <Grid item xs={12} key={rec.id}>
-                  <Card>
-                    <CardContent>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <Box>
-                          <Chip 
-                            label={rec.priority} 
-                            size="small" 
-                            color={getPriorityColor(rec.priority)}
-                            sx={{ mb: 1 }}
-                          />
-                          <Typography variant="body1" gutterBottom>
-                            {rec.message}
+          {/* Activity Log */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 2, height: 500 }}>
+              <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <ListAlt sx={{ mr: 1 }} />
+                Recent Activity
+              </Typography>
+              
+              <List sx={{ maxHeight: 430, overflow: 'auto' }}>
+                {dashboardData.activityLog.map((activity, index) => (
+                  <React.Fragment key={activity.id}>
+                    <ListItem alignItems="flex-start">
+                      <ListItemText
+                        primary={
+                          <Typography variant="body2">
+                            {activity.action}
                           </Typography>
+                        }
+                        secondary={
                           <Typography variant="caption" color="text.secondary">
-                            Type: {rec.type} • Action: {rec.action}
+                            {activity.timestamp?.toDate?.()?.toLocaleString() || 'Recent'}
                           </Typography>
-                        </Box>
-                        <IconButton size="small">
-                          <Lightbulb />
-                        </IconButton>
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
-          </TabPanel>
+                        }
+                      />
+                    </ListItem>
+                    {index < dashboardData.activityLog.length - 1 && <Divider />}
+                  </React.Fragment>
+                ))}
+                {dashboardData.activityLog.length === 0 && (
+                  <Typography color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
+                    No recent activity
+                  </Typography>
+                )}
+              </List>
+            </Paper>
+          </Grid>
+        </Grid>
 
-          {/* Project Overview Tab */}
-          <TabPanel value={activeTab} index={2}>
-            <Typography variant="h6" gutterBottom>Project Performance</Typography>
-            <Typography color="text.secondary">
-              Detailed project analytics and performance metrics will be displayed here.
-              This section can include charts, graphs, and comparative analysis.
+        {/* Charts Section */}
+        <Paper sx={{ p: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+            <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
+              <TrendingUp sx={{ mr: 1 }} />
+              Analytics Overview
             </Typography>
-            {/* Placeholder for charts */}
-            <Box sx={{ height: 200, background: '#e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 2 }}>
-              <Typography color="text.secondary">Charts and Graphs Area</Typography>
-            </Box>
-          </TabPanel>
+          </Box>
+
+          <Grid container spacing={3}>
+            {/* Monthly Requests Bar Chart */}
+            <Grid item xs={12} md={6}>
+              <Box sx={{ p: 2, border: '1px solid #e0e0e0', borderRadius: 1 }}>
+                <Typography variant="subtitle1" gutterBottom fontWeight="medium">
+                  Planting Requests (Last 6 Months)
+                </Typography>
+                <ResponsiveContainer width="100%" height={250}>
+                  <RechartsBar data={dashboardData.monthlyRequestsData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="month" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="requests" fill="#4caf50" name="Requests" />
+                  </RechartsBar>
+                </ResponsiveContainer>
+              </Box>
+            </Grid>
+
+            {/* Task Distribution Pie Chart */}
+            <Grid item xs={12} md={6}>
+              <Box sx={{ p: 2, border: '1px solid #e0e0e0', borderRadius: 1 }}>
+                <Typography variant="subtitle1" gutterBottom fontWeight="medium">
+                  Task Status Distribution
+                </Typography>
+                {dashboardData.taskDistribution && dashboardData.taskDistribution.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={250}>
+                    <PieChart>
+                      <Pie
+                        data={dashboardData.taskDistribution}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {dashboardData.taskDistribution.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <Box sx={{ height: 250, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Typography color="text.secondary">No task data available</Typography>
+                  </Box>
+                )}
+              </Box>
+            </Grid>
+          </Grid>
         </Paper>
       </Box>
+
+      {/* Snackbar */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert 
+          onClose={() => setSnackbar({ ...snackbar, open: false })} 
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }
 
-export default Dashboard;
+export default AdminDashboard;
