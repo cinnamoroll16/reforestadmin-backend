@@ -153,15 +153,16 @@ function AdminDashboard() {
   // NEW: Fetch sensor locations from Firestore + RTDB sensor data
 const fetchSensorLocations = async () => {
   try {
-    console.log('Fetching sensors from Firestore...');
+    console.log('========== STARTING SENSOR FETCH ==========');
     const sensorsSnapshot = await getDocs(collection(firestore, 'sensors'));
+    console.log(`Found ${sensorsSnapshot.docs.length} sensors in Firestore`);
     
     const sensorsWithLocations = await Promise.all(
       sensorsSnapshot.docs.map(async (sensorDoc) => {
         const sensorData = sensorDoc.data();
-        const sensorId = sensorDoc.id; // e.g., "s101"
+        const sensorId = sensorDoc.id;
         
-        console.log(`Processing sensor: ${sensorId}`, sensorData);
+        console.log(`\n--- Processing Sensor: ${sensorId} ---`);
         
         // ========== 1. FETCH LOCATION FROM FIRESTORE ==========
         let locationData = null;
@@ -172,7 +173,9 @@ const fetchSensorLocations = async () => {
             ? sensorData.sensor_location 
             : sensorData.sensor_location.path;
           
-          locationDocId = locationPath.split('/').pop();
+          locationDocId = locationPath.split('/').filter(p => p).pop();
+          
+          console.log(`Fetching location: ${locationDocId}`);
           
           try {
             const locationDocRef = doc(firestore, 'locations', locationDocId);
@@ -180,12 +183,12 @@ const fetchSensorLocations = async () => {
             
             if (locationDocSnap.exists()) {
               locationData = locationDocSnap.data();
-              console.log(`✓ Location found for ${sensorId}:`, locationData.location_name);
+              console.log(`✓ Location: ${locationData.location_name}`);
             } else {
               console.warn(`✗ Location not found: ${locationDocId}`);
             }
           } catch (err) {
-            console.error(`Error fetching location for ${sensorId}:`, err);
+            console.error(`Error fetching location:`, err.message);
           }
         }
 
@@ -193,43 +196,33 @@ const fetchSensorLocations = async () => {
         let latestReading = null;
         
         try {
-          // CORRECTED PATH: /sensors/s101
-          const rtdbPath = `sensors/${sensorId}`;
-          console.log(`Checking RTDB path: ${rtdbPath}`);
+          // RTDB structure: sensors/{sensorId}/sensordata/{data_xxx}
+          const rtdbPath = `sensors/${sensorId}/sensordata`;
+          console.log(`Fetching from RTDB: ${rtdbPath}`);
           
           const sensorDataRef = ref(rtdb, rtdbPath);
           const snapshot = await get(sensorDataRef);
           
           if (snapshot.exists()) {
-            const data = snapshot.val();
-            console.log(`✓ RTDB data found for ${sensorId}:`, data);
+            const allReadings = snapshot.val();
+            console.log(`✓ Found ${Object.keys(allReadings).length} readings`);
             
-            // Check if data has nested readings or direct values
-            if (data && typeof data === 'object') {
-              // If it has keys like 'SENSOR_123456', get the latest one
-              const readings = Object.keys(data)
-                .filter(key => key.startsWith('SENSOR_') || key.includes('reading'))
-                .map(key => ({
-                  id: key,
-                  ...data[key]
-                }));
-              
-              if (readings.length > 0) {
-                // Get most recent reading
-                latestReading = readings[readings.length - 1];
-                console.log(`✓ Latest reading extracted:`, latestReading);
-              } else {
-                // Data might be direct sensor values (no nested structure)
-                latestReading = data;
-                console.log(`✓ Using direct sensor data:`, latestReading);
-              }
-            }
+            // Get all reading keys and sort them to find the latest
+            const readingKeys = Object.keys(allReadings).sort();
+            const latestKey = readingKeys[readingKeys.length - 1];
+            
+            latestReading = {
+              id: latestKey,
+              ...allReadings[latestKey]
+            };
+            
+            console.log(`✓ Latest reading (${latestKey}):`, latestReading);
           } else {
-            console.warn(`✗ No data found at RTDB path: ${rtdbPath}`);
+            console.warn(`✗ No sensordata found at: ${rtdbPath}`);
           }
           
         } catch (err) {
-          console.error(`Error fetching RTDB data for ${sensorId}:`, err);
+          console.error(`RTDB error for ${sensorId}:`, err.message);
         }
 
         // ========== 3. BUILD SENSOR OBJECT ==========
@@ -238,39 +231,61 @@ const fetchSensorLocations = async () => {
           name: locationData?.location_name || `Sensor ${sensorId}`,
           lat: locationData ? parseFloat(locationData.location_latitude) : null,
           lng: locationData ? parseFloat(locationData.location_longitude) : null,
-          sensorType: sensorData.sensor_type || 'Multi-parameter',
-          status: sensorData.sensor_status || 'unknown',
+          
+          // Sensor metadata
+          sensorType: 'Multi-parameter',
+          status: sensorData.sensor_status || 'offline',
           lastCalibration: sensorData.sensor_lastCalibrationDate,
-          latestReading: latestReading,
+          
+          // Latest reading (directly use the field names from RTDB)
+          latestReading: latestReading ? {
+            temperature: latestReading.temperature || 'N/A',
+            soilMoisture: latestReading.soilMoisture || 'N/A',
+            pH: latestReading.pH || 'N/A',
+            timestamp: latestReading.timestamp || null
+          } : null,
+          
           locationId: locationDocId,
-          locationPath: sensorData.sensor_location,
-          ...sensorData
+          locationPath: sensorData.sensor_location
         };
         
-        console.log(`✓ Sensor object created for ${sensorId}:`, sensor);
+        console.log(`✓ Sensor created:`, {
+          id: sensor.id,
+          name: sensor.name,
+          hasCoords: !!(sensor.lat && sensor.lng),
+          hasReading: !!sensor.latestReading,
+          reading: sensor.latestReading
+        });
+        
         return sensor;
       })
     );
 
-    // Filter sensors with valid coordinates
-    const validSensors = sensorsWithLocations.filter(
-      sensor => sensor.lat && sensor.lng && !isNaN(sensor.lat) && !isNaN(sensor.lng)
-    );
+    // Filter valid sensors
+    const validSensors = sensorsWithLocations.filter(sensor => {
+      const hasValidCoords = sensor.lat && sensor.lng && 
+                            !isNaN(sensor.lat) && !isNaN(sensor.lng);
+      
+      if (!hasValidCoords) {
+        console.warn(`Sensor ${sensor.id} excluded: invalid coordinates`);
+      }
+      
+      return hasValidCoords;
+    });
 
-    console.log('========================================');
-    console.log(`✓ Total sensors processed: ${sensorsWithLocations.length}`);
-    console.log(`✓ Valid sensors with coordinates: ${validSensors.length}`);
-    console.log('Sensor details:', validSensors);
-    console.log('========================================');
+    console.log('\n========== SENSOR FETCH SUMMARY ==========');
+    console.log(`Total: ${sensorsSnapshot.docs.length}`);
+    console.log(`Valid: ${validSensors.length}`);
+    console.log(`With readings: ${validSensors.filter(s => s.latestReading).length}`);
+    console.log('==========================================\n');
     
     return validSensors;
 
   } catch (error) {
-    console.error('❌ Error fetching sensors:', error);
+    console.error('❌ CRITICAL ERROR:', error);
     return [];
   }
 };
-
   // Fetch all dashboard data
   const fetchDashboardData = async () => {
     try {
@@ -300,35 +315,57 @@ const fetchSensorLocations = async () => {
       console.log('Fetching planting requests...');
       const allRequestsSnapshot = await getDocs(collection(firestore, 'plantingrequests'));
       console.log('Total requests found:', allRequestsSnapshot.docs.length);
-      
+
       // Map all requests with user and location data
       const allRequests = await Promise.all(
         allRequestsSnapshot.docs.map(async (docSnap) => {
           const data = docSnap.data();
           
-          // Fetch user name if user_id exists
+          // ========== FETCH USER NAME ==========
           let requesterName = 'Unknown User';
-          if (data.user_id) {
+          if (data.userRef) {
             try {
-              const userQuery = query(collection(firestore, 'users'), where('user_id', '==', data.user_id));
-              const userSnapshot = await getDocs(userQuery);
-              if (!userSnapshot.empty) {
-                const userData = userSnapshot.docs[0].data();
-                requesterName = `${userData.user_Firstname || ''} ${userData.user_Lastname || ''}`.trim() || 'Unknown User';
+              // Extract user ID from reference path (e.g., "/users/abc123" -> "abc123")
+              const userPath = typeof data.userRef === 'string' ? data.userRef : data.userRef.path;
+              const userId = userPath.split('/').pop();
+              
+              console.log(`Fetching user: ${userId}`);
+              
+              const userDocRef = doc(firestore, 'users', userId);
+              const userDocSnap = await getDoc(userDocRef);
+              
+              if (userDocSnap.exists()) {
+                const userData = userDocSnap.data();
+                requesterName = `${userData.user_Firstname || ''} ${userData.user_Lastname || ''}`.trim() || 
+                              `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 
+                              'Unknown User';
+                console.log(`✓ User found: ${requesterName}`);
+              } else {
+                console.warn(`✗ User not found: ${userId}`);
               }
             } catch (err) {
               console.error('Error fetching user:', err);
             }
           }
 
-          // Fetch location name if location_id exists
+          // ========== FETCH LOCATION NAME ==========
           let locationName = 'Not specified';
-          if (data.location_id) {
+          if (data.locationRef) {
             try {
-              const locationQuery = query(collection(firestore, 'locations'), where('location_id', '==', data.location_id));
-              const locationSnapshot = await getDocs(locationQuery);
-              if (!locationSnapshot.empty) {
-                locationName = locationSnapshot.docs[0].data().location_name || 'Unknown Location';
+              // Extract location ID from reference path
+              const locationPath = typeof data.locationRef === 'string' ? data.locationRef : data.locationRef.path;
+              const locationId = locationPath.split('/').pop();
+              
+              console.log(`Fetching location: ${locationId}`);
+              
+              const locationDocRef = doc(firestore, 'locations', locationId);
+              const locationDocSnap = await getDoc(locationDocRef);
+              
+              if (locationDocSnap.exists()) {
+                locationName = locationDocSnap.data().location_name || 'Unknown Location';
+                console.log(`✓ Location found: ${locationName}`);
+              } else {
+                console.warn(`✗ Location not found: ${locationId}`);
               }
             } catch (err) {
               console.error('Error fetching location:', err);
@@ -341,8 +378,8 @@ const fetchSensorLocations = async () => {
             type: 'Planting Request',
             site: locationName,
             date: data.request_date,
-            preferredDate: data.preferred_date,
-            remarks: data.request_remarks,
+            preferredDate: data.preferred_date || 'Not specified',
+            remarks: data.request_remarks || '-',
             status: data.request_status || 'pending',
             ...data
           };
@@ -354,7 +391,6 @@ const fetchSensorLocations = async () => {
         (req.request_status || '').toLowerCase() === 'pending'
       );
       console.log('Pending requests:', pendingRequests.length);
-
       // 3. Fetch Planting Tasks
       console.log('Fetching planting tasks...');
       const tasksSnapshot = await getDocs(collection(firestore, 'plantingrecords'));
@@ -373,7 +409,7 @@ const fetchSensorLocations = async () => {
         return acc;
       }, { active: 0, completed: 0, pending: 0, cancelled: 0 });
 
-      // 4. Create Activity Log from requests
+      // 4. Create Activity Log from requests (already has user names)
       const activityLog = allRequests
         .sort((a, b) => {
           const dateA = a.request_date?.toDate?.() || new Date(0);
@@ -385,6 +421,7 @@ const fetchSensorLocations = async () => {
           id: request.id,
           action: `${request.requesterName} submitted a planting request for ${request.site}`,
           timestamp: request.request_date,
+          status: request.status,
           type: 'request'
         }));
 
@@ -404,8 +441,19 @@ const fetchSensorLocations = async () => {
       }).filter(site => site.lat && site.lng && !isNaN(site.lat) && !isNaN(site.lng));
       console.log('Planting sites with valid coordinates:', plantingSites.length);
 
-      // 6. NEW: Fetch Sensor Locations
+      // 6. NEW: Fetch Sensor Locations with extensive logging
+      console.log('\n========== STARTING SENSOR FETCH ==========');
+      console.log('Firebase RTDB instance:', rtdb ? 'Connected' : 'NOT CONNECTED');
+      console.log('Firestore instance:', firestore ? 'Connected' : 'NOT CONNECTED');
+
       const sensors = await fetchSensorLocations();
+
+      console.log('========== SENSOR FETCH COMPLETE ==========');
+      console.log(`Total sensors returned: ${sensors.length}`);
+      if (sensors.length > 0) {
+        console.log('First sensor sample:', sensors[0]);
+      }
+      console.log('============================================\n');
 
       // 7. Generate Monthly Requests Data (last 6 months)
       const monthlyRequestsData = generateMonthlyData(allRequests);
@@ -661,88 +709,6 @@ const fetchSensorLocations = async () => {
             </Grid>
           ))}
         </Grid>
-
-        {/* Pending Requests Table */}
-        <Grid container spacing={3} sx={{ mb: 3 }}>
-          <Grid item xs={12}>
-            <Paper sx={{ p: 2 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
-                  <PendingActions sx={{ mr: 1 }} />
-                  Pending Requests ({dashboardData.pendingRequests.length})
-                </Typography>
-              </Box>
-              <TableContainer sx={{ maxHeight: 400 }}>
-                <Table stickyHeader>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell><strong>Requester</strong></TableCell>
-                      <TableCell><strong>Site</strong></TableCell>
-                      <TableCell><strong>Preferred Date</strong></TableCell>
-                      <TableCell><strong>Remarks</strong></TableCell>
-                      <TableCell align="center"><strong>Actions</strong></TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {dashboardData.pendingRequests.map((request) => (
-                      <TableRow key={request.id} hover>
-                        <TableCell>
-                          <Typography variant="body2" fontWeight="medium">
-                            {request.requesterName}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2">
-                            {request.site}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2">
-                            {request.preferredDate || 'Not specified'}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
-                            {request.remarks || '-'}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="center">
-                          <IconButton 
-                            color="success" 
-                            size="small"
-                            onClick={() => handleRequestAction(request.id, 'approved')}
-                            sx={{ mr: 1 }}
-                            title="Approve"
-                          >
-                            <Check />
-                          </IconButton>
-                          <IconButton 
-                            color="error" 
-                            size="small"
-                            onClick={() => handleRequestAction(request.id, 'declined')}
-                            title="Decline"
-                          >
-                            <Clear />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {dashboardData.pendingRequests.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={5} align="center">
-                          <Typography color="text.secondary" sx={{ py: 3 }}>
-                            No pending requests at this time
-                          </Typography>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Paper>
-          </Grid>
-        </Grid>
-
         {/* Map and Activity */}
         <Grid container spacing={3} sx={{ mb: 3 }}>
           {/* Interactive Map with Sensors */}
@@ -836,14 +802,19 @@ const fetchSensorLocations = async () => {
                                   <Divider sx={{ my: 1 }} />
                                   <Typography variant="caption" fontWeight="bold">Latest Reading:</Typography>
                                   <Typography variant="caption" display="block">
-                                    Temp: {sensor.latestReading.sensorData_temperature}°C
+                                    Temp: {sensor.latestReading.temperature}°C
                                   </Typography>
                                   <Typography variant="caption" display="block">
-                                    Moisture: {sensor.latestReading.sensorData_soilMoisture}%
+                                    Moisture: {sensor.latestReading.soilMoisture}%
                                   </Typography>
                                   <Typography variant="caption" display="block">
-                                    pH: {sensor.latestReading.sensorData_pH}
+                                    pH: {sensor.latestReading.pH}
                                   </Typography>
+                                  {sensor.latestReading.timestamp && (
+                                    <Typography variant="caption" display="block" color="text.secondary">
+                                      {new Date(sensor.latestReading.timestamp).toLocaleString()}
+                                    </Typography>
+                                  )}
                                 </>
                               )}
                               
@@ -937,42 +908,86 @@ const fetchSensorLocations = async () => {
               </Box>
             </Paper>
           </Grid>
-
-          {/* Activity Log */}
-          <Grid item xs={12} md={6}>
-            <Paper sx={{ p: 2, height: 500 }}>
-              <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                <ListAlt sx={{ mr: 1 }} />
-                Recent Activity
-              </Typography>
-              
-              <List sx={{ maxHeight: 430, overflow: 'auto' }}>
-                {dashboardData.activityLog.map((activity, index) => (
-                  <React.Fragment key={activity.id}>
-                    <ListItem alignItems="flex-start">
-                      <ListItemText
-                        primary={
-                          <Typography variant="body2">
-                            {activity.action}
-                          </Typography>
-                        }
-                        secondary={
-                          <Typography variant="caption" color="text.secondary">
-                            {activity.timestamp?.toDate?.()?.toLocaleString() || 'Recent'}
-                          </Typography>
-                        }
-                      />
-                    </ListItem>
-                    {index < dashboardData.activityLog.length - 1 && <Divider />}
-                  </React.Fragment>
-                ))}
-                {dashboardData.activityLog.length === 0 && (
-                  <Typography color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
-                    No recent activity
+    
+          {/* Pending Requests Table */}
+          <Grid container spacing={3} sx={{ mb: 3 }}>
+            <Grid item xs={12}>
+              <Paper sx={{ p: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
+                    <PendingActions sx={{ mr: 1 }} />
+                    Pending Requests ({dashboardData.pendingRequests.length})
                   </Typography>
-                )}
-              </List>
-            </Paper>
+                </Box>
+                <TableContainer sx={{ maxHeight: 400 }}>
+                  <Table stickyHeader>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell><strong>Requester</strong></TableCell>
+                        <TableCell><strong>Site</strong></TableCell>
+                        <TableCell><strong>Preferred Date</strong></TableCell>
+                        <TableCell><strong>Remarks</strong></TableCell>
+                        <TableCell align="center"><strong>Actions</strong></TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {dashboardData.pendingRequests.map((request) => (
+                        <TableRow key={request.id} hover>
+                          <TableCell>
+                            <Typography variant="body2" fontWeight="medium">
+                              {request.requesterName}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2">
+                              {request.site}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2">
+                              {request.preferredDate || 'Not specified'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
+                              {request.remarks || '-'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="center">
+                            <IconButton 
+                              color="success" 
+                              size="small"
+                              onClick={() => handleRequestAction(request.id, 'approved')}
+                              sx={{ mr: 1 }}
+                              title="Approve"
+                            >
+                              <Check />
+                            </IconButton>
+                            <IconButton 
+                              color="error" 
+                              size="small"
+                              onClick={() => handleRequestAction(request.id, 'declined')}
+                              title="Decline"
+                            >
+                              <Clear />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {dashboardData.pendingRequests.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={5} align="center">
+                            <Typography color="text.secondary" sx={{ py: 3 }}>
+                              No pending requests at this time
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Paper>
+            </Grid>
           </Grid>
         </Grid>
 
@@ -987,12 +1002,12 @@ const fetchSensorLocations = async () => {
 
           <Grid container spacing={3}>
             {/* Monthly Requests Bar Chart */}
-            <Grid item xs={12} md={6}>
-              <Box sx={{ p: 2, border: '1px solid #e0e0e0', borderRadius: 1 }}>
-                <Typography variant="subtitle1" gutterBottom fontWeight="medium">
-                  Planting Requests (Last 6 Months)
-                </Typography>
-                <ResponsiveContainer width="100%" height={250}>
+            <Grid item xs={12} md={7} sx={{ display: "flex" }}>
+            <Box sx={{ flex: 1, p: 2, border: "1px solid #e0e0e0", borderRadius: 1 }}>
+              <Typography variant="subtitle1" gutterBottom fontWeight="medium">
+                Planting Requests (Last 6 Months)
+              </Typography>
+              <ResponsiveContainer width="100%" height={250}>
                   <RechartsBar data={dashboardData.monthlyRequestsData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="month" />
@@ -1006,8 +1021,8 @@ const fetchSensorLocations = async () => {
             </Grid>
 
             {/* Task Distribution Pie Chart */}
-            <Grid item xs={12} md={6}>
-              <Box sx={{ p: 2, border: '1px solid #e0e0e0', borderRadius: 1 }}>
+            <Grid item xs={12} md={6} sx={{ display: "flex" }}>
+              <Box sx={{ flex: 1, p: 2, border: "1px solid #e0e0e0", borderRadius: 1 }}>
                 <Typography variant="subtitle1" gutterBottom fontWeight="medium">
                   Task Status Distribution
                 </Typography>

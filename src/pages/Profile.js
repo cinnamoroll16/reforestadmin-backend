@@ -9,7 +9,6 @@ import {
   Button,
   Box,
   Avatar,
-  Divider,
   FormControl,
   InputLabel,
   Select,
@@ -45,8 +44,6 @@ import {
   TableRow,
   Tooltip,
   Badge,
-  Link,
-  CardActions,
   ListItemIcon,
 } from "@mui/material";
 import {
@@ -81,11 +78,19 @@ import {
   Public as PublicIcon,
 } from "@mui/icons-material";
 import { 
-  doc, getDoc, setDoc, onSnapshot, collection, 
-  query, updateDoc, getDocs, serverTimestamp,
-  where, orderBy, limit
+  doc, 
+  setDoc, 
+  onSnapshot, 
+  collection, 
+  query, 
+  updateDoc, 
+  getDocs, 
+  serverTimestamp,
+  where, 
+  orderBy, 
+  limit
 } from "firebase/firestore";
-import { auth, firestore } from "../firebase.js";
+import { firestore } from "../firebase.js";
 import ReForestAppBar from "./AppBar.js";
 import Navigation from "./Navigation.js";
 import { useAuth } from '../context/AuthContext.js';
@@ -108,6 +113,7 @@ const AdminProfile = () => {
   const { user, logout } = useAuth();
   const [profile, setProfile] = useState({
     user_firstname: "",
+    user_middlename: "",
     user_lastname: "",
     user_email: "",
     phone: "",
@@ -118,6 +124,8 @@ const AdminProfile = () => {
     twoFactor: false,
     theme: "light",
     dashboardLayout: "default",
+    deactivated: false,
+    lastLogin: null,
   });
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
@@ -154,20 +162,29 @@ const AdminProfile = () => {
       return;
     }
 
+    let unsubscribers = []; // Store all unsubscribe functions
+
     const loadData = async () => {
       try {
-        // Load admin profile from users collection
+        console.log('========== LOADING ADMIN PROFILE ==========');
+        console.log('Current user:', user.uid);
+        console.log('User email:', user.email);
+        
+        // Load admin profile
         const userDocRef = doc(firestore, "users", user.uid);
         const userUnsubscribe = onSnapshot(
           userDocRef,
           (docSnap) => {
             if (docSnap.exists()) {
               const data = docSnap.data();
+              console.log('✓ Admin profile data loaded:', data);
+              
               setProfile({
-                user_firstname: data.user_firstname || "",
-                user_lastname: data.user_lastname || "",
-                user_email: data.user_email || user.email || "",
-                phone: data.phone || "",
+                user_firstname: data.user_Firstname || data.user_firstname || data.firstName || "",
+                user_middlename: data.user_Middlename || data.user_middlename || data.middleName || "",
+                user_lastname: data.user_Lastname || data.user_lastname || data.lastName || "",
+                user_email: data.user_email || data.email || user.email || "",
+                phone: data.phone || data.user_phone || "",
                 organization: data.organization || "DENR",
                 designation: data.designation || "System Administrator",
                 department: data.department || "Administration",
@@ -178,84 +195,152 @@ const AdminProfile = () => {
                 deactivated: data.deactivated || false,
                 lastLogin: data.lastLogin || null,
               });
+            } else {
+              console.warn('✗ User document does not exist');
+              setError('Profile not found');
             }
           },
           (error) => {
-            console.error("Error loading admin profile:", error);
+            console.error("✗ Error loading admin profile:", error);
+            setError("Failed to load profile data");
           }
         );
+        unsubscribers.push(userUnsubscribe);
 
         // Load roles
+        console.log('Loading roles...');
         const rolesSnapshot = await getDocs(collection(firestore, "roles"));
         const rolesData = rolesSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         }));
         setRoles(rolesData);
+        console.log(`✓ Roles loaded: ${rolesData.length}`);
 
         // Load all users
+        console.log('Loading users...');
         const usersQuery = query(collection(firestore, "users"));
-        const usersUnsubscribe = onSnapshot(usersQuery, (snapshot) => {
-          const usersData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }));
-          setUsers(usersData);
-        });
-
-        // Load login history
-        const loginHistoryQuery = query(
-          collection(firestore, "loginHistory"),
-          where("userId", "==", user.uid),
-          orderBy("timestamp", "desc"),
-          limit(10)
+        const usersUnsubscribe = onSnapshot(
+          usersQuery, 
+          (snapshot) => {
+            const usersData = snapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data()
+            }));
+            setUsers(usersData);
+            console.log(`✓ Users loaded: ${usersData.length}`);
+          },
+          (error) => {
+            console.error('✗ Error loading users:', error);
+          }
         );
-        const loginHistoryUnsubscribe = onSnapshot(loginHistoryQuery, (snapshot) => {
-          const historyData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }));
-          setLoginHistory(historyData);
-        });
+        unsubscribers.push(usersUnsubscribe);
 
-        // Load audit logs for current user
-        const auditLogsQuery = query(
-          collection(firestore, "auditLogs"),
-          where("userId", "==", user.uid),
-          orderBy("timestamp", "desc"),
-          limit(20)
-        );
-        const auditLogsUnsubscribe = onSnapshot(auditLogsQuery, (snapshot) => {
-          const logsData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }));
-          setAuditLogs(logsData);
-        });
+        // Load login history (with error handling)
+        console.log('Loading login history...');
+        try {
+          const loginHistoryQuery = query(
+            collection(firestore, "loginHistory"),
+            where("userId", "==", user.uid),
+            orderBy("timestamp", "desc"),
+            limit(10)
+          );
+          
+          const loginHistoryUnsubscribe = onSnapshot(
+            loginHistoryQuery, 
+            (snapshot) => {
+              const historyData = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+              }));
+              setLoginHistory(historyData);
+              console.log(`✓ Login history loaded: ${historyData.length} records`);
+            },
+            (error) => {
+              console.warn('⚠ Login history error:', error.message);
+              setLoginHistory([]);
+            }
+          );
+          unsubscribers.push(loginHistoryUnsubscribe);
+        } catch (error) {
+          console.warn('⚠ Login history collection does not exist:', error.message);
+          setLoginHistory([]);
+        }
+
+        // Load audit logs (with error handling)
+        console.log('Loading audit logs...');
+        try {
+          const auditLogsQuery = query(
+            collection(firestore, "auditLogs"),
+            where("userId", "==", user.uid),
+            orderBy("timestamp", "desc"),
+            limit(20)
+          );
+          
+          const auditLogsUnsubscribe = onSnapshot(
+            auditLogsQuery,
+            (snapshot) => {
+              const logsData = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+              }));
+              setAuditLogs(logsData);
+              console.log(`✓ Audit logs loaded: ${logsData.length} records`);
+            },
+            (error) => {
+              console.warn('⚠ Audit logs error:', error.message);
+              setAuditLogs([]);
+            }
+          );
+          unsubscribers.push(auditLogsUnsubscribe);
+        } catch (error) {
+          console.warn('⚠ Audit logs collection does not exist:', error.message);
+          setAuditLogs([]);
+        }
 
         setLoading(false);
+        console.log('========== PROFILE LOADED SUCCESSFULLY ==========\n');
 
-        return () => {
-          userUnsubscribe();
-          usersUnsubscribe();
-          loginHistoryUnsubscribe();
-          auditLogsUnsubscribe();
-        };
       } catch (error) {
-        setError("Failed to load data");
+        console.error("❌ Fatal error loading data:", error);
+        setError("Failed to load data: " + error.message);
         setLoading(false);
       }
     };
 
     loadData();
+
+    // Cleanup function - unsubscribe from all listeners
+    return () => {
+      console.log('🧹 Cleaning up subscriptions...');
+      unsubscribers.forEach((unsubscribe, index) => {
+        if (typeof unsubscribe === 'function') {
+          try {
+            unsubscribe();
+            console.log(`✓ Unsubscribed listener ${index + 1}`);
+          } catch (err) {
+            console.error(`✗ Error unsubscribing listener ${index + 1}:`, err);
+          }
+        }
+      });
+    };
   }, [user]);
 
   // Get role name from roleRef
   const getRoleName = (roleRef) => {
     if (!roleRef) return "Unknown";
-    const roleId = roleRef.split('/').pop();
-    const role = roles.find(r => r.id === roleId);
-    return role ? role.role_name : "Unknown";
+    
+    try {
+      // Handle both string path and DocumentReference
+      const rolePath = typeof roleRef === 'string' ? roleRef : roleRef.path;
+      const roleId = rolePath.split('/').filter(p => p).pop();
+      
+      const role = roles.find(r => r.id === roleId);
+      return role ? (role.role_name || role.name || "Unknown") : "Unknown";
+    } catch (error) {
+      console.error('Error getting role name:', error);
+      return "Unknown";
+    }
   };
 
   const handleChange = (field, value) => {
@@ -264,31 +349,58 @@ const AdminProfile = () => {
 
   // Save admin profile
   const handleSave = async () => {
-    if (!user) return;
+    if (!user) {
+      setError('No user logged in');
+      return;
+    }
 
     setSaving(true);
     setError(null);
 
     try {
       const userDocRef = doc(firestore, "users", user.uid);
-      await updateDoc(userDocRef, {
-        user_firstname: profile.user_firstname,
-        user_lastname: profile.user_lastname,
+      
+      // Use the correct Firestore field names (with capital letters to match DB schema)
+      const updates = {
+        user_Firstname: profile.user_firstname,
+        user_Middlename: profile.user_middlename,
+        user_Lastname: profile.user_lastname,
         user_email: profile.user_email,
         phone: profile.phone,
+        department: profile.department,
         organization: profile.organization,
         designation: profile.designation,
-        department: profile.department,
         notifications: profile.notifications,
         twoFactor: profile.twoFactor,
         theme: profile.theme,
         dashboardLayout: profile.dashboardLayout,
         lastUpdated: serverTimestamp(),
-      });
+      };
+
+      console.log('Saving profile updates:', updates);
+      
+      await updateDoc(userDocRef, updates);
       
       setSuccess("Profile updated successfully");
+      console.log('✓ Profile saved successfully');
+      
+      // Log audit event (optional - only if auditLogs collection exists)
+      try {
+        await setDoc(doc(collection(firestore, "auditLogs")), {
+          userId: user.uid,
+          action: "Profile updated",
+          timestamp: serverTimestamp(),
+          ip: "Unknown",
+          details: "Admin profile information updated"
+        });
+        console.log('✓ Audit log created');
+      } catch (auditError) {
+        console.warn('⚠ Could not log audit event:', auditError.message);
+      }
+      
     } catch (error) {
-      setError("Failed to save profile");
+      console.error('❌ Error saving profile:', error);
+      setError("Failed to save profile: " + error.message);
     } finally {
       setSaving(false);
     }
@@ -296,18 +408,33 @@ const AdminProfile = () => {
 
   // Handle password change
   const handleChangePassword = async () => {
-    // Implement password change logic here
-    setSuccess("Password changed successfully");
-    setChangePasswordDialogOpen(false);
-    setPasswordData({
-      currentPassword: "",
-      newPassword: "",
-      confirmPassword: "",
-    });
+    if (!passwordData.newPassword || passwordData.newPassword !== passwordData.confirmPassword) {
+      setError("Passwords do not match");
+      return;
+    }
+
+    try {
+      // TODO: Implement actual Firebase password change
+      // This requires Firebase Authentication API
+      setSuccess("Password changed successfully");
+      setChangePasswordDialogOpen(false);
+      setPasswordData({
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      });
+    } catch (error) {
+      setError("Failed to change password: " + error.message);
+    }
   };
 
   // Deactivate/Reactivate user account
   const handleDeactivateUser = async (userId, deactivate = true) => {
+    if (!userId) {
+      setError('Invalid user ID');
+      return;
+    }
+
     try {
       const userDocRef = doc(firestore, "users", userId);
       await updateDoc(userDocRef, {
@@ -320,8 +447,11 @@ const AdminProfile = () => {
       setSuccess(`User ${deactivate ? 'deactivated' : 'reactivated'} successfully`);
       setDeactivateDialogOpen(false);
       setSelectedUser(null);
+      
+      console.log(`✓ User ${userId} ${deactivate ? 'deactivated' : 'reactivated'}`);
     } catch (error) {
-      setError(`Failed to ${deactivate ? 'deactivate' : 'reactivate'} user`);
+      console.error('❌ Error updating user status:', error);
+      setError(`Failed to ${deactivate ? 'deactivate' : 'reactivate'} user: ` + error.message);
     }
   };
 
@@ -338,44 +468,54 @@ const AdminProfile = () => {
 
       setSuccess("Your admin account has been deactivated");
       setAdminDeactivateDialogOpen(false);
+      
+      console.log('✓ Admin account deactivated');
+      
       // Logout after deactivation
-      setTimeout(() => logout(), 2000);
+      setTimeout(() => {
+        logout();
+      }, 2000);
     } catch (error) {
-      setError("Failed to deactivate admin account");
+      console.error('❌ Error deactivating admin:', error);
+      setError("Failed to deactivate admin account: " + error.message);
     }
   };
 
   // Revoke active session
   const handleRevokeSession = async (sessionId) => {
-    // Implement session revocation logic
+    // TODO: Implement actual session revocation logic
+    console.log('Revoking session:', sessionId);
     setSuccess("Session revoked successfully");
   };
 
   // Download activity logs
   const handleDownloadLogs = () => {
-    const logsData = JSON.stringify(auditLogs, null, 2);
-    const blob = new Blob([logsData], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `activity-logs-${new Date().toISOString().split('T')[0]}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+    try {
+      const logsData = JSON.stringify(auditLogs, null, 2);
+      const blob = new Blob([logsData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `activity-logs-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      console.log('✓ Logs downloaded');
+      setSuccess("Activity logs downloaded");
+    } catch (error) {
+      console.error('❌ Error downloading logs:', error);
+      setError("Failed to download logs");
+    }
   };
 
-  const openDeactivateDialog = (user, deactivate = true) => {
-    setSelectedUser(user);
+  const openDeactivateDialog = (userToDeactivate) => {
+    setSelectedUser(userToDeactivate);
     setDeactivateDialogOpen(true);
   };
 
-  // Admin Tools Quick Links
-  const adminTools = [
-    { icon: <SensorIcon />, label: "Manage Sensors", path: "/sensors" },
-    { icon: <EcoIcon />, label: "Manage Planting Requests", path: "/planting-requests" },
-    { icon: <ReportIcon />, label: "View Reports", path: "/reports" },
-    { icon: <ConfigIcon />, label: "System Configurations", path: "/config" },
-  ];
-
+  // Loading state
   if (loading) {
     return (
       <Box sx={{ display: "flex", minHeight: "100vh" }}>
@@ -392,6 +532,7 @@ const AdminProfile = () => {
     );
   }
 
+  // Not logged in state
   if (!user) {
     return (
       <Box sx={{ display: "flex" }}>
@@ -407,7 +548,7 @@ const AdminProfile = () => {
 
   return (
     <Box sx={{ display: "flex", bgcolor: "grey.50", minHeight: "100vh" }}>
-      <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={user} />
+      <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={user} onLogout={logout} />
       <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
 
       <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - 240px)` } }}>
@@ -432,7 +573,7 @@ const AdminProfile = () => {
                 </Avatar>
                 <Box>
                   <Typography variant="h4" fontWeight="600" gutterBottom>
-                    {profile.user_firstname} {profile.user_lastname}
+                    {`${profile.user_firstname} ${profile.user_middlename} ${profile.user_lastname}`.trim() || 'Admin User'}
                   </Typography>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: 'wrap', mb: 1 }}>
                     <Chip
@@ -455,16 +596,16 @@ const AdminProfile = () => {
                     )}
                   </Box>
                   <Typography variant="body2" color="text.secondary">
-                    <EmailIcon sx={{ fontSize: 16, mr: 0.5 }} />
-                    {profile.user_email} • 
-                    <PhoneIcon sx={{ fontSize: 16, mx: 0.5 }} />
-                    {profile.phone || 'Not provided'} • 
-                    <BusinessIcon sx={{ fontSize: 16, mx: 0.5 }} />
+                    <EmailIcon sx={{ fontSize: 16, mr: 0.5, verticalAlign: 'middle' }} />
+                    {profile.user_email} •{' '}
+                    <PhoneIcon sx={{ fontSize: 16, mx: 0.5, verticalAlign: 'middle' }} />
+                    {profile.phone || 'Not provided'} •{' '}
+                    <BusinessIcon sx={{ fontSize: 16, mx: 0.5, verticalAlign: 'middle' }} />
                     {profile.organization}
                   </Typography>
                   {profile.lastLogin && (
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                      <LoginIcon sx={{ fontSize: 16, mr: 0.5 }} />
+                      <LoginIcon sx={{ fontSize: 16, mr: 0.5, verticalAlign: 'middle' }} />
                       Last login: {new Date(profile.lastLogin.toDate()).toLocaleString()}
                     </Typography>
                   )}
@@ -483,77 +624,37 @@ const AdminProfile = () => {
             </Box>
           </Paper>
 
-          {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
-
-          {/* Admin Tools Quick Links */}
-          <Paper sx={{ p: 3, mb: 4, borderRadius: 2 }}>
-            <Typography variant="h6" fontWeight="600" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
-              <SettingsIcon sx={{ mr: 1 }} />
-              Admin Tools
-            </Typography>
-            <Grid container spacing={2}>
-              {adminTools.map((tool, index) => (
-                <Grid item xs={12} sm={6} md={3} key={index}>
-                  <Card 
-                    sx={{ 
-                      cursor: 'pointer', 
-                      transition: 'all 0.2s',
-                      '&:hover': { 
-                        transform: 'translateY(-2px)',
-                        boxShadow: 4
-                      }
-                    }}
-                    onClick={() => window.location.href = tool.path}
-                  >
-                    <CardContent sx={{ textAlign: 'center', py: 3 }}>
-                      <Box sx={{ color: 'primary.main', mb: 1 }}>
-                        {tool.icon}
-                      </Box>
-                      <Typography variant="body2" fontWeight="500">
-                        {tool.label}
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
-          </Paper>
-
+          {error && (
+            <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
+              {error}
+            </Alert>
+          )}
           {/* Main Content Tabs */}
-          <Paper sx={{
-            borderRadius: 2,
-            p: 3,
-            width: "100%",        // take full width of parent
-            maxWidth: "1400px",   // widen the content area (adjust value as needed)
-            mx: "auto"            // center horizontally
-          }}>
+          <Paper sx={{ borderRadius: 2, p: 3, width: "100%", maxWidth: "1400px", mx: "auto" }}>
             <Tabs 
               value={tabValue} 
               onChange={(e, newValue) => setTabValue(newValue)}
+              variant={isMobile ? "scrollable" : "standard"}
+              scrollButtons={isMobile ? "auto" : false}
               sx={{ 
                 borderBottom: 1, 
                 borderColor: 'divider',
                 '& .MuiTab-root': { fontWeight: 600 }
               }}
             >
-              <Tab icon={<PersonIcon />} label="Profile Settings" />
-              <Tab icon={<PeopleIcon />} label="User Management" />
-              <Tab icon={<SecurityIcon />} label="Security & Audit" />
-              <Tab icon={<SettingsIcon />} label="Preferences" />
-              <Tab icon={<HelpIcon />} label="Support" />
+              <Tab icon={<PersonIcon />} label="Profile Settings" iconPosition="start" />
+              <Tab icon={<PeopleIcon />} label="User Management" iconPosition="start" />
+              <Tab icon={<SecurityIcon />} label="Security & Audit" iconPosition="start" />
+              <Tab icon={<SettingsIcon />} label="Preferences" iconPosition="start" />
+              <Tab icon={<HelpIcon />} label="Support" iconPosition="start" />
             </Tabs>
 
             {/* Profile Settings Tab */}
             <TabPanel value={tabValue} index={0}>
-              <Grid container spacing={2} justifyContent="center" alignItems="flex-start">
-                <Grid item xs={12} md={9}>
-                  <Card sx={{ height: '100%' }}>
-                    <CardContent
-                    sx={{
-                      width: "100%",        // let it expand fully
-                      maxWidth: "1200px",    // control how wide the form should be (adjust as needed)
-                      mx: "auto"            // center horizontally inside parent
-                    }}>
+              <Grid container spacing={3}>
+                <Grid item xs={12} md={8}>
+                  <Card>
+                    <CardContent>
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
                         <PersonIcon color="primary" sx={{ mr: 2 }} />
                         <Typography variant="h6" fontWeight="600">Personal Information</Typography>
@@ -565,6 +666,15 @@ const AdminProfile = () => {
                           label="First Name"
                           value={profile.user_firstname}
                           onChange={(e) => handleChange("user_firstname", e.target.value)}
+                          disabled={profile.deactivated}
+                        />
+
+                        <TextField
+                          fullWidth
+                          label="Middle Name"
+                          value={profile.user_middlename}
+                          onChange={(e) => handleChange("user_middlename", e.target.value)}
+                          disabled={profile.deactivated}
                         />
                         
                         <TextField
@@ -572,6 +682,7 @@ const AdminProfile = () => {
                           label="Last Name"
                           value={profile.user_lastname}
                           onChange={(e) => handleChange("user_lastname", e.target.value)}
+                          disabled={profile.deactivated}
                         />
                         
                         <TextField
@@ -580,6 +691,7 @@ const AdminProfile = () => {
                           type="email"
                           value={profile.user_email}
                           onChange={(e) => handleChange("user_email", e.target.value)}
+                          disabled={profile.deactivated}
                           InputProps={{
                             startAdornment: (
                               <EmailIcon color="action" sx={{ mr: 1 }} />
@@ -592,6 +704,7 @@ const AdminProfile = () => {
                           label="Phone Number"
                           value={profile.phone}
                           onChange={(e) => handleChange("phone", e.target.value)}
+                          disabled={profile.deactivated}
                           InputProps={{
                             startAdornment: (
                               <PhoneIcon color="action" sx={{ mr: 1 }} />
@@ -604,48 +717,48 @@ const AdminProfile = () => {
                 </Grid>
 
                 <Grid item xs={12} md={4}>
-                  <Stack spacing={3}>
-                    <Card>
-                      <CardContent>
-                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-                          <BusinessIcon color="primary" sx={{ mr: 2 }} />
-                          <Typography variant="h6" fontWeight="600">Organization Details</Typography>
-                        </Box>
+                  <Card>
+                    <CardContent>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                        <BusinessIcon color="primary" sx={{ mr: 2 }} />
+                        <Typography variant="h6" fontWeight="600">Organization Details</Typography>
+                      </Box>
+                  
+                      <Stack spacing={2}>
+                        <TextField
+                          fullWidth
+                          label="Organization"
+                          value={profile.organization}
+                          onChange={(e) => handleChange('organization', e.target.value)}
+                          disabled={profile.deactivated}
+                        />
                         
-                        <Stack spacing={2}>
-                          <TextField
-                            fullWidth
-                            label="Organization"
-                            value={profile.organization}
-                            onChange={(e) => handleChange('organization', e.target.value)}
-                          />
-                          
-                          <TextField
-                            fullWidth
-                            label="Designation"
-                            value={profile.designation}
-                            onChange={(e) => handleChange('designation', e.target.value)}
-                          />
-                          
-                          <FormControl fullWidth>
-                            <InputLabel>Department</InputLabel>
-                            <Select
-                              value={profile.department}
-                              label="Department"
-                              onChange={(e) => handleChange('department', e.target.value)}
-                            >
-                              <MenuItem value="Administration">Administration</MenuItem>
-                              <MenuItem value="IT Management">IT Management</MenuItem>
-                              <MenuItem value="System Administration">System Administration</MenuItem>
-                              <MenuItem value="User Management">User Management</MenuItem>
-                              <MenuItem value="Security">Security</MenuItem>
-                              <MenuItem value="DENR Operations">DENR Operations</MenuItem>
-                            </Select>
-                          </FormControl>
-                        </Stack>
-                      </CardContent>
-                    </Card>
-                  </Stack>
+                        <TextField
+                          fullWidth
+                          label="Designation"
+                          value={profile.designation}
+                          onChange={(e) => handleChange('designation', e.target.value)}
+                          disabled={profile.deactivated}
+                        />
+                        
+                        <FormControl fullWidth disabled={profile.deactivated}>
+                          <InputLabel>Department</InputLabel>
+                          <Select
+                            value={profile.department}
+                            label="Department"
+                            onChange={(e) => handleChange('department', e.target.value)}
+                          >
+                            <MenuItem value="Administration">Administration</MenuItem>
+                            <MenuItem value="IT Management">IT Management</MenuItem>
+                            <MenuItem value="System Administration">System Administration</MenuItem>
+                            <MenuItem value="User Management">User Management</MenuItem>
+                            <MenuItem value="Security">Security</MenuItem>
+                            <MenuItem value="DENR Operations">DENR Operations</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </Stack>
+                    </CardContent>
+                  </Card>
                 </Grid>
               </Grid>
 
@@ -667,82 +780,92 @@ const AdminProfile = () => {
             <TabPanel value={tabValue} index={1}>
               <Card>
                 <CardContent>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3, flexWrap: 'wrap', gap: 2 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
                       <PeopleIcon color="primary" sx={{ mr: 2 }} />
                       <Typography variant="h6" fontWeight="600">System Users</Typography>
                     </Box>
-                    <Typography color="text.secondary">
-                      Total Users: {users.length}
-                    </Typography>
+                    <Chip 
+                      label={`Total Users: ${users.length}`} 
+                      color="primary" 
+                      variant="outlined"
+                    />
                   </Box>
 
                   <TableContainer>
                     <Table>
                       <TableHead>
                         <TableRow>
-                          <TableCell>User</TableCell>
-                          <TableCell>Email</TableCell>
-                          <TableCell>Role</TableCell>
-                          <TableCell>Organization</TableCell>
-                          <TableCell>Status</TableCell>
-                          <TableCell align="center">Actions</TableCell>
+                          <TableCell><strong>User</strong></TableCell>
+                          <TableCell><strong>Email</strong></TableCell>
+                          <TableCell><strong>Role</strong></TableCell>
+                          <TableCell><strong>Organization</strong></TableCell>
+                          <TableCell><strong>Status</strong></TableCell>
+                          <TableCell align="center"><strong>Actions</strong></TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {users.map((userItem) => (
-                          <TableRow key={userItem.id} hover>
-                            <TableCell>
-                              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                <Avatar sx={{ mr: 2, width: 40, height: 40 }}>
-                                  {userItem.user_firstname?.[0]}{userItem.user_lastname?.[0]}
-                                </Avatar>
-                                <Box>
-                                  <Typography fontWeight="500">
-                                    {userItem.user_firstname} {userItem.user_lastname}
-                                  </Typography>
-                                  <Typography variant="body2" color="text.secondary">
-                                    {userItem.designation}
-                                  </Typography>
+                        {users.map((userItem) => {
+                          // Build full name with fallback
+                          const firstName = userItem.user_Firstname || userItem.user_firstname || userItem.firstName || "";
+                          const middleName = userItem.user_Middlename || userItem.user_middlename || userItem.middleName || "";
+                          const lastName = userItem.user_Lastname || userItem.user_lastname || userItem.lastName || "";
+                          const fullName = `${firstName} ${middleName} ${lastName}`.trim() || "Unknown User";
+                          const initials = `${firstName[0] || ''}${middleName[0] || ''}${lastName[0] || ''}`.toUpperCase() || '?';
+                          
+                          return (
+                            <TableRow key={userItem.id} hover>
+                              <TableCell>
+                                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                  <Avatar sx={{ mr: 2, width: 40, height: 40, bgcolor: 'primary.main' }}>
+                                    {initials}
+                                  </Avatar>
+                                  <Box>
+                                    <Typography fontWeight="500">{fullName}</Typography>
+                                    <Typography variant="body2" color="text.secondary">
+                                      {userItem.designation || userItem.role || 'N/A'}
+                                    </Typography>
+                                  </Box>
                                 </Box>
-                              </Box>
-                            </TableCell>
-                            <TableCell>{userItem.user_email}</TableCell>
-                            <TableCell>
-                              <Chip 
-                                label={getRoleName(userItem.roleRef)} 
-                                size="small" 
-                                color={
-                                  userItem.roleRef?.includes('admin') ? 'primary' : 
-                                  userItem.roleRef?.includes('denr') ? 'secondary' : 'default'
-                                }
-                              />
-                            </TableCell>
-                            <TableCell>{userItem.organization}</TableCell>
-                            <TableCell>
-                              <Chip 
-                                label={userItem.deactivated ? "Deactivated" : "Active"} 
-                                color={userItem.deactivated ? "error" : "success"}
-                                size="small"
-                              />
-                            </TableCell>
-                            <TableCell align="center">
-                              {userItem.id !== user.uid && ( // Cannot deactivate self
-                                <Tooltip title={userItem.deactivated ? "Reactivate User" : "Deactivate User"}>
-                                  <IconButton
-                                    color={userItem.deactivated ? "success" : "error"}
-                                    onClick={() => userItem.deactivated ? 
-                                      handleDeactivateUser(userItem.id, false) : 
-                                      openDeactivateDialog(userItem, true)
-                                    }
-                                  >
-                                    {userItem.deactivated ? <CheckCircleIcon /> : <BlockIcon />}
-                                  </IconButton>
-                                </Tooltip>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                              </TableCell>
+                              <TableCell>{userItem.user_email || userItem.email || 'N/A'}</TableCell>
+                              <TableCell>
+                                <Chip 
+                                  label={getRoleName(userItem.roleRef)} 
+                                  size="small" 
+                                  color={
+                                    (userItem.roleRef?.includes('admin') || getRoleName(userItem.roleRef).toLowerCase().includes('admin')) ? 'primary' : 
+                                    (userItem.roleRef?.includes('denr') || getRoleName(userItem.roleRef).toLowerCase().includes('denr')) ? 'secondary' : 'default'
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell>{userItem.organization || 'N/A'}</TableCell>
+                              <TableCell>
+                                <Chip 
+                                  label={userItem.deactivated ? "Deactivated" : "Active"} 
+                                  color={userItem.deactivated ? "error" : "success"}
+                                  size="small"
+                                />
+                              </TableCell>
+                              <TableCell align="center">
+                                {userItem.id !== user.uid && (
+                                  <Tooltip title={userItem.deactivated ? "Reactivate User" : "Deactivate User"}>
+                                    <IconButton
+                                      color={userItem.deactivated ? "success" : "error"}
+                                      onClick={() => userItem.deactivated ? 
+                                        handleDeactivateUser(userItem.id, false) : 
+                                        openDeactivateDialog(userItem)
+                                      }
+                                      size="small"
+                                    >
+                                      {userItem.deactivated ? <CheckCircleIcon /> : <BlockIcon />}
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </TableContainer>
@@ -762,7 +885,7 @@ const AdminProfile = () => {
             {/* Security & Audit Tab */}
             <TabPanel value={tabValue} index={2}>
               <Grid container spacing={3}>
-                <Grid item xs={12} md={8}>
+                <Grid item xs={12} md={6}>
                   <Card>
                     <CardContent>
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
@@ -787,6 +910,7 @@ const AdminProfile = () => {
                           startIcon={<LockIcon />}
                           onClick={() => setChangePasswordDialogOpen(true)}
                           disabled={profile.deactivated}
+                          fullWidth
                         >
                           Change Password
                         </Button>
@@ -807,32 +931,33 @@ const AdminProfile = () => {
                         </Badge>
                       </Box>
                       
-                      <List>
-                        {activeSessions.map((session, index) => (
-                          <ListItem key={index} divider>
-                            <ListItemIcon>
-                              <PublicIcon color="action" />
-                            </ListItemIcon>
-                            <ListItemText
-                              primary={`${session.browser} on ${session.os}`}
-                              secondary={`IP: ${session.ip} • Last active: ${session.lastActive}`}
-                            />
-                            <ListItemSecondaryAction>
-                              <Tooltip title="Revoke Session">
-                                <IconButton 
-                                  edge="end" 
-                                  onClick={() => handleRevokeSession(session.id)}
-                                  color="error"
-                                >
-                                  <BlockIcon />
-                                </IconButton>
-                              </Tooltip>
-                            </ListItemSecondaryAction>
-                          </ListItem>
-                        ))}
-                      </List>
-                      
-                      {activeSessions.length === 0 && (
+                      {activeSessions.length > 0 ? (
+                        <List>
+                          {activeSessions.map((session, index) => (
+                            <ListItem key={index} divider={index < activeSessions.length - 1}>
+                              <ListItemIcon>
+                                <PublicIcon color="action" />
+                              </ListItemIcon>
+                              <ListItemText
+                                primary={`${session.browser} on ${session.os}`}
+                                secondary={`IP: ${session.ip} • Last active: ${session.lastActive}`}
+                              />
+                              <ListItemSecondaryAction>
+                                <Tooltip title="Revoke Session">
+                                  <IconButton 
+                                    edge="end" 
+                                    onClick={() => handleRevokeSession(session.id)}
+                                    color="error"
+                                    size="small"
+                                  >
+                                    <BlockIcon />
+                                  </IconButton>
+                                </Tooltip>
+                              </ListItemSecondaryAction>
+                            </ListItem>
+                          ))}
+                        </List>
+                      ) : (
                         <Typography color="text.secondary" textAlign="center" py={2}>
                           No active sessions
                         </Typography>
@@ -855,22 +980,31 @@ const AdminProfile = () => {
                         </Badge>
                       </Box>
                       
-                      <List>
-                        {loginHistory.map((login, index) => (
-                          <ListItem key={login.id} divider>
-                            <ListItemIcon>
-                              <LoginIcon color={login.success ? "success" : "error"} />
-                            </ListItemIcon>
-                            <ListItemText
-                              primary={`${login.ip} • ${login.device}`}
-                              secondary={`${new Date(login.timestamp?.toDate()).toLocaleString()} • ${login.success ? 'Success' : 'Failed'}`}
-                            />
-                            {!login.success && (
-                              <Chip label="Suspicious" color="warning" size="small" />
-                            )}
-                          </ListItem>
-                        ))}
-                      </List>
+                      {loginHistory.length > 0 ? (
+                        <List sx={{ maxHeight: 300, overflow: 'auto' }}>
+                          {loginHistory.map((login) => (
+                            <ListItem key={login.id} divider>
+                              <ListItemIcon>
+                                <LoginIcon color={login.success ? "success" : "error"} />
+                              </ListItemIcon>
+                              <ListItemText
+                                primary={`${login.ip || 'Unknown IP'} • ${login.device || 'Unknown Device'}`}
+                                secondary={login.timestamp ? 
+                                  `${new Date(login.timestamp.toDate()).toLocaleString()} • ${login.success ? 'Success' : 'Failed'}` :
+                                  'Unknown time'
+                                }
+                              />
+                              {!login.success && (
+                                <Chip label="Suspicious" color="warning" size="small" />
+                              )}
+                            </ListItem>
+                          ))}
+                        </List>
+                      ) : (
+                        <Typography color="text.secondary" textAlign="center" py={2}>
+                          No login history available
+                        </Typography>
+                      )}
                     </CardContent>
                   </Card>
 
@@ -882,25 +1016,36 @@ const AdminProfile = () => {
                           <WarningIcon color="primary" sx={{ mr: 2 }} />
                           <Typography variant="h6" fontWeight="600">Recent Activity</Typography>
                         </Box>
-                        <Button 
-                          startIcon={<DownloadIcon />}
-                          onClick={handleDownloadLogs}
-                          size="small"
-                        >
-                          Export
-                        </Button>
+                        {auditLogs.length > 0 && (
+                          <Button 
+                            startIcon={<DownloadIcon />}
+                            onClick={handleDownloadLogs}
+                            size="small"
+                          >
+                            Export
+                          </Button>
+                        )}
                       </Box>
                       
-                      <List sx={{ maxHeight: 300, overflow: 'auto' }}>
-                        {auditLogs.map((log, index) => (
-                          <ListItem key={log.id} divider>
-                            <ListItemText
-                              primary={log.action}
-                              secondary={`${new Date(log.timestamp?.toDate()).toLocaleString()} • IP: ${log.ip}`}
-                            />
-                          </ListItem>
-                        ))}
-                      </List>
+                      {auditLogs.length > 0 ? (
+                        <List sx={{ maxHeight: 300, overflow: 'auto' }}>
+                          {auditLogs.map((log) => (
+                            <ListItem key={log.id} divider>
+                              <ListItemText
+                                primary={log.action || 'Unknown action'}
+                                secondary={log.timestamp ? 
+                                  `${new Date(log.timestamp.toDate()).toLocaleString()} • IP: ${log.ip || 'Unknown'}` :
+                                  'Unknown time'
+                                }
+                              />
+                            </ListItem>
+                          ))}
+                        </List>
+                      ) : (
+                        <Typography color="text.secondary" textAlign="center" py={2}>
+                          No activity logs available
+                        </Typography>
+                      )}
                     </CardContent>
                   </Card>
                 </Grid>
@@ -924,20 +1069,21 @@ const AdminProfile = () => {
                             <Switch
                               checked={profile.notifications}
                               onChange={(e) => handleChange('notifications', e.target.checked)}
+                              disabled={profile.deactivated}
                             />
                           }
                           label="Email Notifications"
                         />
                         <FormControlLabel
-                          control={<Switch defaultChecked />}
+                          control={<Switch defaultChecked disabled={profile.deactivated} />}
                           label="Planting Request Alerts"
                         />
                         <FormControlLabel
-                          control={<Switch defaultChecked />}
+                          control={<Switch defaultChecked disabled={profile.deactivated} />}
                           label="Sensor Updates"
                         />
                         <FormControlLabel
-                          control={<Switch defaultChecked />}
+                          control={<Switch defaultChecked disabled={profile.deactivated} />}
                           label="System Maintenance Alerts"
                         />
                       </Stack>
@@ -949,14 +1095,17 @@ const AdminProfile = () => {
                   <Card>
                     <CardContent>
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-                        {profile.theme === 'dark' ? <DarkModeIcon color="primary" /> : <LightModeIcon color="primary" />}
-                        <Typography variant="h6" fontWeight="600" sx={{ ml: 2 }}>
+                        {profile.theme === 'dark' ? 
+                          <DarkModeIcon color="primary" sx={{ mr: 2 }} /> : 
+                          <LightModeIcon color="primary" sx={{ mr: 2 }} />
+                        }
+                        <Typography variant="h6" fontWeight="600">
                           Theme & Appearance
                         </Typography>
                       </Box>
                       
                       <Stack spacing={2}>
-                        <FormControl fullWidth>
+                        <FormControl fullWidth disabled={profile.deactivated}>
                           <InputLabel>Theme</InputLabel>
                           <Select
                             value={profile.theme}
@@ -969,7 +1118,7 @@ const AdminProfile = () => {
                           </Select>
                         </FormControl>
                         
-                        <FormControl fullWidth>
+                        <FormControl fullWidth disabled={profile.deactivated}>
                           <InputLabel>Dashboard Layout</InputLabel>
                           <Select
                             value={profile.dashboardLayout}
@@ -986,6 +1135,19 @@ const AdminProfile = () => {
                   </Card>
                 </Grid>
               </Grid>
+
+              <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 4 }}>
+                <Button
+                  variant="contained"
+                  size="large"
+                  startIcon={saving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+                  onClick={handleSave}
+                  disabled={saving || profile.deactivated}
+                  sx={{ px: 4 }}
+                >
+                  {saving ? "Saving..." : "Save Preferences"}
+                </Button>
+              </Box>
             </TabPanel>
 
             {/* Support Tab */}
@@ -1043,7 +1205,7 @@ const AdminProfile = () => {
                         These actions are irreversible. Proceed with caution.
                       </Alert>
                       
-                      <Stack spacing={1}>
+                      <Stack spacing={2}>
                         <Button 
                           variant="contained" 
                           color="error"
@@ -1057,6 +1219,7 @@ const AdminProfile = () => {
                         
                         <Button 
                           variant="outlined"
+                          color="error"
                           startIcon={<LogoutIcon />}
                           onClick={logout}
                           fullWidth
@@ -1073,10 +1236,15 @@ const AdminProfile = () => {
         </Container>
 
         {/* Change Password Dialog */}
-        <Dialog open={changePasswordDialogOpen} onClose={() => setChangePasswordDialogOpen(false)} maxWidth="sm" fullWidth>
+        <Dialog 
+          open={changePasswordDialogOpen} 
+          onClose={() => setChangePasswordDialogOpen(false)} 
+          maxWidth="sm" 
+          fullWidth
+        >
           <DialogTitle>Change Password</DialogTitle>
           <DialogContent>
-            <Stack spacing={2} sx={{ mt: 1 }}>
+            <Stack spacing={2} sx={{ mt: 2 }}>
               <TextField
                 fullWidth
                 type="password"
@@ -1097,6 +1265,12 @@ const AdminProfile = () => {
                 label="Confirm New Password"
                 value={passwordData.confirmPassword}
                 onChange={(e) => setPasswordData(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                error={passwordData.confirmPassword && passwordData.newPassword !== passwordData.confirmPassword}
+                helperText={
+                  passwordData.confirmPassword && passwordData.newPassword !== passwordData.confirmPassword
+                    ? "Passwords do not match"
+                    : ""
+                }
               />
             </Stack>
           </DialogContent>
@@ -1105,7 +1279,11 @@ const AdminProfile = () => {
             <Button 
               onClick={handleChangePassword}
               variant="contained"
-              disabled={!passwordData.currentPassword || !passwordData.newPassword || passwordData.newPassword !== passwordData.confirmPassword}
+              disabled={
+                !passwordData.currentPassword || 
+                !passwordData.newPassword || 
+                passwordData.newPassword !== passwordData.confirmPassword
+              }
             >
               Change Password
             </Button>
@@ -1116,10 +1294,18 @@ const AdminProfile = () => {
         <Dialog open={deactivateDialogOpen} onClose={() => setDeactivateDialogOpen(false)}>
           <DialogTitle>Confirm User Deactivation</DialogTitle>
           <DialogContent>
-            <Typography>
-              Are you sure you want to deactivate {selectedUser?.user_firstname} {selectedUser?.user_lastname}?
+            <Typography sx={{ mb: 2 }}>
+              Are you sure you want to deactivate this user?
             </Typography>
-            <Alert severity="warning" sx={{ mt: 2 }}>
+            {selectedUser && (
+              <Box sx={{ p: 2, bgcolor: 'grey.100', borderRadius: 1, mb: 2 }}>
+                <Typography variant="body2"><strong>Name:</strong> {
+                  `${selectedUser.user_Firstname || ''} ${selectedUser.user_Middlename || ''} ${selectedUser.user_Lastname || ''}`.trim() || 'Unknown User'
+                }</Typography>
+                <Typography variant="body2"><strong>Email:</strong> {selectedUser.user_email || selectedUser.email || 'N/A'}</Typography>
+              </Box>
+            )}
+            <Alert severity="warning">
               This user will no longer be able to access the system. Their data will be preserved.
             </Alert>
           </DialogContent>
@@ -1177,23 +1363,26 @@ const AdminProfile = () => {
           </DialogActions>
         </Dialog>
 
-        {/* Notifications */}
+        {/* Success Snackbar */}
         <Snackbar
-          open={success}
+          open={!!success}
           autoHideDuration={4000}
           onClose={() => setSuccess(false)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         >
-          <Alert severity="success" onClose={() => setSuccess(false)}>
+          <Alert severity="success" onClose={() => setSuccess(false)} sx={{ width: '100%' }}>
             {success}
           </Alert>
         </Snackbar>
 
+        {/* Error Snackbar */}
         <Snackbar
           open={!!error}
           autoHideDuration={6000}
           onClose={() => setError(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         >
-          <Alert severity="error" onClose={() => setError(null)}>
+          <Alert severity="error" onClose={() => setError(null)} sx={{ width: '100%' }}>
             {error}
           </Alert>
         </Snackbar>

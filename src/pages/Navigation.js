@@ -16,12 +16,12 @@ import {
   Assignment as AssignmentIcon,
   Notifications as NotificationsIcon,
   Person as PersonIcon,
-  Nature as NatureIcon,
+  Forest as ForestIcon,
 } from '@mui/icons-material';
 
 function Navigation({ mobileOpen, handleDrawerToggle, isMobile }) {
   const navItems = [
-    { text: 'Home', icon: <HomeIcon />, path: '/Dashboard' },
+    { text: 'Dashboard', icon: <HomeIcon />, path: '/Dashboard' },
     { text: 'View Sensor', icon: <SensorsIcon />, path: '/Sensor' },
     { text: 'Recommendation Logs', icon: <ListAltIcon />, path: '/recommendations' },
     { text: 'Task', icon: <AssignmentIcon />, path: '/tasks' },
@@ -42,8 +42,8 @@ function Navigation({ mobileOpen, handleDrawerToggle, isMobile }) {
   const drawer = (
     <div>
       <Toolbar sx={{ backgroundColor: 'primary.main', color: 'white' }}>
-        <NatureIcon sx={{ mr: 2 }} />
-        <Typography variant="h6" noWrap component="div">
+        <ForestIcon sx={{ mr: 2 }} />
+        <Typography variant="h6" noWrap component="div" fontWeight="bold">
           ReForest
         </Typography>
       </Toolbar>

@@ -319,6 +319,13 @@ const Registration = () => {
                     onChange={handleChange}
                     error={!!errors.lastName}
                     helperText={errors.lastName}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <AccountCircle fontSize="small" color="action" />
+                        </InputAdornment>
+                      ),
+                    }}
                     sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
                   />
                 </Grid>
