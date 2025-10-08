@@ -391,24 +391,48 @@ const fetchSensorLocations = async () => {
         (req.request_status || '').toLowerCase() === 'pending'
       );
       console.log('Pending requests:', pendingRequests.length);
-      // 3. Fetch Planting Tasks
-      console.log('Fetching planting tasks...');
-      const tasksSnapshot = await getDocs(collection(firestore, 'plantingrecords'));
-      const tasksData = tasksSnapshot.docs.map(doc => ({
+      
+      // 3. Fetch Planting Records (completed plantings)
+      console.log('========== FETCHING PLANTING RECORDS ==========');
+      const recordsSnapshot = await getDocs(collection(firestore, 'plantingrecords'));
+      const recordsData = recordsSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-      console.log('Tasks fetched:', tasksData.length);
+      console.log(`✓ Total planting records: ${recordsData.length}`);
 
-      const plantingTasks = tasksData.reduce((acc, task) => {
-        const status = (task.task_status || '').toLowerCase();
-        if (status === 'completed') acc.completed++;
-        else if (status === 'pending') acc.pending++;
-        else if (status === 'cancelled') acc.cancelled++;
-        else acc.active++;
-        return acc;
-      }, { active: 0, completed: 0, pending: 0, cancelled: 0 });
+      // Log sample record for debugging
+      if (recordsData.length > 0) {
+        console.log('Sample record:', recordsData[0]);
+      }
 
+      // Count completed tasks from plantingrecords
+      const plantingTasks = {
+        active: 0,
+        completed: recordsData.length, // Each record = 1 completed task
+        pending: 0,
+        cancelled: 0
+      };
+
+      // Optionally fetch plantingtasks for pending/active/cancelled counts
+      try {
+        const tasksSnapshot = await getDocs(collection(firestore, 'plantingtasks'));
+        
+        tasksSnapshot.docs.forEach(taskDoc => {
+          const taskData = taskDoc.data();
+          const status = (taskData.task_status || '').toLowerCase();
+          
+          if (status === 'pending') plantingTasks.pending++;
+          else if (status === 'cancelled') plantingTasks.cancelled++;
+          else if (status === 'active') plantingTasks.active++;
+        });
+        
+      } catch (error) {
+        console.warn('⚠ plantingtasks collection not available:', error.message);
+      }
+
+      console.log('Final task breakdown:', plantingTasks);
+      console.log('==============================================\n');
       // 4. Create Activity Log from requests (already has user names)
       const activityLog = allRequests
         .sort((a, b) => {
@@ -616,14 +640,6 @@ const fetchSensorLocations = async () => {
   // Determine what to show on map
   const showSensors = mapView === 'sensors' || mapView === 'both';
   const showSites = mapView === 'sites' || mapView === 'both';
-
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
-        <MuiCircularProgress size={60} />
-      </Box>
-    );
-  }
 
   return (
     <Box sx={{ display: "flex", minHeight: '100vh' }}>

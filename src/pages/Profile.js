@@ -95,6 +95,9 @@ import ReForestAppBar from "./AppBar.js";
 import Navigation from "./Navigation.js";
 import { useAuth } from '../context/AuthContext.js';
 
+// Drawer width constant
+const drawerWidth = 240;
+
 function TabPanel({ children, value, index, ...other }) {
   return (
     <div
@@ -515,13 +518,21 @@ const AdminProfile = () => {
     setDeactivateDialogOpen(true);
   };
 
+  // Admin Tools Quick Links
+  const adminTools = [
+    { icon: <SensorIcon />, label: "Manage Sensors", path: "/sensors" },
+    { icon: <EcoIcon />, label: "Manage Planting Requests", path: "/planting-requests" },
+    { icon: <ReportIcon />, label: "View Reports", path: "/reports" },
+    { icon: <ConfigIcon />, label: "System Configurations", path: "/config" },
+  ];
+
   // Loading state
   if (loading) {
     return (
       <Box sx={{ display: "flex", minHeight: "100vh" }}>
         <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={user} />
         <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
-        <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - 240px)` } }}>
+        <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - ${drawerWidth}px)` } }}>
           <Toolbar />
           <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
             <CircularProgress size={40} />
@@ -538,7 +549,7 @@ const AdminProfile = () => {
       <Box sx={{ display: "flex" }}>
         <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={user} />
         <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
-        <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - 240px)` } }}>
+        <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - ${drawerWidth}px)` } }}>
           <Toolbar />
           <Alert severity="warning">Please log in to access administrator features.</Alert>
         </Box>
@@ -551,7 +562,7 @@ const AdminProfile = () => {
       <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={user} onLogout={logout} />
       <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
 
-      <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - 240px)` } }}>
+      <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - ${drawerWidth}px)` } }}>
         <Toolbar />
         
         <Container maxWidth="lg" sx={{ py: 2 }}>
@@ -629,6 +640,7 @@ const AdminProfile = () => {
               {error}
             </Alert>
           )}
+
           {/* Main Content Tabs */}
           <Paper sx={{ borderRadius: 2, p: 3, width: "100%", maxWidth: "1400px", mx: "auto" }}>
             <Tabs 
@@ -652,7 +664,7 @@ const AdminProfile = () => {
             {/* Profile Settings Tab */}
             <TabPanel value={tabValue} index={0}>
               <Grid container spacing={3}>
-                <Grid item xs={12} md={8}>
+                <Grid item xs={12} md={10}>
                   <Card>
                     <CardContent>
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
@@ -662,7 +674,7 @@ const AdminProfile = () => {
                       
                       <Stack spacing={3}>
                         <TextField
-                          fullWidth
+                          sx={{ width: '500px' }}
                           label="First Name"
                           value={profile.user_firstname}
                           onChange={(e) => handleChange("user_firstname", e.target.value)}
@@ -670,15 +682,15 @@ const AdminProfile = () => {
                         />
 
                         <TextField
-                          fullWidth
-                          label="Middle Name"
+                          sx={{ width: '500px' }}
+                          label="Middle Name (Optional)"
                           value={profile.user_middlename}
                           onChange={(e) => handleChange("user_middlename", e.target.value)}
                           disabled={profile.deactivated}
                         />
                         
                         <TextField
-                          fullWidth
+                          sx={{ width: '500px' }}
                           label="Last Name"
                           value={profile.user_lastname}
                           onChange={(e) => handleChange("user_lastname", e.target.value)}
@@ -686,7 +698,7 @@ const AdminProfile = () => {
                         />
                         
                         <TextField
-                          fullWidth
+                          sx={{ width: '500px' }}
                           label="Email Address"
                           type="email"
                           value={profile.user_email}
@@ -700,7 +712,7 @@ const AdminProfile = () => {
                         />
                         
                         <TextField
-                          fullWidth
+                          sx={{ width: '500px' }}
                           label="Phone Number"
                           value={profile.phone}
                           onChange={(e) => handleChange("phone", e.target.value)}
@@ -716,7 +728,7 @@ const AdminProfile = () => {
                   </Card>
                 </Grid>
 
-                <Grid item xs={12} md={4}>
+                <Grid item xs={12} md={2}>
                   <Card>
                     <CardContent>
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
