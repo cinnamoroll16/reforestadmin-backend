@@ -54,7 +54,8 @@
     "eject": "react-scripts eject",
     "server": "node server.js",
     "dev-server": "nodemon src/server/server.js",
-    "dev": "concurrently \"npm run dev-server\" \"npm start\""
+    "dev": "concurrently \"npm run dev-server\" \"npm start\"",
+    "vercel-build": "react-scripts build"
   },
   "eslintConfig": {
     "extends": [
