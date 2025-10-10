@@ -20,7 +20,7 @@ const CONFIG = {
   CACHE_KEY: 'reforest_tree_dataset',
   CACHE_EXPIRY_KEY: 'reforest_tree_dataset_expiry',
   CACHE_DURATION: 24 * 60 * 60 * 1000, // 24 hours
-  DATASET_PATH: '/data/Tree_Seedling_Dataset.xlsx',
+  DATASET_PATH: process.env.REACT_APP_DATASET_PATH || '/data/Tree_Seedling_Dataset.xlsx',
   NEARBY_RADIUS_KM: 5,
   MIN_READINGS_FOR_TREND: 7,
   EARTH_RADIUS_KM: 6371
