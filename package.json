@@ -1,5 +1,4 @@
 {
-  "type": "module",
   "name": "reforest-iot-soil-analysis-and-tree-recommendation-app",
   "version": "1.0.0",
   "description": "ReForest Admin Application",
@@ -7,18 +6,20 @@
   "dependencies": {
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
-    "@mui/icons-material": "^5.14.0",
-    "@mui/material": "^5.14.0",
+    "@mui/icons-material": "^5.18.0",
+    "@mui/material": "^5.18.0",
     "@mui/x-data-grid": "^8.11.0",
     "@react-google-maps/api": "^2.20.7",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^13.5.0",
+    "ajv": "^8.12.0",
     "axios": "^1.11.0",
     "bcryptjs": "^2.4.3",
     "body-parser": "^2.2.0",
     "cors": "^2.8.5",
+    "cross-env": "^7.0.3",
     "dotenv": "^16.3.0",
     "express": "^4.21.2",
     "express-rate-limit": "^7.0.0",
@@ -32,11 +33,11 @@
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.9.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-leaflet": "^5.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-leaflet": "^4.2.1",
     "react-router-dom": "^6.14.0",
-    "react-scripts": "5.0.1",
+    "react-scripts": "^5.0.1",
     "recharts": "^3.2.1",
     "web-vitals": "^2.1.4",
     "xlsx": "^0.18.5"
@@ -49,13 +50,13 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "CI=false react-scripts build",
+    "build": "cross-env CI=false react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "server": "node server.js",
     "dev-server": "nodemon src/server/server.js",
     "dev": "concurrently \"npm run dev-server\" \"npm start\"",
-    "vercel-build": "react-scripts build"
+    "vercel-build": "cross-env CI=false react-scripts build"
   },
   "eslintConfig": {
     "extends": [
