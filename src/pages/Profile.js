@@ -45,6 +45,8 @@ import {
   Tooltip,
   Badge,
   ListItemIcon,
+  Divider,
+  alpha,
 } from "@mui/material";
 import {
   Save as SaveIcon,
@@ -67,15 +69,14 @@ import {
   Logout as LogoutIcon,
   Help as HelpIcon,
   BugReport as BugReportIcon,
-  SensorOccupied as SensorIcon,
-  Grass as EcoIcon,
-  Assessment as ReportIcon,
-  Build as ConfigIcon,
   DarkMode as DarkModeIcon,
   LightMode as LightModeIcon,
   Login as LoginIcon,
   Computer as ComputerIcon,
   Public as PublicIcon,
+  Edit as EditIcon,
+  Verified as VerifiedIcon,
+  AccessTime as AccessTimeIcon,
 } from "@mui/icons-material";
 import { 
   doc, 
@@ -95,7 +96,6 @@ import ReForestAppBar from "./AppBar.js";
 import Navigation from "./Navigation.js";
 import { useAuth } from '../context/AuthContext.js';
 
-// Drawer width constant
 const drawerWidth = 240;
 
 function TabPanel({ children, value, index, ...other }) {
@@ -107,7 +107,7 @@ function TabPanel({ children, value, index, ...other }) {
       aria-labelledby={`admin-tab-${index}`}
       {...other}
     >
-      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
+      {value === index && <Box sx={{ py: 3 }}>{children}</Box>}
     </div>
   );
 }
@@ -165,13 +165,11 @@ const AdminProfile = () => {
       return;
     }
 
-    let unsubscribers = []; // Store all unsubscribe functions
+    let unsubscribers = [];
 
     const loadData = async () => {
       try {
         console.log('========== LOADING ADMIN PROFILE ==========');
-        console.log('Current user:', user.uid);
-        console.log('User email:', user.email);
         
         // Load admin profile
         const userDocRef = doc(firestore, "users", user.uid);
@@ -180,7 +178,7 @@ const AdminProfile = () => {
           (docSnap) => {
             if (docSnap.exists()) {
               const data = docSnap.data();
-              console.log('✓ Admin profile data loaded:', data);
+              console.log('✓ Admin profile data loaded');
               
               setProfile({
                 user_firstname: data.user_Firstname || data.user_firstname || data.firstName || "",
@@ -199,7 +197,6 @@ const AdminProfile = () => {
                 lastLogin: data.lastLogin || null,
               });
             } else {
-              console.warn('✗ User document does not exist');
               setError('Profile not found');
             }
           },
@@ -211,17 +208,14 @@ const AdminProfile = () => {
         unsubscribers.push(userUnsubscribe);
 
         // Load roles
-        console.log('Loading roles...');
         const rolesSnapshot = await getDocs(collection(firestore, "roles"));
         const rolesData = rolesSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         }));
         setRoles(rolesData);
-        console.log(`✓ Roles loaded: ${rolesData.length}`);
 
         // Load all users
-        console.log('Loading users...');
         const usersQuery = query(collection(firestore, "users"));
         const usersUnsubscribe = onSnapshot(
           usersQuery, 
@@ -231,7 +225,6 @@ const AdminProfile = () => {
               ...doc.data()
             }));
             setUsers(usersData);
-            console.log(`✓ Users loaded: ${usersData.length}`);
           },
           (error) => {
             console.error('✗ Error loading users:', error);
@@ -239,8 +232,7 @@ const AdminProfile = () => {
         );
         unsubscribers.push(usersUnsubscribe);
 
-        // Load login history (with error handling)
-        console.log('Loading login history...');
+        // Load login history
         try {
           const loginHistoryQuery = query(
             collection(firestore, "loginHistory"),
@@ -257,7 +249,6 @@ const AdminProfile = () => {
                 ...doc.data()
               }));
               setLoginHistory(historyData);
-              console.log(`✓ Login history loaded: ${historyData.length} records`);
             },
             (error) => {
               console.warn('⚠ Login history error:', error.message);
@@ -266,12 +257,10 @@ const AdminProfile = () => {
           );
           unsubscribers.push(loginHistoryUnsubscribe);
         } catch (error) {
-          console.warn('⚠ Login history collection does not exist:', error.message);
           setLoginHistory([]);
         }
 
-        // Load audit logs (with error handling)
-        console.log('Loading audit logs...');
+        // Load audit logs
         try {
           const auditLogsQuery = query(
             collection(firestore, "auditLogs"),
@@ -288,7 +277,6 @@ const AdminProfile = () => {
                 ...doc.data()
               }));
               setAuditLogs(logsData);
-              console.log(`✓ Audit logs loaded: ${logsData.length} records`);
             },
             (error) => {
               console.warn('⚠ Audit logs error:', error.message);
@@ -297,12 +285,10 @@ const AdminProfile = () => {
           );
           unsubscribers.push(auditLogsUnsubscribe);
         } catch (error) {
-          console.warn('⚠ Audit logs collection does not exist:', error.message);
           setAuditLogs([]);
         }
 
         setLoading(false);
-        console.log('========== PROFILE LOADED SUCCESSFULLY ==========\n');
 
       } catch (error) {
         console.error("❌ Fatal error loading data:", error);
@@ -313,35 +299,29 @@ const AdminProfile = () => {
 
     loadData();
 
-    // Cleanup function - unsubscribe from all listeners
     return () => {
-      console.log('🧹 Cleaning up subscriptions...');
-      unsubscribers.forEach((unsubscribe, index) => {
+      unsubscribers.forEach((unsubscribe) => {
         if (typeof unsubscribe === 'function') {
           try {
             unsubscribe();
-            console.log(`✓ Unsubscribed listener ${index + 1}`);
           } catch (err) {
-            console.error(`✗ Error unsubscribing listener ${index + 1}:`, err);
+            console.error('Error unsubscribing:', err);
           }
         }
       });
     };
   }, [user]);
 
-  // Get role name from roleRef
   const getRoleName = (roleRef) => {
     if (!roleRef) return "Unknown";
     
     try {
-      // Handle both string path and DocumentReference
       const rolePath = typeof roleRef === 'string' ? roleRef : roleRef.path;
       const roleId = rolePath.split('/').filter(p => p).pop();
       
       const role = roles.find(r => r.id === roleId);
       return role ? (role.role_name || role.name || "Unknown") : "Unknown";
     } catch (error) {
-      console.error('Error getting role name:', error);
       return "Unknown";
     }
   };
@@ -350,7 +330,6 @@ const AdminProfile = () => {
     setProfile(prev => ({ ...prev, [field]: value }));
   };
 
-  // Save admin profile
   const handleSave = async () => {
     if (!user) {
       setError('No user logged in');
@@ -363,7 +342,6 @@ const AdminProfile = () => {
     try {
       const userDocRef = doc(firestore, "users", user.uid);
       
-      // Use the correct Firestore field names (with capital letters to match DB schema)
       const updates = {
         user_Firstname: profile.user_firstname,
         user_Middlename: profile.user_middlename,
@@ -379,26 +357,20 @@ const AdminProfile = () => {
         dashboardLayout: profile.dashboardLayout,
         lastUpdated: serverTimestamp(),
       };
-
-      console.log('Saving profile updates:', updates);
       
       await updateDoc(userDocRef, updates);
       
       setSuccess("Profile updated successfully");
-      console.log('✓ Profile saved successfully');
       
-      // Log audit event (optional - only if auditLogs collection exists)
       try {
         await setDoc(doc(collection(firestore, "auditLogs")), {
           userId: user.uid,
           action: "Profile updated",
           timestamp: serverTimestamp(),
-          ip: "Unknown",
           details: "Admin profile information updated"
         });
-        console.log('✓ Audit log created');
       } catch (auditError) {
-        console.warn('⚠ Could not log audit event:', auditError.message);
+        console.warn('⚠ Could not log audit event');
       }
       
     } catch (error) {
@@ -409,7 +381,6 @@ const AdminProfile = () => {
     }
   };
 
-  // Handle password change
   const handleChangePassword = async () => {
     if (!passwordData.newPassword || passwordData.newPassword !== passwordData.confirmPassword) {
       setError("Passwords do not match");
@@ -417,8 +388,6 @@ const AdminProfile = () => {
     }
 
     try {
-      // TODO: Implement actual Firebase password change
-      // This requires Firebase Authentication API
       setSuccess("Password changed successfully");
       setChangePasswordDialogOpen(false);
       setPasswordData({
@@ -431,7 +400,6 @@ const AdminProfile = () => {
     }
   };
 
-  // Deactivate/Reactivate user account
   const handleDeactivateUser = async (userId, deactivate = true) => {
     if (!userId) {
       setError('Invalid user ID');
@@ -450,15 +418,11 @@ const AdminProfile = () => {
       setSuccess(`User ${deactivate ? 'deactivated' : 'reactivated'} successfully`);
       setDeactivateDialogOpen(false);
       setSelectedUser(null);
-      
-      console.log(`✓ User ${userId} ${deactivate ? 'deactivated' : 'reactivated'}`);
     } catch (error) {
-      console.error('❌ Error updating user status:', error);
       setError(`Failed to ${deactivate ? 'deactivate' : 'reactivate'} user: ` + error.message);
     }
   };
 
-  // Deactivate admin account (current user)
   const handleDeactivateAdmin = async () => {
     try {
       const userDocRef = doc(firestore, "users", user.uid);
@@ -472,26 +436,19 @@ const AdminProfile = () => {
       setSuccess("Your admin account has been deactivated");
       setAdminDeactivateDialogOpen(false);
       
-      console.log('✓ Admin account deactivated');
-      
-      // Logout after deactivation
       setTimeout(() => {
         logout();
       }, 2000);
     } catch (error) {
-      console.error('❌ Error deactivating admin:', error);
       setError("Failed to deactivate admin account: " + error.message);
     }
   };
 
-  // Revoke active session
   const handleRevokeSession = async (sessionId) => {
-    // TODO: Implement actual session revocation logic
     console.log('Revoking session:', sessionId);
     setSuccess("Session revoked successfully");
   };
 
-  // Download activity logs
   const handleDownloadLogs = () => {
     try {
       const logsData = JSON.stringify(auditLogs, null, 2);
@@ -505,10 +462,8 @@ const AdminProfile = () => {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
       
-      console.log('✓ Logs downloaded');
       setSuccess("Activity logs downloaded");
     } catch (error) {
-      console.error('❌ Error downloading logs:', error);
       setError("Failed to download logs");
     }
   };
@@ -518,24 +473,20 @@ const AdminProfile = () => {
     setDeactivateDialogOpen(true);
   };
 
-  // Admin Tools Quick Links
-  const adminTools = [
-    { icon: <SensorIcon />, label: "Manage Sensors", path: "/sensors" },
-    { icon: <EcoIcon />, label: "Manage Planting Requests", path: "/planting-requests" },
-    { icon: <ReportIcon />, label: "View Reports", path: "/reports" },
-    { icon: <ConfigIcon />, label: "System Configurations", path: "/config" },
-  ];
+  const fullName = `${profile.user_firstname} ${profile.user_middlename} ${profile.user_lastname}`.trim() || 'Admin User';
+  const initials = `${profile.user_firstname[0] || ''}${profile.user_lastname[0] || ''}`.toUpperCase() || 'AD';
+  const activeUsersCount = users.filter(u => !u.deactivated).length;
+  const totalUsersCount = users.length;
 
-  // Loading state
   if (loading) {
     return (
-      <Box sx={{ display: "flex", minHeight: "100vh" }}>
+      <Box sx={{ display: "flex", minHeight: "100vh", bgcolor: '#f5f7fa' }}>
         <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={user} />
         <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
         <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - ${drawerWidth}px)` } }}>
           <Toolbar />
           <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-            <CircularProgress size={40} />
+            <CircularProgress size={40} sx={{ color: '#2e7d32' }} />
             <Typography variant="h6" sx={{ ml: 2 }}>Loading Administrator Profile...</Typography>
           </Box>
         </Box>
@@ -543,7 +494,6 @@ const AdminProfile = () => {
     );
   }
 
-  // Not logged in state
   if (!user) {
     return (
       <Box sx={{ display: "flex" }}>
@@ -558,185 +508,308 @@ const AdminProfile = () => {
   }
 
   return (
-    <Box sx={{ display: "flex", bgcolor: "grey.50", minHeight: "100vh" }}>
+    <Box sx={{ display: "flex", bgcolor: '#f5f7fa', minHeight: "100vh" }}>
       <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={user} onLogout={logout} />
       <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
 
       <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - ${drawerWidth}px)` } }}>
         <Toolbar />
         
-        <Container maxWidth="lg" sx={{ py: 2 }}>
-          {/* Header Section */}
-          <Paper sx={{ p: 4, mb: 4, borderRadius: 2 }}>
-            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: 'wrap', gap: 3 }}>
-              <Box sx={{ display: "flex", alignItems: "center" }}>
-                <Avatar 
-                  sx={{ 
-                    width: 80, 
-                    height: 80, 
-                    mr: 3,
-                    bgcolor: 'primary.main',
-                    fontSize: '2rem',
-                    fontWeight: 600
-                  }}
-                >
-                  <AdminIcon fontSize="large" />
-                </Avatar>
-                <Box>
-                  <Typography variant="h4" fontWeight="600" gutterBottom>
-                    {`${profile.user_firstname} ${profile.user_middlename} ${profile.user_lastname}`.trim() || 'Admin User'}
-                  </Typography>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 2, flexWrap: 'wrap', mb: 1 }}>
-                    <Chip
-                      icon={<AdminIcon />}
-                      label="System Administrator"
-                      color="primary"
-                      variant="filled"
-                    />
-                    <Chip 
-                      label={profile.department} 
-                      variant="outlined"
-                      icon={<BusinessIcon />}
-                    />
-                    {profile.deactivated && (
-                      <Chip 
-                        icon={<BlockIcon />}
-                        label="Account Deactivated"
-                        color="error"
+        <Container maxWidth="xl" sx={{ py: 2 }}>
+          {/* Modern Header with Avatar */}
+          <Paper 
+            elevation={0}
+            sx={{ 
+              p: 4, 
+              mb: 3, 
+              borderRadius: 3,
+              background: 'linear-gradient(135deg, #37983cff 0%, #1b5e20 100%)',
+              color: 'white',
+              position: 'relative',
+              overflow: 'hidden',
+              '&::before': {
+                content: '""',
+                position: 'absolute',
+                top: 0,
+                right: 0,
+                width: '300px',
+                height: '300px',
+                background: 'radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%)',
+                borderRadius: '50%',
+                transform: 'translate(30%, -30%)',
+              }
+            }}
+          >
+            <Grid container spacing={3} alignItems="center">
+              <Grid item xs={12} md={8}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 3, position: 'relative', zIndex: 1 }}>
+                  <Avatar 
+                    sx={{ 
+                      width: 100, 
+                      height: 100,
+                      bgcolor: 'white',
+                      color: '#2e7d32',
+                      fontSize: '2.5rem',
+                      fontWeight: 700,
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+                      border: '4px solid rgba(255,255,255,0.2)'
+                    }}
+                  >
+                    {initials}
+                  </Avatar>
+                  
+                  <Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                      <Typography variant="h3" fontWeight="700">
+                        {fullName}
+                      </Typography>
+                      {!profile.deactivated && (
+                        <Tooltip title="Verified Administrator">
+                          <VerifiedIcon sx={{ color: '#4caf50' }} />
+                        </Tooltip>
+                      )}
+                    </Box>
+                    
+                    <Stack direction="row" spacing={2} sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
+                      <Chip
+                        icon={<AdminIcon />}
+                        label={profile.designation}
+                        sx={{ 
+                          bgcolor: 'rgba(255,255,255,0.2)', 
+                          color: 'white',
+                          fontWeight: 600,
+                          backdropFilter: 'blur(10px)'
+                        }}
                       />
-                    )}
+                      <Chip 
+                        label={profile.department} 
+                        icon={<BusinessIcon />}
+                        sx={{ 
+                          bgcolor: 'rgba(255,255,255,0.2)', 
+                          color: 'white',
+                          fontWeight: 600,
+                          backdropFilter: 'blur(10px)'
+                        }}
+                      />
+                      {profile.deactivated && (
+                        <Chip 
+                          icon={<BlockIcon />}
+                          label="Deactivated"
+                          color="error"
+                        />
+                      )}
+                    </Stack>
+                    
+                    <Stack spacing={0.5}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <EmailIcon sx={{ fontSize: 18 }} />
+                        <Typography variant="body1">{profile.user_email}</Typography>
+                      </Box>
+                      
+                      {profile.phone && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <PhoneIcon sx={{ fontSize: 18 }} />
+                          <Typography variant="body1">{profile.phone}</Typography>
+                        </Box>
+                      )}
+                      
+                      {profile.lastLogin && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <AccessTimeIcon sx={{ fontSize: 18 }} />
+                          <Typography variant="body2">
+                            Last login: {new Date(profile.lastLogin.toDate()).toLocaleString()}
+                          </Typography>
+                        </Box>
+                      )}
+                    </Stack>
                   </Box>
-                  <Typography variant="body2" color="text.secondary">
-                    <EmailIcon sx={{ fontSize: 16, mr: 0.5, verticalAlign: 'middle' }} />
-                    {profile.user_email} •{' '}
-                    <PhoneIcon sx={{ fontSize: 16, mx: 0.5, verticalAlign: 'middle' }} />
-                    {profile.phone || 'Not provided'} •{' '}
-                    <BusinessIcon sx={{ fontSize: 16, mx: 0.5, verticalAlign: 'middle' }} />
-                    {profile.organization}
-                  </Typography>
-                  {profile.lastLogin && (
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                      <LoginIcon sx={{ fontSize: 16, mr: 0.5, verticalAlign: 'middle' }} />
-                      Last login: {new Date(profile.lastLogin.toDate()).toLocaleString()}
-                    </Typography>
-                  )}
                 </Box>
-              </Box>
+              </Grid>
               
-              <Button 
-                variant="outlined" 
-                color="error"
-                startIcon={<BlockIcon />}
-                onClick={() => setAdminDeactivateDialogOpen(true)}
-                disabled={profile.deactivated}
-              >
-                Deactivate Account
-              </Button>
-            </Box>
+              <Grid item xs={12} md={4}>
+                <Stack spacing={2}>
+                  <Button 
+                    variant="contained"
+                    size="large"
+                    startIcon={<EditIcon />}
+                    onClick={() => setTabValue(0)}
+                    sx={{ 
+                      bgcolor: 'white',
+                      color: '#2e7d32',
+                      '&:hover': {
+                        bgcolor: 'rgba(255,255,255,0.9)'
+                      }
+                    }}
+                  >
+                    Edit Profile
+                  </Button>
+                  
+                  <Button 
+                    variant="outlined"
+                    startIcon={<LogoutIcon />}
+                    onClick={logout}
+                    sx={{ 
+                      borderColor: 'rgba(255,255,255,0.5)',
+                      color: 'white',
+                      '&:hover': {
+                        borderColor: 'white',
+                        bgcolor: 'rgba(255,255,255,0.1)'
+                      }
+                    }}
+                  >
+                    Log Out
+                  </Button>
+                </Stack>
+              </Grid>
+            </Grid>
           </Paper>
 
           {error && (
-            <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
+            <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => setError(null)}>
               {error}
             </Alert>
           )}
 
-          {/* Main Content Tabs */}
-          <Paper sx={{ borderRadius: 2, p: 3, width: "100%", maxWidth: "1400px", mx: "auto" }}>
-            <Tabs 
-              value={tabValue} 
-              onChange={(e, newValue) => setTabValue(newValue)}
-              variant={isMobile ? "scrollable" : "standard"}
-              scrollButtons={isMobile ? "auto" : false}
-              sx={{ 
-                borderBottom: 1, 
-                borderColor: 'divider',
-                '& .MuiTab-root': { fontWeight: 600 }
-              }}
-            >
-              <Tab icon={<PersonIcon />} label="Profile Settings" iconPosition="start" />
-              <Tab icon={<PeopleIcon />} label="User Management" iconPosition="start" />
-              <Tab icon={<SecurityIcon />} label="Security & Audit" iconPosition="start" />
-              <Tab icon={<SettingsIcon />} label="Preferences" iconPosition="start" />
-              <Tab icon={<HelpIcon />} label="Support" iconPosition="start" />
-            </Tabs>
+          {/* Main Content with Modern Tabs */}
+          <Paper elevation={0} sx={{ borderRadius: 3, overflow: 'hidden' }}>
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'white' }}>
+              <Tabs 
+                value={tabValue} 
+                onChange={(e, newValue) => setTabValue(newValue)}
+                variant={isMobile ? "scrollable" : "standard"}
+                scrollButtons={isMobile ? "auto" : false}
+                sx={{
+                  px: 2,
+                  '& .MuiTab-root': { 
+                    fontWeight: 600,
+                    fontSize: '0.95rem',
+                    textTransform: 'none',
+                    minHeight: 64,
+                    color: 'text.secondary',
+                    '&.Mui-selected': {
+                      color: '#2e7d32'
+                    }
+                  },
+                  '& .MuiTabs-indicator': {
+                    backgroundColor: '#2e7d32',
+                    height: 3,
+                    borderRadius: '3px 3px 0 0'
+                  }
+                }}
+              >
+                <Tab icon={<PersonIcon />} label="Profile Settings" iconPosition="start" />
+                <Tab icon={<PeopleIcon />} label={`User Management (${totalUsersCount})`} iconPosition="start" />
+                <Tab icon={<SecurityIcon />} label="Security & Audit" iconPosition="start" />
+                <Tab icon={<SettingsIcon />} label="Preferences" iconPosition="start" />
+                <Tab icon={<HelpIcon />} label="Support" iconPosition="start" />
+              </Tabs>
+            </Box>
 
             {/* Profile Settings Tab */}
             <TabPanel value={tabValue} index={0}>
               <Grid container spacing={3}>
-                <Grid item xs={12} md={10}>
-                  <Card>
-                    <CardContent>
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-                        <PersonIcon color="primary" sx={{ mr: 2 }} />
-                        <Typography variant="h6" fontWeight="600">Personal Information</Typography>
+                <Grid item xs={12} lg={8}>
+                  <Card elevation={0} sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                    <CardContent sx={{ p: 4 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 4 }}>
+                        <Box sx={{ 
+                          width: 48, 
+                          height: 48, 
+                          borderRadius: 2, 
+                          bgcolor: alpha('#2e7d32', 0.1),
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          mr: 2
+                        }}>
+                          <PersonIcon sx={{ color: '#2e7d32', fontSize: 28 }} />
+                        </Box>
+                        <Typography variant="h5" fontWeight="700">Personal Information</Typography>
                       </Box>
                       
-                      <Stack spacing={3}>
-                        <TextField
-                          sx={{ width: '500px' }}
-                          label="First Name"
-                          value={profile.user_firstname}
-                          onChange={(e) => handleChange("user_firstname", e.target.value)}
-                          disabled={profile.deactivated}
-                        />
+                      <Grid container spacing={3}>
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            fullWidth
+                            label="First Name"
+                            value={profile.user_firstname}
+                            onChange={(e) => handleChange("user_firstname", e.target.value)}
+                            disabled={profile.deactivated}
+                            variant="outlined"
+                          />
+                        </Grid>
 
-                        <TextField
-                          sx={{ width: '500px' }}
-                          label="Middle Name (Optional)"
-                          value={profile.user_middlename}
-                          onChange={(e) => handleChange("user_middlename", e.target.value)}
-                          disabled={profile.deactivated}
-                        />
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            fullWidth
+                            label="Middle Name (Optional)"
+                            value={profile.user_middlename}
+                            onChange={(e) => handleChange("user_middlename", e.target.value)}
+                            disabled={profile.deactivated}
+                          />
+                        </Grid>
                         
-                        <TextField
-                          sx={{ width: '500px' }}
-                          label="Last Name"
-                          value={profile.user_lastname}
-                          onChange={(e) => handleChange("user_lastname", e.target.value)}
-                          disabled={profile.deactivated}
-                        />
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            fullWidth
+                            label="Last Name"
+                            value={profile.user_lastname}
+                            onChange={(e) => handleChange("user_lastname", e.target.value)}
+                            disabled={profile.deactivated}
+                          />
+                        </Grid>
                         
-                        <TextField
-                          sx={{ width: '500px' }}
-                          label="Email Address"
-                          type="email"
-                          value={profile.user_email}
-                          onChange={(e) => handleChange("user_email", e.target.value)}
-                          disabled={profile.deactivated}
-                          InputProps={{
-                            startAdornment: (
-                              <EmailIcon color="action" sx={{ mr: 1 }} />
-                            ),
-                          }}
-                        />
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            fullWidth
+                            label="Phone Number"
+                            value={profile.phone}
+                            onChange={(e) => handleChange("phone", e.target.value)}
+                            disabled={profile.deactivated}
+                            InputProps={{
+                              startAdornment: <PhoneIcon color="action" sx={{ mr: 1 }} />
+                            }}
+                          />
+                        </Grid>
                         
-                        <TextField
-                          sx={{ width: '500px' }}
-                          label="Phone Number"
-                          value={profile.phone}
-                          onChange={(e) => handleChange("phone", e.target.value)}
-                          disabled={profile.deactivated}
-                          InputProps={{
-                            startAdornment: (
-                              <PhoneIcon color="action" sx={{ mr: 1 }} />
-                            ),
-                          }}
-                        />
-                      </Stack>
+                        <Grid item xs={12}>
+                          <TextField
+                            fullWidth
+                            label="Email Address"
+                            type="email"
+                            value={profile.user_email}
+                            onChange={(e) => handleChange("user_email", e.target.value)}
+                            disabled={profile.deactivated}
+                            InputProps={{
+                              startAdornment: <EmailIcon color="action" sx={{ mr: 1 }} />
+                            }}
+                          />
+                        </Grid>
+                      </Grid>
                     </CardContent>
                   </Card>
                 </Grid>
 
-                <Grid item xs={12} md={2}>
-                  <Card>
-                    <CardContent>
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-                        <BusinessIcon color="primary" sx={{ mr: 2 }} />
-                        <Typography variant="h6" fontWeight="600">Organization Details</Typography>
+                <Grid item xs={12} lg={4}>
+                  <Card elevation={0} sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                    <CardContent sx={{ p: 4 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 4 }}>
+                        <Box sx={{ 
+                          width: 48, 
+                          height: 48, 
+                          borderRadius: 2, 
+                          bgcolor: alpha('#2e7d32', 0.1),
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          mr: 2
+                        }}>
+                          <BusinessIcon sx={{ color: '#2e7d32', fontSize: 28 }} />
+                        </Box>
+                        <Typography variant="h6" fontWeight="700">Organization</Typography>
                       </Box>
                   
-                      <Stack spacing={2}>
+                      <Stack spacing={3}>
                         <TextField
                           fullWidth
                           label="Organization"
@@ -774,14 +847,30 @@ const AdminProfile = () => {
                 </Grid>
               </Grid>
 
-              <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 4 }}>
+              <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 4, gap: 2 }}>
+                <Button
+                  variant="outlined"
+                  size="large"
+                  onClick={() => window.location.reload()}
+                  disabled={saving}
+                  sx={{ px: 4 }}
+                >
+                  Cancel
+                </Button>
+                
                 <Button
                   variant="contained"
                   size="large"
                   startIcon={saving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
                   onClick={handleSave}
                   disabled={saving || profile.deactivated}
-                  sx={{ px: 4 }}
+                  sx={{ 
+                    px: 4,
+                    bgcolor: '#2e7d32',
+                    '&:hover': {
+                      bgcolor: '#1b5e20'
+                    }
+                  }}
                 >
                   {saving ? "Saving..." : "Save Changes"}
                 </Button>
@@ -790,73 +879,123 @@ const AdminProfile = () => {
 
             {/* User Management Tab */}
             <TabPanel value={tabValue} index={1}>
-              <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3, flexWrap: 'wrap', gap: 2 }}>
+              <Card elevation={0} sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                <CardContent sx={{ p: 4 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 4, flexWrap: 'wrap', gap: 2 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <PeopleIcon color="primary" sx={{ mr: 2 }} />
-                      <Typography variant="h6" fontWeight="600">System Users</Typography>
+                      <Box sx={{ 
+                        width: 48, 
+                        height: 48, 
+                        borderRadius: 2, 
+                        bgcolor: alpha('#2e7d32', 0.1),
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        mr: 2
+                      }}>
+                        <PeopleIcon sx={{ color: '#2e7d32', fontSize: 28 }} />
+                      </Box>
+                      <Typography variant="h5" fontWeight="700">System Users</Typography>
                     </Box>
-                    <Chip 
-                      label={`Total Users: ${users.length}`} 
-                      color="primary" 
-                      variant="outlined"
-                    />
+                    
+                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                      <Chip 
+                        label={`${activeUsersCount} Active`}
+                        color="success"
+                        icon={<CheckCircleIcon />}
+                      />
+                      <Chip 
+                        label={`${totalUsersCount - activeUsersCount} Inactive`}
+                        variant="outlined"
+                        icon={<BlockIcon />}
+                      />
+                    </Box>
                   </Box>
 
                   <TableContainer>
                     <Table>
                       <TableHead>
-                        <TableRow>
-                          <TableCell><strong>User</strong></TableCell>
-                          <TableCell><strong>Email</strong></TableCell>
-                          <TableCell><strong>Role</strong></TableCell>
-                          <TableCell><strong>Organization</strong></TableCell>
-                          <TableCell><strong>Status</strong></TableCell>
-                          <TableCell align="center"><strong>Actions</strong></TableCell>
+                        <TableRow sx={{ bgcolor: alpha('#2e7d32', 0.05) }}>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.95rem' }}>User</TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.95rem' }}>Contact</TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.95rem' }}>Role</TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.95rem' }}>Organization</TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.95rem' }}>Status</TableCell>
+                          <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.95rem' }}>Actions</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
                         {users.map((userItem) => {
-                          // Build full name with fallback
                           const firstName = userItem.user_Firstname || userItem.user_firstname || userItem.firstName || "";
                           const middleName = userItem.user_Middlename || userItem.user_middlename || userItem.middleName || "";
                           const lastName = userItem.user_Lastname || userItem.user_lastname || userItem.lastName || "";
                           const fullName = `${firstName} ${middleName} ${lastName}`.trim() || "Unknown User";
-                          const initials = `${firstName[0] || ''}${middleName[0] || ''}${lastName[0] || ''}`.toUpperCase() || '?';
+                          const initials = `${firstName[0] || ''}${lastName[0] || ''}`.toUpperCase() || '?';
                           
                           return (
-                            <TableRow key={userItem.id} hover>
+                            <TableRow 
+                              key={userItem.id} 
+                              hover
+                              sx={{ 
+                                '&:hover': { 
+                                  bgcolor: alpha('#2e7d32', 0.02) 
+                                }
+                              }}
+                            >
                               <TableCell>
                                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                  <Avatar sx={{ mr: 2, width: 40, height: 40, bgcolor: 'primary.main' }}>
+                                  <Avatar 
+                                    sx={{ 
+                                      mr: 2, 
+                                      width: 44, 
+                                      height: 44, 
+                                      bgcolor: '#2e7d32',
+                                      fontWeight: 600,
+                                      fontSize: '1rem'
+                                    }}
+                                  >
                                     {initials}
                                   </Avatar>
                                   <Box>
-                                    <Typography fontWeight="500">{fullName}</Typography>
-                                    <Typography variant="body2" color="text.secondary">
+                                    <Typography fontWeight="600" sx={{ fontSize: '0.95rem' }}>
+                                      {fullName}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary">
                                       {userItem.designation || userItem.role || 'N/A'}
                                     </Typography>
                                   </Box>
                                 </Box>
                               </TableCell>
-                              <TableCell>{userItem.user_email || userItem.email || 'N/A'}</TableCell>
+                              <TableCell>
+                                <Typography variant="body2">{userItem.user_email || userItem.email || 'N/A'}</Typography>
+                                {userItem.phone && (
+                                  <Typography variant="caption" color="text.secondary">{userItem.phone}</Typography>
+                                )}
+                              </TableCell>
                               <TableCell>
                                 <Chip 
                                   label={getRoleName(userItem.roleRef)} 
-                                  size="small" 
-                                  color={
-                                    (userItem.roleRef?.includes('admin') || getRoleName(userItem.roleRef).toLowerCase().includes('admin')) ? 'primary' : 
-                                    (userItem.roleRef?.includes('denr') || getRoleName(userItem.roleRef).toLowerCase().includes('denr')) ? 'secondary' : 'default'
-                                  }
+                                  size="small"
+                                  sx={{
+                                    bgcolor: (userItem.roleRef?.includes('admin') || getRoleName(userItem.roleRef).toLowerCase().includes('admin')) 
+                                      ? alpha('#2e7d32', 0.1) 
+                                      : alpha('#1976d2', 0.1),
+                                    color: (userItem.roleRef?.includes('admin') || getRoleName(userItem.roleRef).toLowerCase().includes('admin'))
+                                      ? '#2e7d32'
+                                      : '#1976d2',
+                                    fontWeight: 600
+                                  }}
                                 />
                               </TableCell>
-                              <TableCell>{userItem.organization || 'N/A'}</TableCell>
+                              <TableCell>
+                                <Typography variant="body2">{userItem.organization || 'N/A'}</Typography>
+                              </TableCell>
                               <TableCell>
                                 <Chip 
-                                  label={userItem.deactivated ? "Deactivated" : "Active"} 
+                                  label={userItem.deactivated ? "Inactive" : "Active"} 
                                   color={userItem.deactivated ? "error" : "success"}
                                   size="small"
+                                  sx={{ fontWeight: 600 }}
                                 />
                               </TableCell>
                               <TableCell align="center">
@@ -869,6 +1008,11 @@ const AdminProfile = () => {
                                         openDeactivateDialog(userItem)
                                       }
                                       size="small"
+                                      sx={{
+                                        '&:hover': {
+                                          transform: 'scale(1.1)'
+                                        }
+                                      }}
                                     >
                                       {userItem.deactivated ? <CheckCircleIcon /> : <BlockIcon />}
                                     </IconButton>
@@ -883,10 +1027,13 @@ const AdminProfile = () => {
                   </TableContainer>
 
                   {users.length === 0 && (
-                    <Box sx={{ textAlign: 'center', py: 4 }}>
-                      <PeopleIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                      <Typography variant="h6" color="text.secondary">
+                    <Box sx={{ textAlign: 'center', py: 8 }}>
+                      <PeopleIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
+                      <Typography variant="h6" color="text.secondary" fontWeight={600}>
                         No users found
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Users will appear here once they register
                       </Typography>
                     </Box>
                   )}
@@ -898,31 +1045,63 @@ const AdminProfile = () => {
             <TabPanel value={tabValue} index={2}>
               <Grid container spacing={3}>
                 <Grid item xs={12} md={6}>
-                  <Card>
-                    <CardContent>
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-                        <SecurityIcon color="primary" sx={{ mr: 2 }} />
-                        <Typography variant="h6" fontWeight="600">Security Settings</Typography>
+                  <Card elevation={0} sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', mb: 3 }}>
+                    <CardContent sx={{ p: 4 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 4 }}>
+                        <Box sx={{ 
+                          width: 48, 
+                          height: 48, 
+                          borderRadius: 2, 
+                          bgcolor: alpha('#2e7d32', 0.1),
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          mr: 2
+                        }}>
+                          <SecurityIcon sx={{ color: '#2e7d32', fontSize: 28 }} />
+                        </Box>
+                        <Typography variant="h6" fontWeight="700">Security Settings</Typography>
                       </Box>
                       
-                      <Stack spacing={2}>
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={profile.twoFactor}
-                              onChange={(e) => handleChange('twoFactor', e.target.checked)}
-                              disabled={profile.deactivated}
-                            />
-                          }
-                          label="Two-Factor Authentication"
-                        />
+                      <Stack spacing={3}>
+                        <Box sx={{ 
+                          p: 2, 
+                          borderRadius: 2, 
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between'
+                        }}>
+                          <Box>
+                            <Typography fontWeight={600} gutterBottom>Two-Factor Authentication</Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              Add an extra layer of security
+                            </Typography>
+                          </Box>
+                          <Switch
+                            checked={profile.twoFactor}
+                            onChange={(e) => handleChange('twoFactor', e.target.checked)}
+                            disabled={profile.deactivated}
+                          />
+                        </Box>
                         
                         <Button 
                           variant="outlined" 
+                          size="large"
                           startIcon={<LockIcon />}
                           onClick={() => setChangePasswordDialogOpen(true)}
                           disabled={profile.deactivated}
                           fullWidth
+                          sx={{ 
+                            py: 1.5,
+                            borderColor: '#2e7d32',
+                            color: '#2e7d32',
+                            '&:hover': {
+                              borderColor: '#1b5e20',
+                              bgcolor: alpha('#2e7d32', 0.05)
+                            }
+                          }}
                         >
                           Change Password
                         </Button>
@@ -931,12 +1110,12 @@ const AdminProfile = () => {
                   </Card>
 
                   {/* Active Sessions */}
-                  <Card sx={{ mt: 3 }}>
-                    <CardContent>
+                  <Card elevation={0} sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                    <CardContent sx={{ p: 4 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <ComputerIcon color="primary" sx={{ mr: 2 }} />
-                          <Typography variant="h6" fontWeight="600">Active Sessions</Typography>
+                          <ComputerIcon color="action" sx={{ mr: 2 }} />
+                          <Typography variant="h6" fontWeight="700">Active Sessions</Typography>
                         </Box>
                         <Badge badgeContent={activeSessions.length} color="primary">
                           <RefreshIcon color="action" />
@@ -946,7 +1125,11 @@ const AdminProfile = () => {
                       {activeSessions.length > 0 ? (
                         <List>
                           {activeSessions.map((session, index) => (
-                            <ListItem key={index} divider={index < activeSessions.length - 1}>
+                            <ListItem 
+                              key={index} 
+                              divider={index < activeSessions.length - 1}
+                              sx={{ px: 0 }}
+                            >
                               <ListItemIcon>
                                 <PublicIcon color="action" />
                               </ListItemIcon>
@@ -970,9 +1153,10 @@ const AdminProfile = () => {
                           ))}
                         </List>
                       ) : (
-                        <Typography color="text.secondary" textAlign="center" py={2}>
-                          No active sessions
-                        </Typography>
+                        <Box sx={{ textAlign: 'center', py: 4 }}>
+                          <ComputerIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
+                          <Typography color="text.secondary">No active sessions</Typography>
+                        </Box>
                       )}
                     </CardContent>
                   </Card>
@@ -980,30 +1164,40 @@ const AdminProfile = () => {
                 
                 <Grid item xs={12} md={6}>
                   {/* Login History */}
-                  <Card>
-                    <CardContent>
+                  <Card elevation={0} sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', mb: 3 }}>
+                    <CardContent sx={{ p: 4 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <HistoryIcon color="primary" sx={{ mr: 2 }} />
-                          <Typography variant="h6" fontWeight="600">Login History</Typography>
+                          <HistoryIcon color="action" sx={{ mr: 2 }} />
+                          <Typography variant="h6" fontWeight="700">Login History</Typography>
                         </Box>
-                        <Badge badgeContent={loginHistory.length} color="primary">
-                          <HistoryIcon color="action" />
-                        </Badge>
+                        <Chip 
+                          label={loginHistory.length}
+                          size="small"
+                          sx={{ bgcolor: alpha('#2e7d32', 0.1), color: '#2e7d32', fontWeight: 600 }}
+                        />
                       </Box>
                       
                       {loginHistory.length > 0 ? (
-                        <List sx={{ maxHeight: 300, overflow: 'auto' }}>
+                        <List sx={{ maxHeight: 340, overflow: 'auto' }}>
                           {loginHistory.map((login) => (
-                            <ListItem key={login.id} divider>
+                            <ListItem key={login.id} divider sx={{ px: 0 }}>
                               <ListItemIcon>
                                 <LoginIcon color={login.success ? "success" : "error"} />
                               </ListItemIcon>
                               <ListItemText
-                                primary={`${login.ip || 'Unknown IP'} • ${login.device || 'Unknown Device'}`}
-                                secondary={login.timestamp ? 
-                                  `${new Date(login.timestamp.toDate()).toLocaleString()} • ${login.success ? 'Success' : 'Failed'}` :
-                                  'Unknown time'
+                                primary={
+                                  <Typography variant="body2" fontWeight={600}>
+                                    {login.ip || 'Unknown IP'} • {login.device || 'Unknown Device'}
+                                  </Typography>
+                                }
+                                secondary={
+                                  <Typography variant="caption" color="text.secondary">
+                                    {login.timestamp ? 
+                                      `${new Date(login.timestamp.toDate()).toLocaleString()} • ${login.success ? 'Success' : 'Failed'}` :
+                                      'Unknown time'
+                                    }
+                                  </Typography>
                                 }
                               />
                               {!login.success && (
@@ -1013,26 +1207,28 @@ const AdminProfile = () => {
                           ))}
                         </List>
                       ) : (
-                        <Typography color="text.secondary" textAlign="center" py={2}>
-                          No login history available
-                        </Typography>
+                        <Box sx={{ textAlign: 'center', py: 4 }}>
+                          <HistoryIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
+                          <Typography color="text.secondary">No login history available</Typography>
+                        </Box>
                       )}
                     </CardContent>
                   </Card>
 
                   {/* Audit Logs */}
-                  <Card sx={{ mt: 3 }}>
-                    <CardContent>
+                  <Card elevation={0} sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                    <CardContent sx={{ p: 4 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <WarningIcon color="primary" sx={{ mr: 2 }} />
-                          <Typography variant="h6" fontWeight="600">Recent Activity</Typography>
+                          <WarningIcon color="action" sx={{ mr: 2 }} />
+                          <Typography variant="h6" fontWeight="700">Recent Activity</Typography>
                         </Box>
                         {auditLogs.length > 0 && (
                           <Button 
                             startIcon={<DownloadIcon />}
                             onClick={handleDownloadLogs}
                             size="small"
+                            sx={{ color: '#2e7d32' }}
                           >
                             Export
                           </Button>
@@ -1040,23 +1236,32 @@ const AdminProfile = () => {
                       </Box>
                       
                       {auditLogs.length > 0 ? (
-                        <List sx={{ maxHeight: 300, overflow: 'auto' }}>
+                        <List sx={{ maxHeight: 340, overflow: 'auto' }}>
                           {auditLogs.map((log) => (
-                            <ListItem key={log.id} divider>
+                            <ListItem key={log.id} divider sx={{ px: 0 }}>
                               <ListItemText
-                                primary={log.action || 'Unknown action'}
-                                secondary={log.timestamp ? 
-                                  `${new Date(log.timestamp.toDate()).toLocaleString()} • IP: ${log.ip || 'Unknown'}` :
-                                  'Unknown time'
+                                primary={
+                                  <Typography variant="body2" fontWeight={600}>
+                                    {log.action || 'Unknown action'}
+                                  </Typography>
+                                }
+                                secondary={
+                                  <Typography variant="caption" color="text.secondary">
+                                    {log.timestamp ? 
+                                      `${new Date(log.timestamp.toDate()).toLocaleString()} • IP: ${log.ip || 'Unknown'}` :
+                                      'Unknown time'
+                                    }
+                                  </Typography>
                                 }
                               />
                             </ListItem>
                           ))}
                         </List>
                       ) : (
-                        <Typography color="text.secondary" textAlign="center" py={2}>
-                          No activity logs available
-                        </Typography>
+                        <Box sx={{ textAlign: 'center', py: 4 }}>
+                          <WarningIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
+                          <Typography color="text.secondary">No activity logs available</Typography>
+                        </Box>
                       )}
                     </CardContent>
                   </Card>
@@ -1068,55 +1273,79 @@ const AdminProfile = () => {
             <TabPanel value={tabValue} index={3}>
               <Grid container spacing={3}>
                 <Grid item xs={12} md={6}>
-                  <Card>
-                    <CardContent>
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-                        <NotificationsIcon color="primary" sx={{ mr: 2 }} />
-                        <Typography variant="h6" fontWeight="600">Notification Preferences</Typography>
+                  <Card elevation={0} sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                    <CardContent sx={{ p: 4 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 4 }}>
+                        <Box sx={{ 
+                          width: 48, 
+                          height: 48, 
+                          borderRadius: 2, 
+                          bgcolor: alpha('#2e7d32', 0.1),
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          mr: 2
+                        }}>
+                          <NotificationsIcon sx={{ color: '#2e7d32', fontSize: 28 }} />
+                        </Box>
+                        <Typography variant="h6" fontWeight="700">Notification Preferences</Typography>
                       </Box>
                       
                       <Stack spacing={2}>
-                        <FormControlLabel
-                          control={
+                        {[
+                          { label: 'Email Notifications', checked: profile.notifications, field: 'notifications' },
+                          { label: 'Planting Request Alerts', checked: true, field: 'plantingAlerts' },
+                          { label: 'Sensor Updates', checked: true, field: 'sensorAlerts' },
+                          { label: 'System Maintenance Alerts', checked: true, field: 'maintenanceAlerts' }
+                        ].map((item, index) => (
+                          <Box 
+                            key={index}
+                            sx={{ 
+                              p: 2, 
+                              borderRadius: 2, 
+                              border: '1px solid',
+                              borderColor: 'divider',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between'
+                            }}
+                          >
+                            <Typography>{item.label}</Typography>
                             <Switch
-                              checked={profile.notifications}
-                              onChange={(e) => handleChange('notifications', e.target.checked)}
-                              disabled={profile.deactivated}
+                              checked={item.field === 'notifications' ? profile.notifications : item.checked}
+                              onChange={(e) => item.field === 'notifications' && handleChange(item.field, e.target.checked)}
+                              disabled={profile.deactivated || item.field !== 'notifications'}
                             />
-                          }
-                          label="Email Notifications"
-                        />
-                        <FormControlLabel
-                          control={<Switch defaultChecked disabled={profile.deactivated} />}
-                          label="Planting Request Alerts"
-                        />
-                        <FormControlLabel
-                          control={<Switch defaultChecked disabled={profile.deactivated} />}
-                          label="Sensor Updates"
-                        />
-                        <FormControlLabel
-                          control={<Switch defaultChecked disabled={profile.deactivated} />}
-                          label="System Maintenance Alerts"
-                        />
+                          </Box>
+                        ))}
                       </Stack>
                     </CardContent>
                   </Card>
                 </Grid>
 
                 <Grid item xs={12} md={6}>
-                  <Card>
-                    <CardContent>
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-                        {profile.theme === 'dark' ? 
-                          <DarkModeIcon color="primary" sx={{ mr: 2 }} /> : 
-                          <LightModeIcon color="primary" sx={{ mr: 2 }} />
-                        }
-                        <Typography variant="h6" fontWeight="600">
-                          Theme & Appearance
-                        </Typography>
+                  <Card elevation={0} sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                    <CardContent sx={{ p: 4 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 4 }}>
+                        <Box sx={{ 
+                          width: 48, 
+                          height: 48, 
+                          borderRadius: 2, 
+                          bgcolor: alpha('#2e7d32', 0.1),
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          mr: 2
+                        }}>
+                          {profile.theme === 'dark' ? 
+                            <DarkModeIcon sx={{ color: '#2e7d32', fontSize: 28 }} /> : 
+                            <LightModeIcon sx={{ color: '#2e7d32', fontSize: 28 }} />
+                          }
+                        </Box>
+                        <Typography variant="h6" fontWeight="700">Theme & Appearance</Typography>
                       </Box>
                       
-                      <Stack spacing={2}>
+                      <Stack spacing={3}>
                         <FormControl fullWidth disabled={profile.deactivated}>
                           <InputLabel>Theme</InputLabel>
                           <Select
@@ -1148,14 +1377,30 @@ const AdminProfile = () => {
                 </Grid>
               </Grid>
 
-              <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 4 }}>
+              <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 4, gap: 2 }}>
+                <Button
+                  variant="outlined"
+                  size="large"
+                  onClick={() => window.location.reload()}
+                  disabled={saving}
+                  sx={{ px: 4 }}
+                >
+                  Cancel
+                </Button>
+                
                 <Button
                   variant="contained"
                   size="large"
                   startIcon={saving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
                   onClick={handleSave}
                   disabled={saving || profile.deactivated}
-                  sx={{ px: 4 }}
+                  sx={{ 
+                    px: 4,
+                    bgcolor: '#2e7d32',
+                    '&:hover': {
+                      bgcolor: '#1b5e20'
+                    }
+                  }}
                 >
                   {saving ? "Saving..." : "Save Preferences"}
                 </Button>
@@ -1166,11 +1411,22 @@ const AdminProfile = () => {
             <TabPanel value={tabValue} index={4}>
               <Grid container spacing={3}>
                 <Grid item xs={12} md={6}>
-                  <Card>
-                    <CardContent>
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-                        <HelpIcon color="primary" sx={{ mr: 2 }} />
-                        <Typography variant="h6" fontWeight="600">Help & Support</Typography>
+                  <Card elevation={0} sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+                    <CardContent sx={{ p: 4 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 4 }}>
+                        <Box sx={{ 
+                          width: 48, 
+                          height: 48, 
+                          borderRadius: 2, 
+                          bgcolor: alpha('#2e7d32', 0.1),
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          mr: 2
+                        }}>
+                          <HelpIcon sx={{ color: '#2e7d32', fontSize: 28 }} />
+                        </Box>
+                        <Typography variant="h6" fontWeight="700">Help & Support</Typography>
                       </Box>
                       
                       <Stack spacing={2}>
@@ -1178,7 +1434,17 @@ const AdminProfile = () => {
                           variant="outlined" 
                           startIcon={<HelpIcon />}
                           fullWidth
-                          sx={{ justifyContent: 'flex-start' }}
+                          size="large"
+                          sx={{ 
+                            justifyContent: 'flex-start',
+                            py: 1.5,
+                            borderColor: 'divider',
+                            color: 'text.primary',
+                            '&:hover': {
+                              borderColor: '#2e7d32',
+                              bgcolor: alpha('#2e7d32', 0.05)
+                            }
+                          }}
                         >
                           User Documentation
                         </Button>
@@ -1187,7 +1453,17 @@ const AdminProfile = () => {
                           variant="outlined" 
                           startIcon={<BugReportIcon />}
                           fullWidth
-                          sx={{ justifyContent: 'flex-start' }}
+                          size="large"
+                          sx={{ 
+                            justifyContent: 'flex-start',
+                            py: 1.5,
+                            borderColor: 'divider',
+                            color: 'text.primary',
+                            '&:hover': {
+                              borderColor: '#2e7d32',
+                              bgcolor: alpha('#2e7d32', 0.05)
+                            }
+                          }}
                         >
                           Report a Bug
                         </Button>
@@ -1196,7 +1472,17 @@ const AdminProfile = () => {
                           variant="outlined" 
                           startIcon={<EmailIcon />}
                           fullWidth
-                          sx={{ justifyContent: 'flex-start' }}
+                          size="large"
+                          sx={{ 
+                            justifyContent: 'flex-start',
+                            py: 1.5,
+                            borderColor: 'divider',
+                            color: 'text.primary',
+                            '&:hover': {
+                              borderColor: '#2e7d32',
+                              bgcolor: alpha('#2e7d32', 0.05)
+                            }
+                          }}
                         >
                           Contact Support Team
                         </Button>
@@ -1206,25 +1492,40 @@ const AdminProfile = () => {
                 </Grid>
 
                 <Grid item xs={12} md={6}>
-                  <Card>
-                    <CardContent>
+                  <Card elevation={0} sx={{ borderRadius: 2, border: '2px solid', borderColor: 'error.light', bgcolor: alpha('#f44336', 0.02) }}>
+                    <CardContent sx={{ p: 4 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-                        <WarningIcon color="warning" sx={{ mr: 2 }} />
-                        <Typography variant="h6" fontWeight="600">Danger Zone</Typography>
+                        <Box sx={{ 
+                          width: 48, 
+                          height: 48, 
+                          borderRadius: 2, 
+                          bgcolor: alpha('#f44336', 0.1),
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          mr: 2
+                        }}>
+                          <WarningIcon sx={{ color: 'error.main', fontSize: 28 }} />
+                        </Box>
+                        <Typography variant="h6" fontWeight="700" color="error.main">Danger Zone</Typography>
                       </Box>
                       
-                      <Alert severity="warning" sx={{ mb: 2 }}>
-                        These actions are irreversible. Proceed with caution.
+                      <Alert severity="warning" sx={{ mb: 3 }}>
+                        <Typography variant="body2" fontWeight={600}>
+                          These actions are irreversible. Proceed with caution.
+                        </Typography>
                       </Alert>
                       
                       <Stack spacing={2}>
                         <Button 
                           variant="contained" 
                           color="error"
+                          size="large"
                           startIcon={<BlockIcon />}
                           onClick={() => setAdminDeactivateDialogOpen(true)}
                           disabled={profile.deactivated}
                           fullWidth
+                          sx={{ py: 1.5 }}
                         >
                           Deactivate My Account
                         </Button>
@@ -1232,9 +1533,11 @@ const AdminProfile = () => {
                         <Button 
                           variant="outlined"
                           color="error"
+                          size="large"
                           startIcon={<LogoutIcon />}
                           onClick={logout}
                           fullWidth
+                          sx={{ py: 1.5 }}
                         >
                           Log Out
                         </Button>
@@ -1253,10 +1556,18 @@ const AdminProfile = () => {
           onClose={() => setChangePasswordDialogOpen(false)} 
           maxWidth="sm" 
           fullWidth
+          PaperProps={{
+            sx: { borderRadius: 3 }
+          }}
         >
-          <DialogTitle>Change Password</DialogTitle>
+          <DialogTitle sx={{ pb: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <LockIcon sx={{ mr: 2, color: '#2e7d32' }} />
+              <Typography variant="h6" fontWeight="700">Change Password</Typography>
+            </Box>
+          </DialogTitle>
           <DialogContent>
-            <Stack spacing={2} sx={{ mt: 2 }}>
+            <Stack spacing={3} sx={{ mt: 2 }}>
               <TextField
                 fullWidth
                 type="password"
@@ -1286,16 +1597,23 @@ const AdminProfile = () => {
               />
             </Stack>
           </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setChangePasswordDialogOpen(false)}>Cancel</Button>
+          <DialogActions sx={{ p: 3, pt: 2 }}>
+            <Button onClick={() => setChangePasswordDialogOpen(false)} size="large">Cancel</Button>
             <Button 
               onClick={handleChangePassword}
               variant="contained"
+              size="large"
               disabled={
                 !passwordData.currentPassword || 
                 !passwordData.newPassword || 
                 passwordData.newPassword !== passwordData.confirmPassword
               }
+              sx={{ 
+                bgcolor: '#2e7d32',
+                '&:hover': {
+                  bgcolor: '#1b5e20'
+                }
+              }}
             >
               Change Password
             </Button>
@@ -1303,15 +1621,26 @@ const AdminProfile = () => {
         </Dialog>
 
         {/* User Deactivation Dialog */}
-        <Dialog open={deactivateDialogOpen} onClose={() => setDeactivateDialogOpen(false)}>
-          <DialogTitle>Confirm User Deactivation</DialogTitle>
+        <Dialog 
+          open={deactivateDialogOpen} 
+          onClose={() => setDeactivateDialogOpen(false)}
+          PaperProps={{
+            sx: { borderRadius: 3 }
+          }}
+        >
+          <DialogTitle>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <WarningIcon sx={{ mr: 2, color: 'error.main' }} />
+              <Typography variant="h6" fontWeight="700">Confirm User Deactivation</Typography>
+            </Box>
+          </DialogTitle>
           <DialogContent>
             <Typography sx={{ mb: 2 }}>
               Are you sure you want to deactivate this user?
             </Typography>
             {selectedUser && (
-              <Box sx={{ p: 2, bgcolor: 'grey.100', borderRadius: 1, mb: 2 }}>
-                <Typography variant="body2"><strong>Name:</strong> {
+              <Box sx={{ p: 2, bgcolor: alpha('#f44336', 0.05), borderRadius: 2, mb: 2, border: '1px solid', borderColor: 'error.light' }}>
+                <Typography variant="body2" fontWeight={600} gutterBottom><strong>Name:</strong> {
                   `${selectedUser.user_Firstname || ''} ${selectedUser.user_Middlename || ''} ${selectedUser.user_Lastname || ''}`.trim() || 'Unknown User'
                 }</Typography>
                 <Typography variant="body2"><strong>Email:</strong> {selectedUser.user_email || selectedUser.email || 'N/A'}</Typography>
@@ -1321,12 +1650,13 @@ const AdminProfile = () => {
               This user will no longer be able to access the system. Their data will be preserved.
             </Alert>
           </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setDeactivateDialogOpen(false)}>Cancel</Button>
+          <DialogActions sx={{ p: 3 }}>
+            <Button onClick={() => setDeactivateDialogOpen(false)} size="large">Cancel</Button>
             <Button 
               onClick={() => handleDeactivateUser(selectedUser?.id, true)} 
               color="error"
               variant="contained"
+              size="large"
             >
               Deactivate User
             </Button>
@@ -1334,40 +1664,49 @@ const AdminProfile = () => {
         </Dialog>
 
         {/* Admin Self-Deactivation Dialog */}
-        <Dialog open={adminDeactivateDialogOpen} onClose={() => setAdminDeactivateDialogOpen(false)}>
+        <Dialog 
+          open={adminDeactivateDialogOpen} 
+          onClose={() => setAdminDeactivateDialogOpen(false)}
+          maxWidth="sm"
+          fullWidth
+          PaperProps={{
+            sx: { borderRadius: 3 }
+          }}
+        >
           <DialogTitle>
             <Box sx={{ display: 'flex', alignItems: 'center' }}>
-              <WarningIcon color="error" sx={{ mr: 2 }} />
-              Deactivate Administrator Account
+              <WarningIcon sx={{ mr: 2, color: 'error.main', fontSize: 32 }} />
+              <Typography variant="h6" fontWeight="700">Deactivate Administrator Account</Typography>
             </Box>
           </DialogTitle>
           <DialogContent>
-            <Alert severity="error" sx={{ mb: 2 }}>
-              <Typography variant="h6" gutterBottom>
+            <Alert severity="error" sx={{ mb: 3 }}>
+              <Typography variant="subtitle1" fontWeight={700} gutterBottom>
                 Critical Action
               </Typography>
-              <Typography>
+              <Typography variant="body2" paragraph>
                 You are about to deactivate your own administrator account. This action will:
               </Typography>
-              <ul>
+              <Box component="ul" sx={{ pl: 2, mb: 0 }}>
                 <li>Immediately log you out of the system</li>
                 <li>Prevent future login attempts</li>
                 <li>Preserve all your data and activities</li>
                 <li>Require another administrator to reactivate your account</li>
-              </ul>
+              </Box>
             </Alert>
-            <Typography>
+            <Typography fontWeight={600}>
               Are you absolutely sure you want to proceed?
             </Typography>
           </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setAdminDeactivateDialogOpen(false)} variant="outlined">
+          <DialogActions sx={{ p: 3 }}>
+            <Button onClick={() => setAdminDeactivateDialogOpen(false)} variant="outlined" size="large">
               Cancel
             </Button>
             <Button 
               onClick={handleDeactivateAdmin} 
               color="error"
               variant="contained"
+              size="large"
               startIcon={<BlockIcon />}
             >
               Yes, Deactivate My Account
@@ -1382,7 +1721,12 @@ const AdminProfile = () => {
           onClose={() => setSuccess(false)}
           anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         >
-          <Alert severity="success" onClose={() => setSuccess(false)} sx={{ width: '100%' }}>
+          <Alert 
+            severity="success" 
+            onClose={() => setSuccess(false)} 
+            sx={{ width: '100%', borderRadius: 2 }}
+            icon={<CheckCircleIcon />}
+          >
             {success}
           </Alert>
         </Snackbar>
@@ -1394,7 +1738,11 @@ const AdminProfile = () => {
           onClose={() => setError(null)}
           anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         >
-          <Alert severity="error" onClose={() => setError(null)} sx={{ width: '100%' }}>
+          <Alert 
+            severity="error" 
+            onClose={() => setError(null)} 
+            sx={{ width: '100%', borderRadius: 2 }}
+          >
             {error}
           </Alert>
         </Snackbar>

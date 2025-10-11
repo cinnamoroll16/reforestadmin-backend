@@ -31,6 +31,9 @@ import {
 } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 
+// ✅ Import LegalDocumentsCard
+import LegalDocumentsCard from '../components/LegalDocumentsCard';
+
 // ✅ Firebase imports
 import { auth, firestore } from '../firebase.js';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
@@ -53,6 +56,27 @@ const Registration = () => {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState('');
+
+  // ✅ State for legal documents modal
+  const [legalDocOpen, setLegalDocOpen] = useState(false);
+  const [docType, setDocType] = useState(''); // 'terms' or 'privacy'
+
+  // ✅ Handlers for opening legal documents
+  const handleOpenTerms = (e) => {
+    e.preventDefault();
+    setDocType('terms');
+    setLegalDocOpen(true);
+  };
+
+  const handleOpenPrivacy = (e) => {
+    e.preventDefault();
+    setDocType('privacy');
+    setLegalDocOpen(true);
+  };
+
+  const handleCloseLegalDoc = () => {
+    setLegalDocOpen(false);
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -82,7 +106,6 @@ const Registration = () => {
     return errors;
   };
 
-  // Function to convert role value to roleRef path
   const getRoleRef = (roleValue) => {
     const roleMapping = {
       'admin': '/roles/admin',
@@ -101,7 +124,6 @@ const Registration = () => {
       setLoading(true);
 
       try {
-        // ✅ Create user in Firebase Auth
         const userCredential = await createUserWithEmailAndPassword(
           auth,
           formData.email,
@@ -109,22 +131,20 @@ const Registration = () => {
         );
         const user = userCredential.user;
 
-        // ✅ Update display name in Auth profile
         const fullName = `${formData.firstName} ${formData.lastName}`;
         await updateProfile(user, {
           displayName: fullName,
         });
 
-        // ✅ Save user data in Firestore with the specified structure
         await setDoc(doc(firestore, 'users', user.uid), {
           user_lastname: formData.lastName.trim(),
           user_firstname: formData.firstName.trim(),
           user_email: formData.email.toLowerCase().trim(),
           roleRef: getRoleRef(formData.role),
-          user_password: "hashed_password", // Note: In practice, Firebase Auth handles passwords
+          user_password: "hashed_password",
           createdAt: new Date(),
           status: 'active',
-          uid: user.uid // Keep uid for easy reference
+          uid: user.uid
         });
 
         setSubmitted(true);
@@ -138,7 +158,6 @@ const Registration = () => {
         });
         setAcceptedTerms(false);
 
-        // Redirect after success
         setTimeout(() => {
           navigate('/login');
         }, 2000);
@@ -154,7 +173,7 @@ const Registration = () => {
   };
 
   const roleOptions = [
-    { value: 'admin', label: 'Admin', description: 'Dako-dako ni HAHAHA', icon: <Nature sx={{ fontSize: 20, color: '#2e7d32' }} /> },
+    { value: 'admin', label: 'Admin', description: 'Handles system management, user monitoring, and data operations', icon: <Nature sx={{ fontSize: 20, color: '#2e7d32' }} /> },
     { value: 'officer', label: 'DENR Officer', description: 'Monitor and verify plantations', icon: <Security sx={{ fontSize: 20, color: '#2e7d32' }} /> },
     { value: 'stakeholder', label: 'Stakeholder', description: 'Support and fund initiatives', icon: <Business sx={{ fontSize: 20, color: '#2e7d32' }} /> }
   ];
@@ -456,7 +475,7 @@ const Registration = () => {
                 )}
               </FormControl>
 
-              {/* Terms */}
+              {/* ✅ Updated Terms section with click handlers */}
               <FormControlLabel
                 sx={{ mb: 2, alignItems: 'flex-start' }}
                 control={
@@ -469,11 +488,29 @@ const Registration = () => {
                 label={
                   <Typography variant="body2" sx={{ mt: 0.5 }}>
                     I agree to the{' '}
-                    <Link href="#" sx={{ color: '#2e7d32', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>
+                    <Link 
+                      href="#" 
+                      onClick={handleOpenTerms}
+                      sx={{ 
+                        color: '#2e7d32', 
+                        textDecoration: 'none', 
+                        fontWeight: 600,
+                        '&:hover': { textDecoration: 'underline' } 
+                      }}
+                    >
                       Terms of Service
                     </Link>{' '}
                     and{' '}
-                    <Link href="#" sx={{ color: '#2e7d32', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>
+                    <Link 
+                      href="#" 
+                      onClick={handleOpenPrivacy}
+                      sx={{ 
+                        color: '#2e7d32', 
+                        textDecoration: 'none', 
+                        fontWeight: 600,
+                        '&:hover': { textDecoration: 'underline' } 
+                      }}
+                    >
                       Privacy Policy
                     </Link>
                   </Typography>
@@ -501,7 +538,6 @@ const Registration = () => {
                   fontSize: '16px',
                   fontWeight: 600,
                   boxShadow: 2,
-                  '&:hover': { backgroundColor: '#1b5e20', boxShadow: 4 },
                 }}
               >
                 {loading ? 'Creating Account...' : 'Create Account'}
@@ -519,6 +555,13 @@ const Registration = () => {
           </Paper>
         </Grid>
       </Grid>
+
+      {/* ✅ Add LegalDocumentsCard component */}
+      <LegalDocumentsCard 
+        open={legalDocOpen}
+        onClose={handleCloseLegalDoc}
+        documentType={docType}
+      />
     </Box>
   );
 };

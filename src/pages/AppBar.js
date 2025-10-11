@@ -61,7 +61,7 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
     switch (path) {
       case '/dashboard':
         return 'Dashboard';
-      case '/sensor':
+      case '/sensors':
         return 'Sensor Data';
       case '/recommendations':
         return 'Recommendations';
@@ -297,13 +297,6 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
             <PersonIcon sx={{ mr: 2 }} />
             Profile
           </MenuItem>
-          <MenuItem onClick={handleSettings}>
-            <SettingsIcon sx={{ mr: 2 }} />
-            Settings
-          </MenuItem>
-          
-          <Divider />
-          
           <MenuItem onClick={handleLogout} sx={{ color: 'error.main' }}>
             Logout
           </MenuItem>

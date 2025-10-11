@@ -151,141 +151,141 @@ function AdminDashboard() {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
   // NEW: Fetch sensor locations from Firestore + RTDB sensor data
-const fetchSensorLocations = async () => {
-  try {
-    console.log('========== STARTING SENSOR FETCH ==========');
-    const sensorsSnapshot = await getDocs(collection(firestore, 'sensors'));
-    console.log(`Found ${sensorsSnapshot.docs.length} sensors in Firestore`);
-    
-    const sensorsWithLocations = await Promise.all(
-      sensorsSnapshot.docs.map(async (sensorDoc) => {
-        const sensorData = sensorDoc.data();
-        const sensorId = sensorDoc.id;
-        
-        console.log(`\n--- Processing Sensor: ${sensorId} ---`);
-        
-        // ========== 1. FETCH LOCATION FROM FIRESTORE ==========
-        let locationData = null;
-        let locationDocId = null;
-        
-        if (sensorData.sensor_location) {
-          const locationPath = typeof sensorData.sensor_location === 'string' 
-            ? sensorData.sensor_location 
-            : sensorData.sensor_location.path;
+  const fetchSensorLocations = async () => {
+    try {
+      console.log('========== STARTING SENSOR FETCH ==========');
+      const sensorsSnapshot = await getDocs(collection(firestore, 'sensors'));
+      console.log(`Found ${sensorsSnapshot.docs.length} sensors in Firestore`);
+      
+      const sensorsWithLocations = await Promise.all(
+        sensorsSnapshot.docs.map(async (sensorDoc) => {
+          const sensorData = sensorDoc.data();
+          const sensorId = sensorDoc.id;
           
-          locationDocId = locationPath.split('/').filter(p => p).pop();
+          console.log(`\n--- Processing Sensor: ${sensorId} ---`);
           
-          console.log(`Fetching location: ${locationDocId}`);
+          // ========== 1. FETCH LOCATION FROM FIRESTORE ==========
+          let locationData = null;
+          let locationDocId = null;
+          
+          if (sensorData.sensor_location) {
+            const locationPath = typeof sensorData.sensor_location === 'string' 
+              ? sensorData.sensor_location 
+              : sensorData.sensor_location.path;
+            
+            locationDocId = locationPath.split('/').filter(p => p).pop();
+            
+            console.log(`Fetching location: ${locationDocId}`);
+            
+            try {
+              const locationDocRef = doc(firestore, 'locations', locationDocId);
+              const locationDocSnap = await getDoc(locationDocRef);
+              
+              if (locationDocSnap.exists()) {
+                locationData = locationDocSnap.data();
+                console.log(`✓ Location: ${locationData.location_name}`);
+              } else {
+                console.warn(`✗ Location not found: ${locationDocId}`);
+              }
+            } catch (err) {
+              console.error(`Error fetching location:`, err.message);
+            }
+          }
+
+          // ========== 2. FETCH LATEST SENSOR READING FROM RTDB ==========
+          let latestReading = null;
           
           try {
-            const locationDocRef = doc(firestore, 'locations', locationDocId);
-            const locationDocSnap = await getDoc(locationDocRef);
+            // RTDB structure: sensors/{sensorId}/sensordata/{data_xxx}
+            const rtdbPath = `sensors/${sensorId}/sensordata`;
+            console.log(`Fetching from RTDB: ${rtdbPath}`);
             
-            if (locationDocSnap.exists()) {
-              locationData = locationDocSnap.data();
-              console.log(`✓ Location: ${locationData.location_name}`);
+            const sensorDataRef = ref(rtdb, rtdbPath);
+            const snapshot = await get(sensorDataRef);
+            
+            if (snapshot.exists()) {
+              const allReadings = snapshot.val();
+              console.log(`✓ Found ${Object.keys(allReadings).length} readings`);
+              
+              // Get all reading keys and sort them to find the latest
+              const readingKeys = Object.keys(allReadings).sort();
+              const latestKey = readingKeys[readingKeys.length - 1];
+              
+              latestReading = {
+                id: latestKey,
+                ...allReadings[latestKey]
+              };
+              
+              console.log(`✓ Latest reading (${latestKey}):`, latestReading);
             } else {
-              console.warn(`✗ Location not found: ${locationDocId}`);
+              console.warn(`✗ No sensordata found at: ${rtdbPath}`);
             }
+            
           } catch (err) {
-            console.error(`Error fetching location:`, err.message);
+            console.error(`RTDB error for ${sensorId}:`, err.message);
           }
+
+          // ========== 3. BUILD SENSOR OBJECT ==========
+          const sensor = {
+            id: sensorId,
+            name: locationData?.location_name || `Sensor ${sensorId}`,
+            lat: locationData ? parseFloat(locationData.location_latitude) : null,
+            lng: locationData ? parseFloat(locationData.location_longitude) : null,
+            
+            // Sensor metadata
+            sensorType: 'Multi-parameter',
+            status: sensorData.sensor_status || 'offline',
+            lastCalibration: sensorData.sensor_lastCalibrationDate,
+            
+            // Latest reading (directly use the field names from RTDB)
+            latestReading: latestReading ? {
+              temperature: latestReading.temperature || 'N/A',
+              soilMoisture: latestReading.soilMoisture || 'N/A',
+              pH: latestReading.pH || 'N/A',
+              timestamp: latestReading.timestamp || null
+            } : null,
+            
+            locationId: locationDocId,
+            locationPath: sensorData.sensor_location
+          };
+          
+          console.log(`✓ Sensor created:`, {
+            id: sensor.id,
+            name: sensor.name,
+            hasCoords: !!(sensor.lat && sensor.lng),
+            hasReading: !!sensor.latestReading,
+            reading: sensor.latestReading
+          });
+          
+          return sensor;
+        })
+      );
+
+      // Filter valid sensors
+      const validSensors = sensorsWithLocations.filter(sensor => {
+        const hasValidCoords = sensor.lat && sensor.lng && 
+                              !isNaN(sensor.lat) && !isNaN(sensor.lng);
+        
+        if (!hasValidCoords) {
+          console.warn(`Sensor ${sensor.id} excluded: invalid coordinates`);
         }
-
-        // ========== 2. FETCH LATEST SENSOR READING FROM RTDB ==========
-        let latestReading = null;
         
-        try {
-          // RTDB structure: sensors/{sensorId}/sensordata/{data_xxx}
-          const rtdbPath = `sensors/${sensorId}/sensordata`;
-          console.log(`Fetching from RTDB: ${rtdbPath}`);
-          
-          const sensorDataRef = ref(rtdb, rtdbPath);
-          const snapshot = await get(sensorDataRef);
-          
-          if (snapshot.exists()) {
-            const allReadings = snapshot.val();
-            console.log(`✓ Found ${Object.keys(allReadings).length} readings`);
-            
-            // Get all reading keys and sort them to find the latest
-            const readingKeys = Object.keys(allReadings).sort();
-            const latestKey = readingKeys[readingKeys.length - 1];
-            
-            latestReading = {
-              id: latestKey,
-              ...allReadings[latestKey]
-            };
-            
-            console.log(`✓ Latest reading (${latestKey}):`, latestReading);
-          } else {
-            console.warn(`✗ No sensordata found at: ${rtdbPath}`);
-          }
-          
-        } catch (err) {
-          console.error(`RTDB error for ${sensorId}:`, err.message);
-        }
+        return hasValidCoords;
+      });
 
-        // ========== 3. BUILD SENSOR OBJECT ==========
-        const sensor = {
-          id: sensorId,
-          name: locationData?.location_name || `Sensor ${sensorId}`,
-          lat: locationData ? parseFloat(locationData.location_latitude) : null,
-          lng: locationData ? parseFloat(locationData.location_longitude) : null,
-          
-          // Sensor metadata
-          sensorType: 'Multi-parameter',
-          status: sensorData.sensor_status || 'offline',
-          lastCalibration: sensorData.sensor_lastCalibrationDate,
-          
-          // Latest reading (directly use the field names from RTDB)
-          latestReading: latestReading ? {
-            temperature: latestReading.temperature || 'N/A',
-            soilMoisture: latestReading.soilMoisture || 'N/A',
-            pH: latestReading.pH || 'N/A',
-            timestamp: latestReading.timestamp || null
-          } : null,
-          
-          locationId: locationDocId,
-          locationPath: sensorData.sensor_location
-        };
-        
-        console.log(`✓ Sensor created:`, {
-          id: sensor.id,
-          name: sensor.name,
-          hasCoords: !!(sensor.lat && sensor.lng),
-          hasReading: !!sensor.latestReading,
-          reading: sensor.latestReading
-        });
-        
-        return sensor;
-      })
-    );
-
-    // Filter valid sensors
-    const validSensors = sensorsWithLocations.filter(sensor => {
-      const hasValidCoords = sensor.lat && sensor.lng && 
-                            !isNaN(sensor.lat) && !isNaN(sensor.lng);
+      console.log('\n========== SENSOR FETCH SUMMARY ==========');
+      console.log(`Total: ${sensorsSnapshot.docs.length}`);
+      console.log(`Valid: ${validSensors.length}`);
+      console.log(`With readings: ${validSensors.filter(s => s.latestReading).length}`);
+      console.log('==========================================\n');
       
-      if (!hasValidCoords) {
-        console.warn(`Sensor ${sensor.id} excluded: invalid coordinates`);
-      }
-      
-      return hasValidCoords;
-    });
+      return validSensors;
 
-    console.log('\n========== SENSOR FETCH SUMMARY ==========');
-    console.log(`Total: ${sensorsSnapshot.docs.length}`);
-    console.log(`Valid: ${validSensors.length}`);
-    console.log(`With readings: ${validSensors.filter(s => s.latestReading).length}`);
-    console.log('==========================================\n');
-    
-    return validSensors;
-
-  } catch (error) {
-    console.error('❌ CRITICAL ERROR:', error);
-    return [];
-  }
-};
+    } catch (error) {
+      console.error('❌ CRITICAL ERROR:', error);
+      return [];
+    }
+  };
   // Fetch all dashboard data
   const fetchDashboardData = async () => {
     try {
@@ -309,7 +309,7 @@ const fetchSensorLocations = async () => {
         else if (roleLower.includes('field') || roleLower.includes('planter')) acc.fieldUsers++;
         else if (roleLower.includes('denr')) acc.denrStaff++;
         return acc;
-      }, { total: 0, admins: 0, fieldUsers: 0, denrStaff: 0 });
+      }, { total: 0, admins: 3, fieldUsers: 4, denrStaff: 1 });
 
       // 2. Fetch ALL Planting Requests
       console.log('Fetching planting requests...');
@@ -973,7 +973,7 @@ const fetchSensorLocations = async () => {
                             <IconButton 
                               color="success" 
                               size="small"
-                              onClick={() => handleRequestAction(request.id, 'approved')}
+                              onClick={() => handleRequestAction(request.id, 'pending')}
                               sx={{ mr: 1 }}
                               title="Approve"
                             >

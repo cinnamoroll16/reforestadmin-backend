@@ -16,7 +16,7 @@ import Sensors from './pages/Sensor.js'; // Your actual file
 import Recommendations from './pages/Recommendations.js';
 import Tasks from './pages/Task.js';
 import Notification from './pages/Notification.js';
-import ForgotPassword from './pages/ForgotPassword.js';
+import ForgotPassword from './pages/ForgotPassword.js';;
 
 // Temporary placeholder components
 const ResetPassword = () => <div>Reset Password Page - Under Construction</div>;
@@ -195,7 +195,6 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-
               {/* 404 Fallback */}
               <Route path="*" element={<NotFound />} />
             </Routes>

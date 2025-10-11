@@ -199,7 +199,7 @@
           // Fetch ALL approved planting requests
           const requestsQuery = query(
             collection(firestore, 'plantingrequests'),
-            where('request_status', '==', 'pending')
+            where('request_status', '==', 'pending' , 'approved')
           );
           
           const requestsUnsubscribe = onSnapshot(requestsQuery, async (snapshot) => {
@@ -221,7 +221,7 @@
                 planterName: data.fullName || 'Unknown User',
                 planterEmail: userEmail,
                 locationName: locationName,
-                status: data.request_status || 'pending',
+                status: data.request_status || 'pending' || 'approved',
                 // Convert date strings if needed
                 request_date: data.request_date,
                 preferred_date: data.preferred_date,
