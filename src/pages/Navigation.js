@@ -21,8 +21,8 @@ import {
 
 function Navigation({ mobileOpen, handleDrawerToggle, isMobile }) {
   const navItems = [
-    { text: 'Dashboard', icon: <HomeIcon />, path: '/Dashboard' },
-    { text: 'View Sensor', icon: <SensorsIcon />, path: '/Sensor' },
+    { text: 'Dashboard', icon: <HomeIcon />, path: '/dashboard' },
+    { text: 'View Sensor', icon: <SensorsIcon />, path: '/sensor' },
     { text: 'Recommendation Logs', icon: <ListAltIcon />, path: '/recommendations' },
     { text: 'Task', icon: <AssignmentIcon />, path: '/tasks' },
     { text: 'Notification', icon: <NotificationsIcon />, path: '/notifications' },

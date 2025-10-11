@@ -86,6 +86,8 @@ const theme = createTheme({
 });
 
 function App() {
+  // This hook automatically redirects uppercase URLs to lowercase
+  useLowercaseRedirect();
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
