@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "npm run build",
+  "buildCommand": "cross-env CI=false npm run build",
   "outputDirectory": "build",
   "devCommand": "npm start",
   "installCommand": "npm install",
@@ -9,6 +9,43 @@
     {
       "source": "/(.*)",
       "destination": "/index.html"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/Sensor",
+      "destination": "/sensors",
+      "permanent": true
+    },
+    {
+      "source": "/Sensors",
+      "destination": "/sensors",
+      "permanent": true
+    },
+    {
+      "source": "/Notification",
+      "destination": "/notifications",
+      "permanent": true
+    },
+    {
+      "source": "/Notifications",
+      "destination": "/notifications",
+      "permanent": true
+    },
+    {
+      "source": "/Recommendation",
+      "destination": "/recommendations",
+      "permanent": true
+    },
+    {
+      "source": "/Recommendations",
+      "destination": "/recommendations",
+      "permanent": true
+    },
+    {
+      "source": "/Dashboard",
+      "destination": "/",
+      "permanent": true
     }
   ],
   "headers": [

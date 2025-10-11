@@ -61,7 +61,7 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
     switch (path) {
       case '/dashboard':
         return 'Dashboard';
-      case '/Sensor':
+      case '/sensor':
         return 'Sensor Data';
       case '/recommendations':
         return 'Recommendations';

@@ -13,5 +13,5 @@ export function useLowercaseRedirect() {
     if (location.pathname !== lowerPath) {
       navigate(lowerPath + location.search, { replace: true });
     }
-  }, [location, navigate]);
+  }, [location.pathname, location.search, navigate]);
 }

@@ -1,6 +1,6 @@
 // src/App.js
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { AuthProvider } from './context/AuthContext.js';
@@ -12,21 +12,13 @@ import Login from './pages/Login.js';
 import Registration from './pages/Registration.js';
 import Dashboard from './pages/Dashboard.js';
 import Profile from './pages/Profile.js';
-import Sensor from './pages/Sensor.js';
+import Sensors from './pages/Sensor.js'; // renamed to match your import
 import Recommendations from './pages/Recommendations.js';
 import Tasks from './pages/Task.js';
 import Notification from './pages/Notification.js';
 import ForgotPassword from './pages/ForgotPassword.js';
-// Uncomment these imports when you create these components:
-// import ForgotPassword from './pages/ForgotPassword';
-// import ResetPassword from './pages/ResetPassword';
-// import PlantingProjects from './pages/PlantingProjects';
-// import TreeInventory from './pages/TreeInventory';
-// import Reports from './pages/Reports';
-// import Settings from './pages/Settings';
-// import NotFound from './pages/NotFound';
 
-// Create temporary placeholder components for development
+// Temporary placeholder components
 const ResetPassword = () => <div>Reset Password Page - Under Construction</div>;
 const PlantingProjects = () => <div>Planting Projects Page - Under Construction</div>;
 const TreeInventory = () => <div>Tree Inventory Page - Under Construction</div>;
@@ -34,7 +26,7 @@ const Reports = () => <div>Reports Page - Under Construction</div>;
 const Settings = () => <div>Settings Page - Under Construction</div>;
 const NotFound = () => <div>404 - Page Not Found</div>;
 
-// Create theme
+// MUI Theme
 const theme = createTheme({
   palette: {
     primary: {
@@ -85,111 +77,127 @@ const theme = createTheme({
   },
 });
 
+// 🔠 Lowercase Redirect Wrapper
+function LowercaseRedirect({ children }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    const lowerPath = location.pathname.toLowerCase();
+    if (location.pathname !== lowerPath) {
+      navigate(lowerPath + location.search, { replace: true });
+    }
+  }, [location.pathname, location.search, navigate]);
+
+  return children;
+}
+
 function App() {
-  // This hook automatically redirects uppercase URLs to lowercase
-  useLowercaseRedirect();
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <AuthProvider>
-        <Router>
-          <Routes>
-            {/* Public Routes */}
-            <Route 
-              path="/login" 
-              element={
-                <PublicRoute>
-                  <Login />
-                </PublicRoute>
-              } 
-            />
-            <Route 
-              path="/register" 
-              element={
-                <PublicRoute>
-                  <Registration />
-                </PublicRoute>
-              } 
-            />
-            <Route 
-              path="/forgotpassword" 
-              element={
-                <PublicRoute>
-                  <ForgotPassword />
-                </PublicRoute>
-              } 
-            />
-            <Route 
-              path="/reset-password/:token" 
-              element={
-                <PublicRoute>
-                  <ResetPassword />
-                </PublicRoute>
-              } 
-            />
+        <BrowserRouter>
+          <LowercaseRedirect>
+            <Routes>
+              {/* Public Routes */}
+              <Route
+                path="/login"
+                element={
+                  <PublicRoute>
+                    <Login />
+                  </PublicRoute>
+                }
+              />
+              <Route
+                path="/register"
+                element={
+                  <PublicRoute>
+                    <Registration />
+                  </PublicRoute>
+                }
+              />
+              <Route
+                path="/forgotpassword"
+                element={
+                  <PublicRoute>
+                    <ForgotPassword />
+                  </PublicRoute>
+                }
+              />
+              <Route
+                path="/reset-password/:token"
+                element={
+                  <PublicRoute>
+                    <ResetPassword />
+                  </PublicRoute>
+                }
+              />
 
-            {/* Protected Routes */}
-            <Route 
-              path="/dashboard" 
-              element={
-                <ProtectedRoute>
-                  <Dashboard />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/profile" 
-              element={
-                <ProtectedRoute>
-                  <Profile />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/sensor" 
-              element={
-                <ProtectedRoute>
-                  <Sensor />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/recommendations" 
-              element={
-                <ProtectedRoute>
-                  <Recommendations />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/tasks/:id" 
-              element={
-                <ProtectedRoute>
-                  <Tasks />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/tasks" 
-              element={
-                <ProtectedRoute>
-                  <Tasks />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/notifications" 
-              element={
-                <ProtectedRoute>
-                  <Notification />
-                </ProtectedRoute>
-              } 
-            />
-            {/* Default Redirects */}
-            <Route path="/" element={<Navigate to="/login" replace />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Router>
+              {/* Protected Routes */}
+              <Route
+                path="/dashboard"
+                element={
+                  <ProtectedRoute>
+                    <Dashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/profile"
+                element={
+                  <ProtectedRoute>
+                    <Profile />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/sensor"
+                element={
+                  <ProtectedRoute>
+                    <Sensors />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/recommendations"
+                element={
+                  <ProtectedRoute>
+                    <Recommendations />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/tasks/:id"
+                element={
+                  <ProtectedRoute>
+                    <Tasks />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/tasks"
+                element={
+                  <ProtectedRoute>
+                    <Tasks />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/notifications"
+                element={
+                  <ProtectedRoute>
+                    <Notification />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Default Redirects */}
+              <Route path="/" element={<Navigate to="/login" replace />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </LowercaseRedirect>
+        </BrowserRouter>
       </AuthProvider>
     </ThemeProvider>
   );
