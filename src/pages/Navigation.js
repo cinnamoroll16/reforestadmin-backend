@@ -1,11 +1,13 @@
 // src/pages/Navigation.js
-  import {
+import { useNavigate, useLocation } from 'react-router-dom';
+import {
   Drawer,
   Toolbar,
   List,
   ListItem,
   ListItemIcon,
   ListItemText,
+  ListItemButton,
   Typography,
   Box,
 } from '@mui/material';
@@ -20,24 +22,28 @@ import {
 } from '@mui/icons-material';
 
 function Navigation({ mobileOpen, handleDrawerToggle, isMobile }) {
+  const navigate = useNavigate(); // ✅ Use React Router navigate
+  const location = useLocation(); // ✅ Use React Router location
+
+  // ✅ FIXED PATHS - all lowercase, matching your actual routes
   const navItems = [
-    { text: 'Dashboard', icon: <HomeIcon />, path: '/dashboard' },
-    { text: 'View Sensor', icon: <SensorsIcon />, path: '/sensor' },
+    { text: 'Dashboard', icon: <HomeIcon />, path: '/' }, // ✅ Changed from /dashboard
+    { text: 'View Sensor', icon: <SensorsIcon />, path: '/sensors' }, // ✅ Changed from /sensor to /sensors (plural)
     { text: 'Recommendation Logs', icon: <ListAltIcon />, path: '/recommendations' },
     { text: 'Task', icon: <AssignmentIcon />, path: '/tasks' },
     { text: 'Notification', icon: <NotificationsIcon />, path: '/notifications' },
-    { text: 'My Profile', icon: <PersonIcon />, path: '/profile' }, // ✅ Already there
+    { text: 'My Profile', icon: <PersonIcon />, path: '/profile' },
   ];
 
   const handleNavigation = (path) => {
-    window.location.href = path; // Use window.location for navigation
+    navigate(path); // ✅ Use React Router navigation instead of window.location
     if (isMobile) {
       handleDrawerToggle();
     }
   };
 
-  // Get current path for highlighting
-  const currentPath = window.location.pathname;
+  // ✅ Get current path from React Router
+  const currentPath = location.pathname;
 
   const drawer = (
     <div>
@@ -50,22 +56,43 @@ function Navigation({ mobileOpen, handleDrawerToggle, isMobile }) {
       <List>
         {navItems.map((item) => (
           <ListItem 
-            button 
             key={item.text}
-            onClick={() => handleNavigation(item.path)}
-            selected={currentPath === item.path}
+            disablePadding
             sx={{
-              '&.Mui-selected': {
-                backgroundColor: 'primary.light',
-                color: 'white',
-                '&:hover': {
-                  backgroundColor: 'primary.main',
-                }
-              }
+              backgroundColor: currentPath === item.path ? 'rgba(46, 125, 50, 0.1)' : 'transparent',
             }}
           >
-            <ListItemIcon>{item.icon}</ListItemIcon>
-            <ListItemText primary={item.text} />
+            <ListItemButton 
+              onClick={() => handleNavigation(item.path)}
+              selected={currentPath === item.path}
+              sx={{
+                '&.Mui-selected': {
+                  backgroundColor: 'rgba(46, 125, 50, 0.15)',
+                  borderLeft: '4px solid #2e7d32',
+                  '&:hover': {
+                    backgroundColor: 'rgba(46, 125, 50, 0.2)',
+                  }
+                },
+                '&:hover': {
+                  backgroundColor: 'rgba(46, 125, 50, 0.08)',
+                }
+              }}
+            >
+              <ListItemIcon 
+                sx={{ 
+                  color: currentPath === item.path ? 'primary.main' : 'inherit' 
+                }}
+              >
+                {item.icon}
+              </ListItemIcon>
+              <ListItemText 
+                primary={item.text}
+                primaryTypographyProps={{
+                  fontWeight: currentPath === item.path ? 600 : 400,
+                  color: currentPath === item.path ? 'primary.main' : 'inherit',
+                }}
+              />
+            </ListItemButton>
           </ListItem>
         ))}
       </List>

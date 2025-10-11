@@ -12,7 +12,7 @@ import Login from './pages/Login.js';
 import Registration from './pages/Registration.js';
 import Dashboard from './pages/Dashboard.js';
 import Profile from './pages/Profile.js';
-import Sensors from './pages/Sensor.js'; // renamed to match your import
+import Sensors from './pages/Sensor.js'; // Your actual file
 import Recommendations from './pages/Recommendations.js';
 import Tasks from './pages/Task.js';
 import Notification from './pages/Notification.js';
@@ -20,10 +20,6 @@ import ForgotPassword from './pages/ForgotPassword.js';
 
 // Temporary placeholder components
 const ResetPassword = () => <div>Reset Password Page - Under Construction</div>;
-const PlantingProjects = () => <div>Planting Projects Page - Under Construction</div>;
-const TreeInventory = () => <div>Tree Inventory Page - Under Construction</div>;
-const Reports = () => <div>Reports Page - Under Construction</div>;
-const Settings = () => <div>Settings Page - Under Construction</div>;
 const NotFound = () => <div>404 - Page Not Found</div>;
 
 // MUI Theme
@@ -134,14 +130,18 @@ function App() {
                 }
               />
 
-              {/* Protected Routes */}
+              {/* Protected Routes - ✅ FIXED TO MATCH NAVIGATION.JS */}
               <Route
-                path="/dashboard"
+                path="/"
                 element={
                   <ProtectedRoute>
                     <Dashboard />
                   </ProtectedRoute>
                 }
+              />
+              <Route
+                path="/dashboard"
+                element={<Navigate to="/" replace />}
               />
               <Route
                 path="/profile"
@@ -152,12 +152,16 @@ function App() {
                 }
               />
               <Route
-                path="/sensor"
+                path="/sensors"
                 element={
                   <ProtectedRoute>
                     <Sensors />
                   </ProtectedRoute>
                 }
+              />
+              <Route
+                path="/sensor"
+                element={<Navigate to="/sensors" replace />}
               />
               <Route
                 path="/recommendations"
@@ -192,8 +196,7 @@ function App() {
                 }
               />
 
-              {/* Default Redirects */}
-              <Route path="/" element={<Navigate to="/login" replace />} />
+              {/* 404 Fallback */}
               <Route path="*" element={<NotFound />} />
             </Routes>
           </LowercaseRedirect>
