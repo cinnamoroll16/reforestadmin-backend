@@ -16,7 +16,8 @@ import Sensors from './pages/Sensor.js'; // Your actual file
 import Recommendations from './pages/Recommendations.js';
 import Tasks from './pages/Task.js';
 import Notification from './pages/Notification.js';
-import ForgotPassword from './pages/ForgotPassword.js';;
+import ForgotPassword from './pages/ForgotPassword.js';
+import LandingPage from './pages/LandingPage.jsx';
 
 // Temporary placeholder components
 const ResetPassword = () => <div>Reset Password Page - Under Construction</div>;
@@ -88,6 +89,17 @@ function LowercaseRedirect({ children }) {
   return children;
 }
 
+// 🎯 Landing Page Redirect for root path
+function RootRedirect() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    navigate('/landing-page', { replace: true });
+  }, [navigate]);
+
+  return null;
+}
+
 function App() {
   return (
     <ThemeProvider theme={theme}>
@@ -96,6 +108,19 @@ function App() {
         <BrowserRouter>
           <LowercaseRedirect>
             <Routes>
+              {/* 🎯 Root path now redirects to Landing Page */}
+              <Route path="/" element={<RootRedirect />} />
+              
+              {/* 🏠 Landing Page - First page users see */}
+              <Route
+                path="/landing-page"
+                element={
+                  <PublicRoute>
+                    <LandingPage />
+                  </PublicRoute>
+                }
+              />
+
               {/* Public Routes */}
               <Route
                 path="/login"
@@ -132,16 +157,12 @@ function App() {
 
               {/* Protected Routes - ✅ FIXED TO MATCH NAVIGATION.JS */}
               <Route
-                path="/"
+                path="/dashboard"
                 element={
                   <ProtectedRoute>
                     <Dashboard />
                   </ProtectedRoute>
                 }
-              />
-              <Route
-                path="/dashboard"
-                element={<Navigate to="/" replace />}
               />
               <Route
                 path="/profile"
@@ -195,6 +216,7 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+
               {/* 404 Fallback */}
               <Route path="*" element={<NotFound />} />
             </Routes>
