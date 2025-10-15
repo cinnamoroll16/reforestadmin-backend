@@ -1,6 +1,7 @@
 // src/pages/AdminDashboard.js
 import React, { useState, useEffect } from 'react';
 import {
+  LinearProgress,
   Box,
   Toolbar,
   useMediaQuery,
@@ -18,11 +19,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  List,
-  ListItem,
-  ListItemText,
   Divider,
-  CircularProgress as MuiCircularProgress,
   Alert,
   Snackbar,
   Chip,
@@ -32,11 +29,8 @@ import {
 import {
   People,
   PendingActions,
-  Assignment,
   CheckCircle,
   LocationOn,
-  ListAlt,
-  BarChart,
   TrendingUp,
   Refresh,
   Check,
@@ -44,11 +38,11 @@ import {
   Sensors,
   Nature
 } from '@mui/icons-material';
-import { collection, getDocs,  getDoc, query, where, updateDoc, doc, Timestamp } from 'firebase/firestore';
-import { ref, get, query as rtdbQuery, orderByChild, limitToLast } from 'firebase/database'; // ADD RTDB functions
+import { collection, getDocs, getDoc, updateDoc, doc, Timestamp } from 'firebase/firestore';
+import { ref, get } from 'firebase/database';
 import { firestore, rtdb } from '../firebase.js';
-import ReForestAppBar from "../pages/AppBar.js";
-import Navigation from "./Navigation.js";
+import ReForestAppBar from "../pages/AppBar.jsx";
+import Navigation from "./Navigation.jsx";
 import { useAuth } from '../context/AuthContext.js';
 
 // Recharts components
@@ -60,8 +54,6 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  LineChart,
-  Line,
   PieChart,
   Pie,
   Cell,
@@ -122,8 +114,8 @@ const COLORS = ['#4caf50', '#2196f3', '#ff9800', '#f44336', '#9c27b0'];
 
 function AdminDashboard() {
   const { user, logout } = useAuth();
-  const [mobileOpen, setMobileOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [mapView, setMapView] = useState('both'); // 'sensors', 'sites', or 'both'
   const [dashboardData, setDashboardData] = useState({
@@ -140,31 +132,26 @@ function AdminDashboard() {
       pending: 0,
       cancelled: 0
     },
-    activityLog: [],
     plantingSites: [],
-    sensors: [], // NEW: Array to store sensor locations
+    sensors: [],
     monthlyRequestsData: [],
-    userTrendData: []
+    taskDistribution: []
   });
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
-  // NEW: Fetch sensor locations from Firestore + RTDB sensor data
+  // Fetch sensor locations from Firestore + RTDB sensor data
   const fetchSensorLocations = async () => {
     try {
-      console.log('========== STARTING SENSOR FETCH ==========');
       const sensorsSnapshot = await getDocs(collection(firestore, 'sensors'));
-      console.log(`Found ${sensorsSnapshot.docs.length} sensors in Firestore`);
       
       const sensorsWithLocations = await Promise.all(
         sensorsSnapshot.docs.map(async (sensorDoc) => {
           const sensorData = sensorDoc.data();
           const sensorId = sensorDoc.id;
           
-          console.log(`\n--- Processing Sensor: ${sensorId} ---`);
-          
-          // ========== 1. FETCH LOCATION FROM FIRESTORE ==========
+          // Fetch location from Firestore
           let locationData = null;
           let locationDocId = null;
           
@@ -175,39 +162,28 @@ function AdminDashboard() {
             
             locationDocId = locationPath.split('/').filter(p => p).pop();
             
-            console.log(`Fetching location: ${locationDocId}`);
-            
             try {
               const locationDocRef = doc(firestore, 'locations', locationDocId);
               const locationDocSnap = await getDoc(locationDocRef);
               
               if (locationDocSnap.exists()) {
                 locationData = locationDocSnap.data();
-                console.log(`✓ Location: ${locationData.location_name}`);
-              } else {
-                console.warn(`✗ Location not found: ${locationDocId}`);
               }
             } catch (err) {
-              console.error(`Error fetching location:`, err.message);
+              console.error(`Error fetching location for sensor ${sensorId}:`, err.message);
             }
           }
 
-          // ========== 2. FETCH LATEST SENSOR READING FROM RTDB ==========
+          // Fetch latest sensor reading from RTDB
           let latestReading = null;
           
           try {
-            // RTDB structure: sensors/{sensorId}/sensordata/{data_xxx}
             const rtdbPath = `sensors/${sensorId}/sensordata`;
-            console.log(`Fetching from RTDB: ${rtdbPath}`);
-            
             const sensorDataRef = ref(rtdb, rtdbPath);
             const snapshot = await get(sensorDataRef);
             
             if (snapshot.exists()) {
               const allReadings = snapshot.val();
-              console.log(`✓ Found ${Object.keys(allReadings).length} readings`);
-              
-              // Get all reading keys and sort them to find the latest
               const readingKeys = Object.keys(allReadings).sort();
               const latestKey = readingKeys[readingKeys.length - 1];
               
@@ -215,47 +191,29 @@ function AdminDashboard() {
                 id: latestKey,
                 ...allReadings[latestKey]
               };
-              
-              console.log(`✓ Latest reading (${latestKey}):`, latestReading);
-            } else {
-              console.warn(`✗ No sensordata found at: ${rtdbPath}`);
             }
-            
           } catch (err) {
-            console.error(`RTDB error for ${sensorId}:`, err.message);
+            console.error(`RTDB error for sensor ${sensorId}:`, err.message);
           }
 
-          // ========== 3. BUILD SENSOR OBJECT ==========
+          // Build sensor object
           const sensor = {
             id: sensorId,
-            name: locationData?.location_name || `Sensor ${sensorId}`,
+            name: locationData?.location_name || `Sensor ${sensorId.slice(0, 8)}`,
             lat: locationData ? parseFloat(locationData.location_latitude) : null,
             lng: locationData ? parseFloat(locationData.location_longitude) : null,
-            
-            // Sensor metadata
             sensorType: 'Multi-parameter',
             status: sensorData.sensor_status || 'offline',
             lastCalibration: sensorData.sensor_lastCalibrationDate,
-            
-            // Latest reading (directly use the field names from RTDB)
             latestReading: latestReading ? {
               temperature: latestReading.temperature || 'N/A',
               soilMoisture: latestReading.soilMoisture || 'N/A',
               pH: latestReading.pH || 'N/A',
               timestamp: latestReading.timestamp || null
             } : null,
-            
             locationId: locationDocId,
             locationPath: sensorData.sensor_location
           };
-          
-          console.log(`✓ Sensor created:`, {
-            id: sensor.id,
-            name: sensor.name,
-            hasCoords: !!(sensor.lat && sensor.lng),
-            hasReading: !!sensor.latestReading,
-            reading: sensor.latestReading
-          });
           
           return sensor;
         })
@@ -265,40 +223,28 @@ function AdminDashboard() {
       const validSensors = sensorsWithLocations.filter(sensor => {
         const hasValidCoords = sensor.lat && sensor.lng && 
                               !isNaN(sensor.lat) && !isNaN(sensor.lng);
-        
-        if (!hasValidCoords) {
-          console.warn(`Sensor ${sensor.id} excluded: invalid coordinates`);
-        }
-        
         return hasValidCoords;
       });
-
-      console.log('\n========== SENSOR FETCH SUMMARY ==========');
-      console.log(`Total: ${sensorsSnapshot.docs.length}`);
-      console.log(`Valid: ${validSensors.length}`);
-      console.log(`With readings: ${validSensors.filter(s => s.latestReading).length}`);
-      console.log('==========================================\n');
       
       return validSensors;
 
     } catch (error) {
-      console.error('❌ CRITICAL ERROR:', error);
+      console.error('Error fetching sensors:', error);
       return [];
     }
   };
+
   // Fetch all dashboard data
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
       
       // 1. Fetch Users
-      console.log('Fetching users...');
       const usersSnapshot = await getDocs(collection(firestore, 'users'));
       const usersData = usersSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-      console.log('Users fetched:', usersData.length);
 
       // Calculate user breakdown by role
       const userBreakdown = usersData.reduce((acc, userData) => {
@@ -309,27 +255,22 @@ function AdminDashboard() {
         else if (roleLower.includes('field') || roleLower.includes('planter')) acc.fieldUsers++;
         else if (roleLower.includes('denr')) acc.denrStaff++;
         return acc;
-      }, { total: 0, admins: 3, fieldUsers: 4, denrStaff: 1 });
+      }, { total: 0, admins: 0, fieldUsers: 0, denrStaff: 0 });
 
       // 2. Fetch ALL Planting Requests
-      console.log('Fetching planting requests...');
       const allRequestsSnapshot = await getDocs(collection(firestore, 'plantingrequests'));
-      console.log('Total requests found:', allRequestsSnapshot.docs.length);
 
       // Map all requests with user and location data
       const allRequests = await Promise.all(
         allRequestsSnapshot.docs.map(async (docSnap) => {
           const data = docSnap.data();
           
-          // ========== FETCH USER NAME ==========
+          // Fetch user name
           let requesterName = 'Unknown User';
           if (data.userRef) {
             try {
-              // Extract user ID from reference path (e.g., "/users/abc123" -> "abc123")
               const userPath = typeof data.userRef === 'string' ? data.userRef : data.userRef.path;
               const userId = userPath.split('/').pop();
-              
-              console.log(`Fetching user: ${userId}`);
               
               const userDocRef = doc(firestore, 'users', userId);
               const userDocSnap = await getDoc(userDocRef);
@@ -339,33 +280,24 @@ function AdminDashboard() {
                 requesterName = `${userData.user_Firstname || ''} ${userData.user_Lastname || ''}`.trim() || 
                               `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 
                               'Unknown User';
-                console.log(`✓ User found: ${requesterName}`);
-              } else {
-                console.warn(`✗ User not found: ${userId}`);
               }
             } catch (err) {
               console.error('Error fetching user:', err);
             }
           }
 
-          // ========== FETCH LOCATION NAME ==========
+          // Fetch location name
           let locationName = 'Not specified';
           if (data.locationRef) {
             try {
-              // Extract location ID from reference path
               const locationPath = typeof data.locationRef === 'string' ? data.locationRef : data.locationRef.path;
               const locationId = locationPath.split('/').pop();
-              
-              console.log(`Fetching location: ${locationId}`);
               
               const locationDocRef = doc(firestore, 'locations', locationId);
               const locationDocSnap = await getDoc(locationDocRef);
               
               if (locationDocSnap.exists()) {
                 locationName = locationDocSnap.data().location_name || 'Unknown Location';
-                console.log(`✓ Location found: ${locationName}`);
-              } else {
-                console.warn(`✗ Location not found: ${locationId}`);
               }
             } catch (err) {
               console.error('Error fetching location:', err);
@@ -390,31 +322,23 @@ function AdminDashboard() {
       const pendingRequests = allRequests.filter(req => 
         (req.request_status || '').toLowerCase() === 'pending'
       );
-      console.log('Pending requests:', pendingRequests.length);
       
       // 3. Fetch Planting Records (completed plantings)
-      console.log('========== FETCHING PLANTING RECORDS ==========');
       const recordsSnapshot = await getDocs(collection(firestore, 'plantingrecords'));
       const recordsData = recordsSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-      console.log(`✓ Total planting records: ${recordsData.length}`);
-
-      // Log sample record for debugging
-      if (recordsData.length > 0) {
-        console.log('Sample record:', recordsData[0]);
-      }
 
       // Count completed tasks from plantingrecords
       const plantingTasks = {
         active: 0,
-        completed: recordsData.length, // Each record = 1 completed task
+        completed: recordsData.length,
         pending: 0,
         cancelled: 0
       };
 
-      // Optionally fetch plantingtasks for pending/active/cancelled counts
+      // Fetch plantingtasks for pending/active/cancelled counts
       try {
         const tasksSnapshot = await getDocs(collection(firestore, 'plantingtasks'));
         
@@ -428,29 +352,10 @@ function AdminDashboard() {
         });
         
       } catch (error) {
-        console.warn('⚠ plantingtasks collection not available:', error.message);
+        console.warn('plantingtasks collection not available:', error.message);
       }
 
-      console.log('Final task breakdown:', plantingTasks);
-      console.log('==============================================\n');
-      // 4. Create Activity Log from requests (already has user names)
-      const activityLog = allRequests
-        .sort((a, b) => {
-          const dateA = a.request_date?.toDate?.() || new Date(0);
-          const dateB = b.request_date?.toDate?.() || new Date(0);
-          return dateB - dateA;
-        })
-        .slice(0, 10)
-        .map(request => ({
-          id: request.id,
-          action: `${request.requesterName} submitted a planting request for ${request.site}`,
-          timestamp: request.request_date,
-          status: request.status,
-          type: 'request'
-        }));
-
-      // 5. Fetch Planting Sites from locations collection
-      console.log('Fetching locations...');
+      // 4. Fetch Planting Sites from locations collection
       const locationsSnapshot = await getDocs(collection(firestore, 'locations'));
       const plantingSites = locationsSnapshot.docs.map(doc => {
         const data = doc.data();
@@ -463,29 +368,14 @@ function AdminDashboard() {
           ...data
         };
       }).filter(site => site.lat && site.lng && !isNaN(site.lat) && !isNaN(site.lng));
-      console.log('Planting sites with valid coordinates:', plantingSites.length);
 
-      // 6. NEW: Fetch Sensor Locations with extensive logging
-      console.log('\n========== STARTING SENSOR FETCH ==========');
-      console.log('Firebase RTDB instance:', rtdb ? 'Connected' : 'NOT CONNECTED');
-      console.log('Firestore instance:', firestore ? 'Connected' : 'NOT CONNECTED');
-
+      // 5. Fetch Sensor Locations
       const sensors = await fetchSensorLocations();
 
-      console.log('========== SENSOR FETCH COMPLETE ==========');
-      console.log(`Total sensors returned: ${sensors.length}`);
-      if (sensors.length > 0) {
-        console.log('First sensor sample:', sensors[0]);
-      }
-      console.log('============================================\n');
-
-      // 7. Generate Monthly Requests Data (last 6 months)
+      // 6. Generate Monthly Requests Data (last 6 months)
       const monthlyRequestsData = generateMonthlyData(allRequests);
 
-      // 8. Generate User Trend Data
-      const userTrendData = generateUserTrendData(usersData);
-
-      // 9. Task distribution for pie chart
+      // 7. Task distribution for pie chart
       const taskDistribution = [
         { name: 'Active', value: plantingTasks.active, color: COLORS[0] },
         { name: 'Completed', value: plantingTasks.completed, color: COLORS[1] },
@@ -497,15 +387,11 @@ function AdminDashboard() {
         users: userBreakdown,
         pendingRequests,
         plantingTasks,
-        activityLog,
         plantingSites,
-        sensors, // NEW: Add sensors to state
+        sensors,
         monthlyRequestsData,
-        userTrendData,
         taskDistribution
       });
-
-      console.log('Dashboard data loaded successfully');
 
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -545,15 +431,6 @@ function AdminDashboard() {
     return monthlyData;
   };
 
-  // Generate user trend data
-  const generateUserTrendData = (usersData) => {
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-    return monthNames.map((month, index) => ({
-      month,
-      users: Math.floor(usersData.length * (0.6 + index * 0.08))
-    }));
-  };
-
   // Handle request approval/rejection
   const handleRequestAction = async (requestId, action) => {
     try {
@@ -591,7 +468,7 @@ function AdminDashboard() {
   const handleLogout = () => logout();
   const handleRefresh = () => fetchDashboardData();
 
-  // Overview Cards Data - Updated to include sensors
+  // Overview Cards Data
   const overviewCards = [
     {
       title: 'Total Users',
@@ -623,7 +500,7 @@ function AdminDashboard() {
     }
   ];
 
-  // Calculate map center based on sensors or planting sites
+  // Calculate map center
   const defaultCenter = [10.3157, 123.8854]; // Cebu City
   let mapCenter = defaultCenter;
   
@@ -681,11 +558,22 @@ function AdminDashboard() {
               startIcon={<Refresh />} 
               onClick={handleRefresh} 
               variant="outlined"
+              disabled={loading}
             >
               Refresh Data
             </Button>
           </Box>
         </Box>
+
+        {/* Loading State */}
+        {loading && (
+          <Box sx={{ mb: 3 }}>
+            <LinearProgress sx={{ borderRadius: 1 }} />
+            <Typography variant="body2" color="text.secondary" align="center" sx={{ mt: 1 }}>
+              Loading dashboard data...
+            </Typography>
+          </Box>
+        )}
 
         {/* Overview Cards */}
         <Grid container spacing={2} sx={{ mb: 3 }}>
@@ -725,12 +613,13 @@ function AdminDashboard() {
             </Grid>
           ))}
         </Grid>
-        {/* Map and Activity */}
+
+        {/* Map and Pending Requests */}
         <Grid container spacing={3} sx={{ mb: 3 }}>
-          {/* Interactive Map with Sensors */}
-          <Grid item xs={12} md={6}>
+          {/* Interactive Map */}
+          <Grid item xs={12} lg={8}>
             <Paper sx={{ p: 2, height: 500 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
                 <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
                   <LocationOn sx={{ mr: 1 }} />
                   Location Map
@@ -742,15 +631,9 @@ function AdminDashboard() {
                   onChange={(e, newView) => newView && setMapView(newView)}
                   size="small"
                 >
-                  <ToggleButton value="both">
-                    Both
-                  </ToggleButton>
-                  <ToggleButton value="sensors">
-                    Sensors ({dashboardData.sensors.length})
-                  </ToggleButton>
-                  <ToggleButton value="sites">
-                    Sites ({dashboardData.plantingSites.length})
-                  </ToggleButton>
+                  <ToggleButton value="both">Both</ToggleButton>
+                  <ToggleButton value="sensors">Sensors ({dashboardData.sensors.length})</ToggleButton>
+                  <ToggleButton value="sites">Sites ({dashboardData.plantingSites.length})</ToggleButton>
                 </ToggleButtonGroup>
               </Box>
 
@@ -850,10 +733,9 @@ function AdminDashboard() {
                           </Popup>
                         </Marker>
                         
-                        {/* Add a circle around sensor for coverage area */}
                         <Circle
                           center={[sensor.lat, sensor.lng]}
-                          radius={50} // 50 meters
+                          radius={50}
                           pathOptions={{
                             color: '#2196f3',
                             fillColor: '#2196f3',
@@ -924,86 +806,76 @@ function AdminDashboard() {
               </Box>
             </Paper>
           </Grid>
-    
-          {/* Pending Requests Table */}
-          <Grid container spacing={3} sx={{ mb: 3 }}>
-            <Grid item xs={12}>
-              <Paper sx={{ p: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
-                    <PendingActions sx={{ mr: 1 }} />
-                    Pending Requests ({dashboardData.pendingRequests.length})
-                  </Typography>
-                </Box>
-                <TableContainer sx={{ maxHeight: 400 }}>
-                  <Table stickyHeader>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell><strong>Requester</strong></TableCell>
-                        <TableCell><strong>Site</strong></TableCell>
-                        <TableCell><strong>Preferred Date</strong></TableCell>
-                        <TableCell><strong>Remarks</strong></TableCell>
-                        <TableCell align="center"><strong>Actions</strong></TableCell>
+
+          {/* Pending Requests - Side Panel */}
+          <Grid item xs={12} lg={4}>
+            <Paper sx={{ p: 2, height: 500 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
+                  <PendingActions sx={{ mr: 1 }} />
+                  Pending Requests
+                </Typography>
+                <Chip 
+                  label={dashboardData.pendingRequests.length} 
+                  color="warning" 
+                  size="small"
+                />
+              </Box>
+              <TableContainer sx={{ maxHeight: 420 }}>
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell><strong>Details</strong></TableCell>
+                      <TableCell align="center"><strong>Actions</strong></TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {dashboardData.pendingRequests.map((request) => (
+                      <TableRow key={request.id} hover>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight="medium">
+                            {request.requesterName}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            {request.site}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {request.preferredDate}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="center">
+                          <IconButton 
+                            color="success" 
+                            size="small"
+                            onClick={() => handleRequestAction(request.id, 'approved')}
+                            title="Approve"
+                          >
+                            <Check fontSize="small" />
+                          </IconButton>
+                          <IconButton 
+                            color="error" 
+                            size="small"
+                            onClick={() => handleRequestAction(request.id, 'declined')}
+                            title="Decline"
+                          >
+                            <Clear fontSize="small" />
+                          </IconButton>
+                        </TableCell>
                       </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {dashboardData.pendingRequests.map((request) => (
-                        <TableRow key={request.id} hover>
-                          <TableCell>
-                            <Typography variant="body2" fontWeight="medium">
-                              {request.requesterName}
-                            </Typography>
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="body2">
-                              {request.site}
-                            </Typography>
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="body2">
-                              {request.preferredDate || 'Not specified'}
-                            </Typography>
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
-                              {request.remarks || '-'}
-                            </Typography>
-                          </TableCell>
-                          <TableCell align="center">
-                            <IconButton 
-                              color="success" 
-                              size="small"
-                              onClick={() => handleRequestAction(request.id, 'pending')}
-                              sx={{ mr: 1 }}
-                              title="Approve"
-                            >
-                              <Check />
-                            </IconButton>
-                            <IconButton 
-                              color="error" 
-                              size="small"
-                              onClick={() => handleRequestAction(request.id, 'declined')}
-                              title="Decline"
-                            >
-                              <Clear />
-                            </IconButton>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                      {dashboardData.pendingRequests.length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={5} align="center">
-                            <Typography color="text.secondary" sx={{ py: 3 }}>
-                              No pending requests at this time
-                            </Typography>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </Paper>
-            </Grid>
+                    ))}
+                    {dashboardData.pendingRequests.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={2} align="center">
+                          <Typography color="text.secondary" sx={{ py: 3 }}>
+                            No pending requests
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
           </Grid>
         </Grid>
 
@@ -1018,12 +890,12 @@ function AdminDashboard() {
 
           <Grid container spacing={3}>
             {/* Monthly Requests Bar Chart */}
-            <Grid item xs={12} md={7} sx={{ display: "flex" }}>
-            <Box sx={{ flex: 1, p: 2, border: "1px solid #e0e0e0", borderRadius: 1 }}>
-              <Typography variant="subtitle1" gutterBottom fontWeight="medium">
-                Planting Requests (Last 6 Months)
-              </Typography>
-              <ResponsiveContainer width="100%" height={250}>
+            <Grid item xs={12} md={8}>
+              <Box sx={{ p: 2, border: "1px solid #e0e0e0", borderRadius: 1 }}>
+                <Typography variant="subtitle1" gutterBottom fontWeight="medium">
+                  Planting Requests (Last 6 Months)
+                </Typography>
+                <ResponsiveContainer width="100%" height={250}>
                   <RechartsBar data={dashboardData.monthlyRequestsData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="month" />
@@ -1037,8 +909,8 @@ function AdminDashboard() {
             </Grid>
 
             {/* Task Distribution Pie Chart */}
-            <Grid item xs={12} md={6} sx={{ display: "flex" }}>
-              <Box sx={{ flex: 1, p: 2, border: "1px solid #e0e0e0", borderRadius: 1 }}>
+            <Grid item xs={12} md={4}>
+              <Box sx={{ p: 2, border: "1px solid #e0e0e0", borderRadius: 1 }}>
                 <Typography variant="subtitle1" gutterBottom fontWeight="medium">
                   Task Status Distribution
                 </Typography>

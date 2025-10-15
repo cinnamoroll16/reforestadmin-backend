@@ -92,8 +92,8 @@ import {
   limit
 } from "firebase/firestore";
 import { firestore } from "../firebase.js";
-import ReForestAppBar from "./AppBar.js";
-import Navigation from "./Navigation.js";
+import ReForestAppBar from "./AppBar.jsx";
+import Navigation from "./Navigation.jsx";
 import { useAuth } from '../context/AuthContext.js';
 
 const drawerWidth = 240;

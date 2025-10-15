@@ -8,15 +8,15 @@ import ProtectedRoute from './components/ProtectedRoute.js';
 import PublicRoute from './components/PublicRoute.js';
 
 // Import pages
-import Login from './pages/Login.js';
-import Registration from './pages/Registration.js';
-import Dashboard from './pages/Dashboard.js';
-import Profile from './pages/Profile.js';
-import Sensors from './pages/Sensor.js'; // Your actual file
-import Recommendations from './pages/Recommendations.js';
-import Tasks from './pages/Task.js';
-import Notification from './pages/Notification.js';
-import ForgotPassword from './pages/ForgotPassword.js';
+import Login from './pages/Login.jsx';
+import Registration from './pages/Registration.jsx';
+import Dashboard from './pages/Dashboard.jsx';
+import Profile from './pages/Profile.jsx';
+import Sensors from './pages/Sensor.jsx'; // Your actual file
+import Recommendations from './pages/Recommendations.jsx';
+import Tasks from './pages/Task.jsx';
+import Notification from './pages/Notification.jsx';
+import ForgotPassword from './pages/ForgotPassword.jsx';
 import LandingPage from './pages/LandingPage.jsx';
 
 // Temporary placeholder components

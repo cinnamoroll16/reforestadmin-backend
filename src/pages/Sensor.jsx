@@ -65,8 +65,8 @@ import {
   Eco as EcoIcon,
   Info as InfoIcon
 } from '@mui/icons-material';
-import ReForestAppBar from './AppBar.js';
-import Navigation from './Navigation.js';
+import ReForestAppBar from './AppBar.jsx';
+import Navigation from './Navigation.jsx';
 import { useNavigate } from 'react-router-dom';
 
 // Import ML functions from datasetLoader

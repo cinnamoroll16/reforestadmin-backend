@@ -25,8 +25,8 @@
     query, onSnapshot, where, serverTimestamp
   } from 'firebase/firestore';
   import { auth, firestore } from "../firebase.js";
-  import ReForestAppBar from './AppBar.js';
-  import Navigation from './Navigation.js';
+  import ReForestAppBar from './AppBar.jsx';
+  import Navigation from './Navigation.jsx';
 
   const drawerWidth = 240;
 

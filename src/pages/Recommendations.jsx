@@ -42,8 +42,8 @@ import {
   CheckCircle as CheckCircleIcon
 } from '@mui/icons-material';
 import { useTheme, useMediaQuery } from '@mui/material';
-import ReForestAppBar from './AppBar.js';
-import Navigation from './Navigation.js';
+import ReForestAppBar from './AppBar.jsx';
+import Navigation from './Navigation.jsx';
 import { auth, firestore } from "../firebase.js";
 import { collection, onSnapshot, doc, getDoc, getDocs, query, orderBy, addDoc, updateDoc, serverTimestamp, where } from 'firebase/firestore';
 

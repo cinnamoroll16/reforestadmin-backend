@@ -2,29 +2,26 @@
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Button, Chip, Dialog, DialogTitle, DialogContent,
-  DialogActions, TextField, Grid, Alert, IconButton,
+  DialogActions, Grid, Alert, IconButton,
   Badge, useMediaQuery, useTheme, Avatar, LinearProgress, alpha,
   Tabs, Tab
 } from '@mui/material';
 import { 
   collection, getDocs, doc, updateDoc, addDoc,
-  query, where, onSnapshot, serverTimestamp
+  query, where, onSnapshot, serverTimestamp, getDoc
 } from 'firebase/firestore';
-import { ref, onValue } from 'firebase/database';
-import { auth, firestore, rtdb } from "../firebase.js";
-import ReForestAppBar from './AppBar.js';
-import Navigation from './Navigation.js';
+import { auth, firestore } from "../firebase.js";
+import ReForestAppBar from './AppBar.jsx';
+import Navigation from './Navigation.jsx';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
-import SensorsIcon from '@mui/icons-material/Sensors';
-import WarningIcon from '@mui/icons-material/Warning';
 import NewReleasesIcon from '@mui/icons-material/NewReleases';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import DeleteIcon from '@mui/icons-material/Delete';
 import MarkAsReadIcon from '@mui/icons-material/DoneAll';
+import AssignmentIcon from '@mui/icons-material/Assignment';
 
 const drawerWidth = 240;
 
@@ -36,7 +33,7 @@ export const createPlantRequestNotification = async (plantRequestData, plantRequ
   try {
     const notificationData = {
       type: 'plant_request',
-      notification_type: plantRequestData.request_status || 'pending',
+      notification_type: 'pending',
       title: 'New Planting Request',
       notif_message: `New planting request from ${plantRequestData.fullName} for ${plantRequestData.preferred_date}`,
       data: {
@@ -45,7 +42,7 @@ export const createPlantRequestNotification = async (plantRequestData, plantRequ
         locationRef: plantRequestData.locationRef,
         preferredDate: plantRequestData.preferred_date,
         createdBy: plantRequestData.createdBy,
-        requestStatus: plantRequestData.requestStatus || 'pending'
+        requestStatus: 'pending'
       },
       targetRole: 'admin',
       read: false,
@@ -57,41 +54,10 @@ export const createPlantRequestNotification = async (plantRequestData, plantRequ
     };
 
     const docRef = await addDoc(collection(firestore, 'notifications'), notificationData);
-    console.log('Notification created with ID:', docRef.id);
+    console.log('✓ Notification created:', docRef.id);
     return docRef.id;
   } catch (error) {
     console.error('Error creating notification:', error);
-    throw error;
-  }
-};
-
-export const createSensorAlertNotification = async (alertData) => {
-  try {
-    const notificationData = {
-      type: 'sensor_alert',
-      notification_type: 'pending',
-      title: `Sensor Alert - ${alertData.severity.toUpperCase()}`,
-      message: alertData.message,
-      data: {
-        sensorId: alertData.sensorId,
-        parameter: alertData.parameter,
-        value: alertData.value,
-        severity: alertData.severity,
-        alertType: alertData.type
-      },
-      targetRole: 'admin',
-      read: false,
-      resolved: false,
-      hidden: false,
-      priority: alertData.severity === 'high' ? 'high' : alertData.severity === 'medium' ? 'medium' : 'low',
-      notif_timestamp: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    };
-
-    const docRef = await addDoc(collection(firestore, 'notifications'), notificationData);
-    return docRef.id;
-  } catch (error) {
-    console.error('Error creating sensor alert notification:', error);
     throw error;
   }
 };
@@ -109,7 +75,6 @@ export const markNotificationAsRead = async (notificationId) => {
   }
 };
 
-// Soft delete - hide notification but don't delete from Firestore
 export const hideNotification = async (notificationId) => {
   try {
     const notificationRef = doc(firestore, 'notifications', notificationId);
@@ -118,7 +83,6 @@ export const hideNotification = async (notificationId) => {
       hiddenAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
-    console.log('Notification hidden:', notificationId);
   } catch (error) {
     console.error('Error hiding notification:', error);
     throw error;
@@ -131,13 +95,10 @@ export const hideNotification = async (notificationId) => {
 
 const NotificationPanel = () => {
   const [plantingRequests, setPlantingRequests] = useState([]);
-  const [sensorAlerts, setSensorAlerts] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [selectedRequest, setSelectedRequest] = useState(null);
-  const [selectedAlert, setSelectedAlert] = useState(null);
   const [selectedNotification, setSelectedNotification] = useState(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
-  const [alertDialogOpen, setAlertDialogOpen] = useState(false);
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -176,74 +137,112 @@ const NotificationPanel = () => {
     return null;
   };
 
-  const createMissingRequestNotifications = async (requests) => {
+  // Helper function to resolve location reference
+  const resolveLocationRef = async (locationRef) => {
+    if (!locationRef) return 'Unknown Location';
+    
     try {
-      for (const request of requests) {
-        const existingQuery = query(
-          collection(firestore, 'notifications'),
-          where('type', '==', 'plant_request'),
-          where('data.plantRequestId', '==', request.id),
-          where('notification_type', '==', 'pending')
-        );
-        
-        const existingSnapshot = await getDocs(existingQuery);
-        
-        if (existingSnapshot.empty) {
-          await createPlantRequestNotification({
-            fullName: request.fullName,
-            createdBy: request.createdBy,
-            locationRef: request.locationRef,
-            userRef: request.userRef,
-            preferred_date: request.preferred_date,
-            request_status: request.request_status,
-            requestStatus: request.requestStatus
-          }, request.id);
+      // If it's a string path like "/locations/abc123"
+      if (typeof locationRef === 'string') {
+        const locationId = locationRef.split('/').pop();
+        const locationDoc = await getDoc(doc(firestore, 'locations', locationId));
+        if (locationDoc.exists()) {
+          return locationDoc.data().location_name || 'Unknown Location';
+        }
+      }
+      // If it's a reference object
+      else if (locationRef.path) {
+        const locationId = locationRef.path.split('/').pop();
+        const locationDoc = await getDoc(doc(firestore, 'locations', locationId));
+        if (locationDoc.exists()) {
+          return locationDoc.data().location_name || 'Unknown Location';
         }
       }
     } catch (error) {
-      console.error('Error creating missing request notifications:', error);
+      console.error('Error resolving location:', error);
     }
+    
+    return 'Unknown Location';
   };
 
-  const createSensorAlertNotificationIfNew = async (alertData) => {
+  // Helper function to resolve user reference
+  const resolveUserRef = async (userRef) => {
+    if (!userRef) return { name: 'Unknown User', email: 'N/A' };
+    
     try {
-      const existingQuery = query(
-        collection(firestore, 'notifications'),
-        where('type', '==', 'sensor_alert'),
-        where('data.sensorId', '==', alertData.sensorId),
-        where('data.parameter', '==', alertData.parameter || ''),
-        where('notification_type', '==', 'pending')
-      );
-      
-      const existingSnapshot = await getDocs(existingQuery);
-      
-      if (existingSnapshot.empty) {
-        await createSensorAlertNotification(alertData);
+      // If it's a string path like "/users/abc123"
+      if (typeof userRef === 'string') {
+        const userId = userRef.split('/').pop();
+        const userDoc = await getDoc(doc(firestore, 'users', userId));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          return {
+            name: `${userData.user_Firstname || ''} ${userData.user_Lastname || ''}`.trim() || 
+                  `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 
+                  'Unknown User',
+            email: userData.user_email || userData.email || 'N/A'
+          };
+        }
+      }
+      // If it's a reference object
+      else if (userRef.path) {
+        const userId = userRef.path.split('/').pop();
+        const userDoc = await getDoc(doc(firestore, 'users', userId));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          return {
+            name: `${userData.user_Firstname || ''} ${userData.user_Lastname || ''}`.trim() || 
+                  `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 
+                  'Unknown User',
+            email: userData.user_email || userData.email || 'N/A'
+          };
+        }
       }
     } catch (error) {
-      console.error('Error checking for existing sensor notification:', error);
+      console.error('Error resolving user:', error);
     }
+    
+    return { name: 'Unknown User', email: 'N/A' };
   };
 
   useEffect(() => {
     let unsubscribeRequests = null;
     let unsubscribeNotifications = null;
-    let unsubscribeSensors = null;
 
     const setupListeners = async () => {
       try {
-        console.log('🚀 Starting data fetch...');
         setLoading(true);
 
-        const requestsQuery = query(collection(firestore, 'plantingrequests'));
+        // ========== FETCH ALL PLANTING REQUESTS ==========
+        console.log('📋 Fetching planting requests from "plantingrequests" collection...');
+        
+        // Get ALL requests first to see what we have
+        const requestsQuery = collection(firestore, 'plantingrequests');
         
         unsubscribeRequests = onSnapshot(requestsQuery, 
           async (snapshot) => {
-            const allRequests = snapshot.docs.map(doc => {
-              const data = doc.data();
+            console.log(`✓ Found ${snapshot.docs.length} total planting requests`);
+            
+            if (snapshot.docs.length > 0) {
+              // Log first document structure to understand the data
+              const firstDoc = snapshot.docs[0].data();
+              console.log('Sample request structure:', Object.keys(firstDoc));
+            }
+            
+            // Process all requests and resolve references
+            const requestsPromises = snapshot.docs.map(async (docSnap) => {
+              const data = docSnap.data();
+              
+              // Resolve user and location references
+              const userInfo = await resolveUserRef(data.userRef);
+              const locationName = await resolveLocationRef(data.locationRef);
+              
               return {
-                id: doc.id,
+                id: docSnap.id,
                 ...data,
+                fullName: userInfo.name,
+                createdBy: userInfo.email,
+                locationName: locationName,
                 request_date: convertTimestamp(data.request_date),
                 approvedAt: convertTimestamp(data.approvedAt),
                 rejectedAt: convertTimestamp(data.rejectedAt),
@@ -251,19 +250,19 @@ const NotificationPanel = () => {
               };
             });
             
+            const allRequests = await Promise.all(requestsPromises);
+            
+            // Filter for pending requests (check both possible field names)
             const pendingRequests = allRequests.filter(req => {
-              const status = req.requestStatus || 'pending';
-              return status === 'pending';
+              const status = req.requestStatus || req.request_status || 'pending';
+              return status.toLowerCase() === 'pending';
             });
             
+            console.log(`✓ Filtered to ${pendingRequests.length} pending requests`);
             setPlantingRequests(pendingRequests);
-
-            if (pendingRequests.length > 0) {
-              await createMissingRequestNotifications(pendingRequests);
-            }
           },
           (error) => {
-            console.error('❌ Error in requests snapshot listener:', error);
+            console.error('❌ Error fetching requests:', error);
             setAlert({
               open: true,
               message: 'Error loading planting requests: ' + error.message,
@@ -272,15 +271,22 @@ const NotificationPanel = () => {
           }
         );
 
-        // Query only non-hidden notifications
-        const notificationsQuery = query(
-          collection(firestore, 'notifications'),
-          where('notification_type', '==', 'pending'),
-          where('hidden', '==', false)
-        );
+        // ========== FETCH ALL NOTIFICATIONS ==========
+        console.log('🔔 Fetching notifications from "notifications" collection...');
+        
+        // Get ALL notifications first to see what we have
+        const notificationsQuery = collection(firestore, 'notifications');
 
         unsubscribeNotifications = onSnapshot(notificationsQuery, 
           (snapshot) => {
+            console.log(`✓ Found ${snapshot.docs.length} total notifications`);
+            
+            if (snapshot.docs.length > 0) {
+              // Log first document structure to understand the data
+              const firstDoc = snapshot.docs[0].data();
+              console.log('Sample notification structure:', Object.keys(firstDoc));
+            }
+            
             const allNotifications = snapshot.docs.map(doc => {
               const data = doc.data();
               const timestamp = convertTimestamp(data.notif_timestamp || data.createdAt) || new Date();
@@ -296,14 +302,23 @@ const NotificationPanel = () => {
               };
             });
             
-            const adminNotifications = allNotifications
-              .filter(notification => notification.targetRole === 'admin')
-              .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            // Filter for admin notifications that are not hidden
+            const adminNotifications = allNotifications.filter(notification => {
+              const isAdmin = !notification.targetRole || notification.targetRole === 'admin';
+              const notHidden = notification.hidden !== true;
+              return isAdmin && notHidden;
+            });
             
-            setNotifications(adminNotifications);
+            // Sort by timestamp (newest first)
+            const sortedNotifications = adminNotifications.sort((a, b) => 
+              new Date(b.timestamp) - new Date(a.timestamp)
+            );
+            
+            console.log(`✓ Filtered to ${sortedNotifications.length} admin notifications`);
+            setNotifications(sortedNotifications);
           },
           (error) => {
-            console.error('❌ Error in notifications snapshot listener:', error);
+            console.error('❌ Error fetching notifications:', error);
             setAlert({
               open: true,
               message: 'Error loading notifications: ' + error.message,
@@ -311,21 +326,6 @@ const NotificationPanel = () => {
             });
           }
         );
-
-        const sensorRef = ref(rtdb, "sensors");
-        unsubscribeSensors = onValue(sensorRef, (snapshot) => {
-          if (snapshot.exists()) {
-            const sensorsData = snapshot.val();
-            const alerts = generateSensorAlerts(sensorsData);
-            setSensorAlerts(alerts);
-            
-            alerts.forEach(alert => {
-              createSensorAlertNotificationIfNew(alert);
-            });
-          } else {
-            setSensorAlerts([]);
-          }
-        });
 
         setLoading(false);
 
@@ -345,103 +345,12 @@ const NotificationPanel = () => {
     return () => {
       if (unsubscribeRequests) unsubscribeRequests();
       if (unsubscribeNotifications) unsubscribeNotifications();
-      if (unsubscribeSensors) unsubscribeSensors();
     };
   }, []);
-
-  const generateSensorAlerts = (sensorsData) => {
-    const alerts = [];
-    const now = new Date();
-    
-    if (!sensorsData) return alerts;
-
-    Object.entries(sensorsData).forEach(([sensorId, sensorData]) => {
-      if (!sensorData.sensorData) return;
-
-      const readings = Object.values(sensorData.sensorData);
-      if (readings.length === 0) return;
-
-      const latestReading = readings[readings.length - 1];
-      const readingTime = new Date(latestReading.timestamp);
-      const hoursDiff = (now - readingTime) / (1000 * 60 * 60);
-      
-      if (hoursDiff > 24) {
-        alerts.push({
-          id: `offline-${sensorId}`,
-          type: 'offline',
-          sensorId,
-          message: `Sensor ${sensorId} has been offline for more than 24 hours`,
-          timestamp: readingTime,
-          severity: 'high'
-        });
-      } else if (hoursDiff > 4) {
-        alerts.push({
-          id: `delayed-${sensorId}`,
-          type: 'delayed',
-          sensorId,
-          message: `Sensor ${sensorId} data is delayed (last update ${Math.round(hoursDiff)} hours ago)`,
-          timestamp: readingTime,
-          severity: 'medium'
-        });
-      }
-
-      if (latestReading.pH !== undefined && (latestReading.pH < 5.5 || latestReading.pH > 8.5)) {
-        alerts.push({
-          id: `ph-${sensorId}-${latestReading.timestamp}`,
-          type: 'reading',
-          sensorId,
-          parameter: 'pH',
-          value: latestReading.pH,
-          message: `Abnormal pH level (${latestReading.pH}) detected at sensor ${sensorId}`,
-          timestamp: readingTime,
-          severity: 'high'
-        });
-      }
-
-      if (latestReading.soilMoisture !== undefined && latestReading.soilMoisture < 20) {
-        alerts.push({
-          id: `moisture-${sensorId}-${latestReading.timestamp}`,
-          type: 'reading',
-          sensorId,
-          parameter: 'moisture',
-          value: latestReading.soilMoisture,
-          message: `Low soil moisture (${latestReading.soilMoisture}%) detected at sensor ${sensorId}`,
-          timestamp: readingTime,
-          severity: 'high'
-        });
-      }
-
-      if (latestReading.temperature !== undefined && latestReading.temperature > 35) {
-        alerts.push({
-          id: `temp-${sensorId}-${latestReading.timestamp}`,
-          type: 'reading',
-          sensorId,
-          parameter: 'temperature',
-          value: latestReading.temperature,
-          message: `High temperature (${latestReading.temperature}°C) detected at sensor ${sensorId}`,
-          timestamp: readingTime,
-          severity: 'medium'
-        });
-      }
-    });
-
-    return alerts.sort((a, b) => {
-      const severityOrder = { high: 0, medium: 1, low: 2 };
-      if (severityOrder[a.severity] !== severityOrder[b.severity]) {
-        return severityOrder[a.severity] - severityOrder[b.severity];
-      }
-      return new Date(b.timestamp) - new Date(a.timestamp);
-    });
-  };
 
   const handleViewDetails = (request) => {
     setSelectedRequest(request);
     setDetailDialogOpen(true);
-  };
-
-  const handleViewAlert = (alert) => {
-    setSelectedAlert(alert);
-    setAlertDialogOpen(true);
   };
 
   const handleViewNotification = async (notification) => {
@@ -458,18 +367,6 @@ const NotificationPanel = () => {
         console.error('Error marking notification as read:', error);
       }
     }
-  };
-
-  const handleRefreshSensorAlerts = () => {
-    const sensorRef = ref(rtdb, "sensors");
-    onValue(sensorRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const sensorsData = snapshot.val();
-        const alerts = generateSensorAlerts(sensorsData);
-        setSensorAlerts(alerts);
-        setAlert({ open: true, message: 'Sensor alerts refreshed', severity: 'success' });
-      }
-    });
   };
 
   const handleMarkAllAsRead = async () => {
@@ -508,19 +405,9 @@ const NotificationPanel = () => {
     }
   };
 
-  const getAlertColor = (severity) => {
-    switch (severity) {
-      case 'high': return 'error';
-      case 'medium': return 'warning';
-      case 'low': return 'info';
-      default: return 'default';
-    }
-  };
-
   const getNotificationIcon = (type) => {
     switch (type) {
       case 'plant_request': return <NewReleasesIcon />;
-      case 'sensor_alert': return <WarningIcon />;
       case 'request_approved': return <CheckCircleIcon />;
       case 'request_rejected': return <CancelIcon />;
       default: return <NotificationsIcon />;
@@ -553,14 +440,16 @@ const NotificationPanel = () => {
       
       return String(date);
     } catch (error) {
-      console.error('Error formatting date:', error, date);
+      console.error('Error formatting date:', error);
       return 'Invalid Date';
     }
   };
 
   const formatType = (type) => {
     if (!type) return "Unknown";
-    return type.replace('_', ' ');
+    return type.split('_').map(word => 
+      word.charAt(0).toUpperCase() + word.slice(1)
+    ).join(' ');
   };
 
   const formatDateTime = (date) => {
@@ -591,15 +480,13 @@ const NotificationPanel = () => {
       
       return String(date);
     } catch (error) {
-      console.error('Error formatting datetime:', error, date);
+      console.error('Error formatting datetime:', error);
       return 'Invalid Date';
     }
   };
 
   const unreadCount = notifications.filter(n => !n.read).length;
   const pendingCount = plantingRequests.length;
-  const alertCount = sensorAlerts.length;
-  const notificationCount = notifications.length;
 
   if (loading) {
     return (
@@ -615,8 +502,10 @@ const NotificationPanel = () => {
             mt: '64px',
           }}
         >
-          <LinearProgress />
-          <Typography sx={{ mt: 2 }}>Loading notifications...</Typography>
+          <LinearProgress sx={{ mb: 2, borderRadius: 1 }} />
+          <Typography variant="body2" color="text.secondary" align="center">
+            Loading notifications...
+          </Typography>
         </Box>
       </Box>
     );
@@ -668,7 +557,7 @@ const NotificationPanel = () => {
               {notification.title}
             </Typography>
             <Chip 
-              label={notification.priority} 
+              label={notification.priority || 'medium'} 
               size="small" 
               color={
                 notification.priority === 'high' ? 'error' : 
@@ -734,13 +623,13 @@ const NotificationPanel = () => {
       }}
       onClick={() => handleViewDetails(request)}
     >
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <Avatar sx={{ bgcolor: '#2e7d32', width: 40, height: 40 }}>
             {(request.fullName || 'U').charAt(0)}
           </Avatar>
           
-          <Box sx={{ flex: 1 }}>
+          <Box>
             <Typography variant="subtitle1" fontWeight="bold">
               {request.fullName || 'Unknown User'}
             </Typography>
@@ -748,97 +637,31 @@ const NotificationPanel = () => {
               {request.createdBy || 'N/A'}
             </Typography>
           </Box>
-          
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <LocationOnIcon fontSize="small" color="action" />
-              <Typography variant="body2">
-                {request.locationRef || 'Unknown Location'}
-              </Typography>
-            </Box>
-            
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <CalendarTodayIcon fontSize="small" color="action" />
-              <Typography variant="body2">
-                {typeof request.preferred_date === 'string' 
-                  ? request.preferred_date 
-                  : formatDate(request.preferred_date)}
-              </Typography>
-            </Box>
-            
-            <Chip 
-              label={request.requestStatus || request.request_status || 'pending'} 
-              color={getStatusColor(request.requestStatus || request.request_status || 'pending')}
-              size="small"
-            />
-          </Box>
-        </Box>
-      </Box>
-    </Paper>
-  );
-
-  const AlertRow = ({ alert }) => (
-    <Paper 
-      sx={{ 
-        p: 2, 
-        mb: 1,
-        borderRadius: 2,
-        borderLeft: `4px solid ${theme.palette[getAlertColor(alert.severity)].main}`,
-        cursor: 'pointer',
-        transition: 'all 0.2s ease-in-out',
-        '&:hover': { 
-          transform: 'translateY(-1px)',
-          boxShadow: 2
-        }
-      }}
-      onClick={() => handleViewAlert(alert)}
-    >
-      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
-        <Box sx={{ 
-          color: theme.palette[getAlertColor(alert.severity)].main,
-          mt: 0.5
-        }}>
-          <WarningIcon />
         </Box>
         
-        <Box sx={{ flex: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexWrap: 'wrap' }}>
-            <Typography variant="subtitle1" fontWeight="bold">
-              Sensor {alert.sensorId}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <LocationOnIcon fontSize="small" color="action" />
+            <Typography variant="body2">
+              {request.locationName || 'Unknown Location'}
             </Typography>
-            <Chip 
-              label={alert.severity.toUpperCase()} 
-              color={getAlertColor(alert.severity)}
-              size="small"
-            />
-            {alert.parameter && (
-              <Chip 
-                label={alert.parameter} 
-                size="small" 
-                variant="outlined"
-              />
-            )}
           </Box>
           
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            {alert.message}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <CalendarTodayIcon fontSize="small" color="action" />
+            <Typography variant="body2">
+              {typeof request.preferred_date === 'string' 
+                ? request.preferred_date 
+                : formatDate(request.preferred_date)}
+            </Typography>
+          </Box>
           
-          <Typography variant="caption" color="text.secondary">
-            {formatDateTime(alert.timestamp)}
-          </Typography>
+          <Chip 
+            label={request.requestStatus || request.request_status || 'pending'} 
+            color={getStatusColor(request.requestStatus || request.request_status || 'pending')}
+            size="small"
+          />
         </Box>
-        
-        {alert.value !== undefined && (
-          <Box sx={{ textAlign: 'right' }}>
-            <Typography variant="h6" color={getAlertColor(alert.severity)}>
-              {alert.value}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              Value
-            </Typography>
-          </Box>
-        )}
       </Box>
     </Paper>
   );
@@ -880,7 +703,7 @@ const NotificationPanel = () => {
         )}
 
         <Box sx={{ width: '100%' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
             <Box>
               <Typography variant="h4" sx={{ color: '#2e7d32', fontWeight: 600 }}>
                 Notifications Center
@@ -896,31 +719,95 @@ const NotificationPanel = () => {
                 variant="outlined"
                 color="primary"
               >
-                Mark All as Read ({unreadCount})
+                Mark All as Read
               </Button>
             )}
           </Box>
         </Box>
 
+        {/* Enhanced Tab Design */}
         <Paper sx={{ mb: 3, borderRadius: 2, boxShadow: 2 }}>
           <Tabs 
             value={activeTab} 
-            onChange={handleTabChange} 
-            centered
+            onChange={handleTabChange}
+            variant={isMobile ? "scrollable" : "fullWidth"}
+            scrollButtons={isMobile ? "auto" : false}
             sx={{
-              '& .MuiTab-root': { fontWeight: 600 },
-              '& .Mui-selected': { color: '#2e7d32' }
+              '& .MuiTab-root': { 
+                fontWeight: 600,
+                minHeight: 70,
+                textTransform: 'none',
+                fontSize: '0.95rem'
+              },
+              '& .Mui-selected': { 
+                color: '#2e7d32'
+              },
+              '& .MuiTabs-indicator': {
+                backgroundColor: '#2e7d32',
+                height: 3
+              }
             }}
           >
             <Tab 
-              label={
-                <Badge badgeContent={unreadCount} color="error" sx={{ mr: 1 }}>
-                  All Notifications ({notificationCount})
+              icon={
+                <Badge 
+                  badgeContent={unreadCount} 
+                  color="error"
+                  sx={{ 
+                    '& .MuiBadge-badge': { 
+                      right: -3, 
+                      top: 3,
+                      fontSize: '0.7rem',
+                      minWidth: 18,
+                      height: 18
+                    } 
+                  }}
+                >
+                  <NotificationsIcon />
                 </Badge>
-              } 
+              }
+              label={
+                <Box>
+                  <Typography variant="body2" fontWeight="600">
+                    All Notifications
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {notifications.length} total
+                  </Typography>
+                </Box>
+              }
+              iconPosition="start"
             />
-            <Tab label={`Planting Requests (${pendingCount})`} />
-            <Tab label={`Sensor Alerts (${alertCount})`} />
+            <Tab 
+              icon={
+                <Badge 
+                  badgeContent={pendingCount} 
+                  color="warning"
+                  sx={{ 
+                    '& .MuiBadge-badge': { 
+                      right: -3, 
+                      top: 3,
+                      fontSize: '0.7rem',
+                      minWidth: 18,
+                      height: 18
+                    } 
+                  }}
+                >
+                  <AssignmentIcon />
+                </Badge>
+              }
+              label={
+                <Box>
+                  <Typography variant="body2" fontWeight="600">
+                    Planting Requests
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {pendingCount} pending
+                  </Typography>
+                </Box>
+              }
+              iconPosition="start"
+            />
           </Tabs>
         </Paper>
 
@@ -968,39 +855,7 @@ const NotificationPanel = () => {
           </>
         )}
 
-        {activeTab === 2 && (
-          <>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6" sx={{ color: '#2e7d32', fontWeight: 600 }}>
-                Sensor Alerts
-              </Typography>
-              <Button
-                startIcon={<RefreshIcon />}
-                onClick={handleRefreshSensorAlerts}
-                variant="outlined"
-                size="small"
-              >
-                Refresh
-              </Button>
-            </Box>
-
-            {sensorAlerts.length === 0 ? (
-              <EmptyState 
-                icon={SensorsIcon}
-                title="No sensor alerts"
-                description="All sensors are functioning normally"
-              />
-            ) : (
-              <Box>
-                {sensorAlerts.map((alert) => (
-                  <AlertRow key={alert.id} alert={alert} />
-                ))}
-              </Box>
-            )}
-          </>
-        )}
-
-        {/* Detail Dialog - READ ONLY */}
+        {/* Detail Dialog */}
         <Dialog open={detailDialogOpen} onClose={() => setDetailDialogOpen(false)} maxWidth="md" fullWidth>
           <DialogTitle>Planting Request Details</DialogTitle>
           <DialogContent>
@@ -1016,7 +871,7 @@ const NotificationPanel = () => {
                 <Grid item xs={12} md={6}>
                   <Typography variant="subtitle2" color="text.secondary">Location Information</Typography>
                   <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
-                    <Typography><strong>Location:</strong> {selectedRequest.locationRef || 'Unknown Location'}</Typography>
+                    <Typography><strong>Location:</strong> {selectedRequest.locationName || 'Unknown Location'}</Typography>
                   </Box>
                 </Grid>
                 <Grid item xs={12}>
@@ -1041,11 +896,8 @@ const NotificationPanel = () => {
                         sx={{ ml: 1 }}
                       />
                     </Typography>
-                    {selectedRequest.approvalNotes && (
-                      <Typography><strong>Notes:</strong> {selectedRequest.approvalNotes}</Typography>
-                    )}
-                    {selectedRequest.rejectionReason && (
-                      <Typography><strong>Rejection Reason:</strong> {selectedRequest.rejectionReason}</Typography>
+                    {selectedRequest.request_remarks && (
+                      <Typography sx={{ mt: 1 }}><strong>Remarks:</strong> {selectedRequest.request_remarks}</Typography>
                     )}
                   </Box>
                 </Grid>
@@ -1057,59 +909,7 @@ const NotificationPanel = () => {
           </DialogActions>
         </Dialog>
 
-        {/* Alert Dialog - READ ONLY */}
-        <Dialog open={alertDialogOpen} onClose={() => setAlertDialogOpen(false)} maxWidth="sm" fullWidth>
-          <DialogTitle>Sensor Alert Details</DialogTitle>
-          <DialogContent>
-            {selectedAlert && (
-              <Box sx={{ mt: 1 }}>
-                <Grid container spacing={2}>
-                  <Grid item xs={12}>
-                    <Typography variant="h6" gutterBottom>
-                      Sensor {selectedAlert.sensorId}
-                    </Typography>
-                    <Chip 
-                      label={selectedAlert.severity.toUpperCase()} 
-                      color={getAlertColor(selectedAlert.severity)}
-                      size="small"
-                    />
-                  </Grid>
-                  <Grid item xs={12}>
-                    <Typography variant="subtitle2" color="text.secondary">Alert Message</Typography>
-                    <Typography variant="body1" sx={{ mt: 1 }}>
-                      {selectedAlert.message}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Typography variant="subtitle2" color="text.secondary">Alert Type</Typography>
-                    <Typography variant="body2">{selectedAlert.type}</Typography>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Typography variant="subtitle2" color="text.secondary">Timestamp</Typography>
-                    <Typography variant="body2">{formatDateTime(selectedAlert.timestamp)}</Typography>
-                  </Grid>
-                  {selectedAlert.parameter && (
-                    <Grid item xs={6}>
-                      <Typography variant="subtitle2" color="text.secondary">Parameter</Typography>
-                      <Typography variant="body2">{selectedAlert.parameter}</Typography>
-                    </Grid>
-                  )}
-                  {selectedAlert.value !== undefined && (
-                    <Grid item xs={6}>
-                      <Typography variant="subtitle2" color="text.secondary">Value</Typography>
-                      <Typography variant="body2">{selectedAlert.value}</Typography>
-                    </Grid>
-                  )}
-                </Grid>
-              </Box>
-            )}
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setAlertDialogOpen(false)}>Close</Button>
-          </DialogActions>
-        </Dialog>
-
-        {/* Notification Dialog - READ ONLY */}
+        {/* Notification Dialog */}
         <Dialog open={notificationDialogOpen} onClose={() => setNotificationDialogOpen(false)} maxWidth="sm" fullWidth>
           <DialogTitle>Notification Details</DialogTitle>
           <DialogContent>
@@ -1121,9 +921,12 @@ const NotificationPanel = () => {
                       {selectedNotification.title}
                     </Typography>
                     <Chip 
-                      label={selectedNotification.priority} 
+                      label={selectedNotification.priority || 'medium'} 
                       size="small" 
-                      color={selectedNotification.priority === 'high' ? 'error' : selectedNotification.priority === 'medium' ? 'warning' : 'default'}
+                      color={
+                        selectedNotification.priority === 'high' ? 'error' : 
+                        selectedNotification.priority === 'medium' ? 'warning' : 'default'
+                      }
                       variant="outlined"
                     />
                   </Grid>
@@ -1135,7 +938,7 @@ const NotificationPanel = () => {
                   </Grid>
                   <Grid item xs={6}>
                     <Typography variant="subtitle2" color="text.secondary">Type</Typography>
-                    <Typography variant="body2">{selectedNotification.type}</Typography>
+                    <Typography variant="body2">{formatType(selectedNotification.type)}</Typography>
                   </Grid>
                   <Grid item xs={6}>
                     <Typography variant="subtitle2" color="text.secondary">Created</Typography>
