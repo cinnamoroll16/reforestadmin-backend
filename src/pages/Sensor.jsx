@@ -1,4 +1,4 @@
-// src/pages/Sensors.js - Complete Fixed Version
+// src/pages/Sensors.js - Updated with Sensor History Grid
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { ref, onValue } from 'firebase/database';
 import { rtdb, auth, firestore } from '../firebase.js';
@@ -42,7 +42,9 @@ import {
   List,
   ListItem,
   ListItemText,
-  ListItemIcon
+  ListItemIcon,
+  Tab,
+  Tabs
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { 
@@ -63,7 +65,8 @@ import {
   Timeline as TimelineIcon,
   BubbleChart as BubbleChartIcon,
   Eco as EcoIcon,
-  Info as InfoIcon
+  Info as InfoIcon,
+  History as HistoryIcon
 } from '@mui/icons-material';
 import ReForestAppBar from './AppBar.jsx';
 import Navigation from './Navigation.jsx';
@@ -227,6 +230,202 @@ const TrendIndicator = ({ trend, parameter }) => {
 };
 
 // ============================================================================
+// SENSOR HISTORY GRID COMPONENT
+// ============================================================================
+const SensorHistoryGrid = ({ readings }) => {
+  const [historyPage, setHistoryPage] = useState(0);
+  const [historyRowsPerPage, setHistoryRowsPerPage] = useState(10);
+
+  const handleHistoryPageChange = (event, newPage) => {
+    setHistoryPage(newPage);
+  };
+
+  const handleHistoryRowsPerPageChange = (event) => {
+    setHistoryRowsPerPage(parseInt(event.target.value, 10));
+    setHistoryPage(0);
+  };
+
+  const sortedReadings = useMemo(() => {
+    return [...readings].sort((a, b) => {
+      if (!a.timestamp) return 1;
+      if (!b.timestamp) return -1;
+      return new Date(b.timestamp) - new Date(a.timestamp);
+    });
+  }, [readings]);
+
+  const paginatedReadings = useMemo(() => {
+    return sortedReadings.slice(
+      historyPage * historyRowsPerPage,
+      historyPage * historyRowsPerPage + historyRowsPerPage
+    );
+  }, [sortedReadings, historyPage, historyRowsPerPage]);
+
+  const getReadingQuality = (reading) => {
+    const validation = validateSensorData({
+      ph: reading.pH,
+      soilMoisture: reading.soilMoisture,
+      temperature: reading.temperature
+    });
+    
+    if (!validation.isValid) return 'error';
+    if (validation.hasWarnings) return 'warning';
+    return 'success';
+  };
+
+  const getQualityColor = (quality) => {
+    switch (quality) {
+      case 'success': return 'success.main';
+      case 'warning': return 'warning.main';
+      case 'error': return 'error.main';
+      default: return 'text.secondary';
+    }
+  };
+
+  return (
+    <Box sx={{ mt: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+        <HistoryIcon sx={{ mr: 1, color: 'primary.main' }} />
+        <Typography variant="h6">
+          Sensor History ({readings.length} readings)
+        </Typography>
+      </Box>
+
+      {readings.length === 0 ? (
+        <Card variant="outlined" sx={{ p: 3, textAlign: 'center' }}>
+          <Typography variant="body1" color="text.secondary">
+            No historical data available for this sensor
+          </Typography>
+        </Card>
+      ) : (
+        <>
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ bgcolor: 'grey.50' }}>
+                  <TableCell><Typography variant="subtitle2" fontWeight="bold">Timestamp</Typography></TableCell>
+                  <TableCell align="center"><Typography variant="subtitle2" fontWeight="bold">pH</Typography></TableCell>
+                  <TableCell align="center"><Typography variant="subtitle2" fontWeight="bold">Moisture (%)</Typography></TableCell>
+                  <TableCell align="center"><Typography variant="subtitle2" fontWeight="bold">Temp (°C)</Typography></TableCell>
+                  <TableCell align="center"><Typography variant="subtitle2" fontWeight="bold">Quality</Typography></TableCell>
+                  <TableCell><Typography variant="subtitle2" fontWeight="bold">Reading ID</Typography></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {paginatedReadings.map((reading, index) => {
+                  const quality = getReadingQuality(reading);
+                  const qualityColor = getQualityColor(quality);
+                  
+                  return (
+                    <TableRow 
+                      key={reading.readingId || index}
+                      sx={{ 
+                        '&:last-child td, &:last-child th': { border: 0 },
+                        bgcolor: quality === 'error' ? 'error.light' : quality === 'warning' ? 'warning.light' : 'transparent'
+                      }}
+                    >
+                      <TableCell>
+                        <Typography variant="body2">
+                          {formatTimestamp(reading.timestamp)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Typography 
+                          variant="body2" 
+                          sx={{ 
+                            color: reading.pH !== undefined && reading.pH >= SensorDataSchema.ph.optimal[0] && reading.pH <= SensorDataSchema.ph.optimal[1] 
+                              ? 'success.main' 
+                              : 'text.secondary',
+                            fontWeight: 'medium'
+                          }}
+                        >
+                          {formatValue(reading.pH)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Typography 
+                          variant="body2"
+                          sx={{ 
+                            color: reading.soilMoisture !== undefined && reading.soilMoisture >= SensorDataSchema.soilMoisture.optimal[0] 
+                              ? 'success.main' 
+                              : 'text.secondary',
+                            fontWeight: 'medium'
+                          }}
+                        >
+                          {formatValue(reading.soilMoisture, '%')}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Typography 
+                          variant="body2"
+                          sx={{ 
+                            color: reading.temperature !== undefined && reading.temperature >= SensorDataSchema.temperature.optimal[0] && reading.temperature <= SensorDataSchema.temperature.optimal[1]
+                              ? 'success.main' 
+                              : 'text.secondary',
+                            fontWeight: 'medium'
+                          }}
+                        >
+                          {formatValue(reading.temperature, '°C')}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Chip
+                          label={quality === 'success' ? 'Good' : quality === 'warning' ? 'Warning' : 'Error'}
+                          color={quality === 'success' ? 'success' : quality === 'warning' ? 'warning' : 'error'}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="caption" color="text.secondary" fontFamily="monospace">
+                          {reading.readingId || `reading_${index}`}
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          
+          <TablePagination
+            rowsPerPageOptions={[5, 10, 25, 50]}
+            component="div"
+            count={readings.length}
+            rowsPerPage={historyRowsPerPage}
+            page={historyPage}
+            onPageChange={handleHistoryPageChange}
+            onRowsPerPageChange={handleHistoryRowsPerPageChange}
+            sx={{ borderTop: '1px solid', borderColor: 'divider' }}
+          />
+        </>
+      )}
+    </Box>
+  );
+};
+
+// ============================================================================
+// TAB PANEL COMPONENT FOR DIALOG
+// ============================================================================
+function TabPanel(props) {
+  const { children, value, index, ...other } = props;
+
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`sensor-detail-tabpanel-${index}`}
+      aria-labelledby={`sensor-detail-tab-${index}`}
+      {...other}
+    >
+      {value === index && (
+        <Box sx={{ py: 3 }}>
+          {children}
+        </Box>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 function Sensors() {
@@ -253,6 +452,7 @@ function Sensors() {
   const [selectedSensor, setSelectedSensor] = useState(null);
   const [sensorDetailOpen, setSensorDetailOpen] = useState(false);
   const [trendAnalysis, setTrendAnalysis] = useState(null);
+  const [dialogTab, setDialogTab] = useState(0);
   
   // Error/Notification State
   const [error, setError] = useState(null);
@@ -715,6 +915,7 @@ function Sensors() {
   const handleSensorClick = (sensor) => {
     setSelectedSensor(sensor);
     setSensorDetailOpen(true);
+    setDialogTab(0); // Reset to first tab
     
     // Analyze trends if enough data
     if (sensor.readings.length >= 7) {
@@ -734,6 +935,11 @@ function Sensors() {
     setSensorDetailOpen(false);
     setSelectedSensor(null);
     setTrendAnalysis(null);
+    setDialogTab(0);
+  };
+
+  const handleDialogTabChange = (event, newValue) => {
+    setDialogTab(newValue);
   };
 
   // ============================================================================
@@ -977,8 +1183,9 @@ function Sensors() {
         <Dialog 
           open={sensorDetailOpen} 
           onClose={handleCloseSensorDetail}
-          maxWidth="md"
+          maxWidth="lg"
           fullWidth
+          sx={{ '& .MuiDialog-paper': { minHeight: '70vh' } }}
         >
           <DialogTitle>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -989,132 +1196,146 @@ function Sensors() {
                 <CloseIcon />
               </IconButton>
             </Box>
+            <Tabs value={dialogTab} onChange={handleDialogTabChange} sx={{ mt: 1 }}>
+              <Tab label="Overview" />
+              <Tab label={`History (${selectedSensor?.readings?.length || 0})`} />
+            </Tabs>
           </DialogTitle>
           <DialogContent dividers>
             {selectedSensor && (
-              <Grid container spacing={3}>
-                {/* Location Info */}
-                <Grid item xs={12}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                        <LocationIcon sx={{ fontSize: 16, verticalAlign: 'middle', mr: 0.5 }} />
-                        Location
-                      </Typography>
-                      <Typography variant="h6">{selectedSensor.location}</Typography>
-                      {selectedSensor.coordinates && (
-                        <Typography variant="body2" color="text.secondary">
-                          Coordinates: {selectedSensor.coordinates.latitude.toFixed(6)}°, {selectedSensor.coordinates.longitude.toFixed(6)}°
-                        </Typography>
-                      )}
-                    </CardContent>
-                  </Card>
-                </Grid>
+              <>
+                {/* OVERVIEW TAB */}
+                <TabPanel value={dialogTab} index={0}>
+                  <Grid container spacing={3}>
+                    {/* Location Info */}
+                    <Grid item xs={12}>
+                      <Card variant="outlined">
+                        <CardContent>
+                          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                            <LocationIcon sx={{ fontSize: 16, verticalAlign: 'middle', mr: 0.5 }} />
+                            Location
+                          </Typography>
+                          <Typography variant="h6">{selectedSensor.location}</Typography>
+                          {selectedSensor.coordinates && (
+                            <Typography variant="body2" color="text.secondary">
+                              Coordinates: {selectedSensor.coordinates.latitude.toFixed(6)}°, {selectedSensor.coordinates.longitude.toFixed(6)}°
+                            </Typography>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </Grid>
 
-                {/* Current Readings */}
-                <Grid item xs={12} md={4}>
-                  <Card variant="outlined" sx={{ bgcolor: '#e3f2fd' }}>
-                    <CardContent>
-                      <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                        <pHIcon sx={{ fontSize: 16, verticalAlign: 'middle', mr: 0.5 }} />
-                        pH Level
-                      </Typography>
-                      <Typography variant="h4">{formatValue(selectedSensor.ph)}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Optimal: {SensorDataSchema.ph.optimal.join(' - ')}
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
+                    {/* Current Readings */}
+                    <Grid item xs={12} md={4}>
+                      <Card variant="outlined" sx={{ bgcolor: '#e3f2fd' }}>
+                        <CardContent>
+                          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                            <pHIcon sx={{ fontSize: 16, verticalAlign: 'middle', mr: 0.5 }} />
+                            pH Level
+                          </Typography>
+                          <Typography variant="h4">{formatValue(selectedSensor.ph)}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Optimal: {SensorDataSchema.ph.optimal.join(' - ')}
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
 
-                <Grid item xs={12} md={4}>
-                  <Card variant="outlined" sx={{ bgcolor: '#e8f5e9' }}>
-                    <CardContent>
-                      <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                        <WaterDropIcon sx={{ fontSize: 16, verticalAlign: 'middle', mr: 0.5 }} />
-                        Soil Moisture
-                      </Typography>
-                      <Typography variant="h4">{formatValue(selectedSensor.soilMoisture, '%')}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Optimal: {SensorDataSchema.soilMoisture.optimal.join(' - ')}%
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
+                    <Grid item xs={12} md={4}>
+                      <Card variant="outlined" sx={{ bgcolor: '#e8f5e9' }}>
+                        <CardContent>
+                          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                            <WaterDropIcon sx={{ fontSize: 16, verticalAlign: 'middle', mr: 0.5 }} />
+                            Soil Moisture
+                          </Typography>
+                          <Typography variant="h4">{formatValue(selectedSensor.soilMoisture, '%')}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Optimal: {SensorDataSchema.soilMoisture.optimal.join(' - ')}%
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
 
-                <Grid item xs={12} md={4}>
-                  <Card variant="outlined" sx={{ bgcolor: '#fff3e0' }}>
-                    <CardContent>
-                      <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                        <ThermostatIcon sx={{ fontSize: 16, verticalAlign: 'middle', mr: 0.5 }} />
-                        Temperature
-                      </Typography>
-                      <Typography variant="h4">{formatValue(selectedSensor.temperature, '°C')}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Optimal: {SensorDataSchema.temperature.optimal.join(' - ')}°C
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
+                    <Grid item xs={12} md={4}>
+                      <Card variant="outlined" sx={{ bgcolor: '#fff3e0' }}>
+                        <CardContent>
+                          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                            <ThermostatIcon sx={{ fontSize: 16, verticalAlign: 'middle', mr: 0.5 }} />
+                            Temperature
+                          </Typography>
+                          <Typography variant="h4">{formatValue(selectedSensor.temperature, '°C')}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Optimal: {SensorDataSchema.temperature.optimal.join(' - ')}°C
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
 
-                {/* Trend Analysis */}
-                {trendAnalysis && trendAnalysis.trends && (
-                  <Grid item xs={12}>
-                    <Card variant="outlined">
-                      <CardContent>
-                        <Typography variant="subtitle2" gutterBottom>
-                          <TimelineIcon sx={{ fontSize: 16, verticalAlign: 'middle', mr: 0.5 }} />
-                          Soil Trend Analysis ({selectedSensor.readings.length} readings)
-                        </Typography>
-                        <Divider sx={{ my: 1 }} />
-                        <TrendIndicator trend={trendAnalysis.trends.moisture} parameter="Moisture" />
-                        <TrendIndicator trend={trendAnalysis.trends.ph} parameter="pH" />
-                        <TrendIndicator trend={trendAnalysis.trends.temperature} parameter="Temperature" />
-                        
-                        {trendAnalysis.alerts && trendAnalysis.alerts.length > 0 && (
-                          <Box sx={{ mt: 2 }}>
-                            <Typography variant="caption" color="text.secondary">Alerts:</Typography>
-                            <List dense>
-                              {trendAnalysis.alerts.map((alert, idx) => (
-                                <ListItem key={idx}>
-                                  <ListItemIcon>
-                                    <WarningIcon color={alert.severity} fontSize="small" />
-                                  </ListItemIcon>
-                                  <ListItemText 
-                                    primary={alert.message}
-                                    secondary={`Current: ${alert.currentValue}`}
-                                  />
-                                </ListItem>
-                              ))}
-                            </List>
+                    {/* Trend Analysis */}
+                    {trendAnalysis && trendAnalysis.trends && (
+                      <Grid item xs={12}>
+                        <Card variant="outlined">
+                          <CardContent>
+                            <Typography variant="subtitle2" gutterBottom>
+                              <TimelineIcon sx={{ fontSize: 16, verticalAlign: 'middle', mr: 0.5 }} />
+                              Soil Trend Analysis ({selectedSensor.readings.length} readings)
+                            </Typography>
+                            <Divider sx={{ my: 1 }} />
+                            <TrendIndicator trend={trendAnalysis.trends.moisture} parameter="Moisture" />
+                            <TrendIndicator trend={trendAnalysis.trends.ph} parameter="pH" />
+                            <TrendIndicator trend={trendAnalysis.trends.temperature} parameter="Temperature" />
+                            
+                            {trendAnalysis.alerts && trendAnalysis.alerts.length > 0 && (
+                              <Box sx={{ mt: 2 }}>
+                                <Typography variant="caption" color="text.secondary">Alerts:</Typography>
+                                <List dense>
+                                  {trendAnalysis.alerts.map((alert, idx) => (
+                                    <ListItem key={idx}>
+                                      <ListItemIcon>
+                                        <WarningIcon color={alert.severity} fontSize="small" />
+                                      </ListItemIcon>
+                                      <ListItemText 
+                                        primary={alert.message}
+                                        secondary={`Current: ${alert.currentValue}`}
+                                      />
+                                    </ListItem>
+                                  ))}
+                                </List>
+                              </Box>
+                            )}
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    )}
+
+                    {/* Status */}
+                    <Grid item xs={12}>
+                      <Card variant="outlined">
+                        <CardContent>
+                          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                            Status & Calibration
+                          </Typography>
+                          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                            <Chip
+                              label={selectedSensor.status}
+                              color={getStatusColor(selectedSensor.status)}
+                              icon={getStatusIcon(selectedSensor.status)}
+                            />
+                            <Typography variant="body2" color="text.secondary">
+                              Last calibration: {selectedSensor.lastCalibration || 'N/A'}
+                            </Typography>
                           </Box>
-                        )}
-                      </CardContent>
-                    </Card>
+                        </CardContent>
+                      </Card>
+                    </Grid>
                   </Grid>
-                )}
+                </TabPanel>
 
-                {/* Status */}
-                <Grid item xs={12}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                        Status & Calibration
-                      </Typography>
-                      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                        <Chip
-                          label={selectedSensor.status}
-                          color={getStatusColor(selectedSensor.status)}
-                          icon={getStatusIcon(selectedSensor.status)}
-                        />
-                        <Typography variant="body2" color="text.secondary">
-                          Last calibration: {selectedSensor.lastCalibration || 'N/A'}
-                        </Typography>
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              </Grid>
+                {/* HISTORY TAB */}
+                <TabPanel value={dialogTab} index={1}>
+                  <SensorHistoryGrid readings={selectedSensor.readings} />
+                </TabPanel>
+              </>
             )}
           </DialogContent>
           <DialogActions>
