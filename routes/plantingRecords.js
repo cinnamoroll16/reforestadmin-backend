@@ -1,3 +1,4 @@
+// routes/plantingrecords.js
 const express = require('express');
 const { db, admin } = require('../config/firebaseAdmin');
 const router = express.Router();

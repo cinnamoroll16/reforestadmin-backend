@@ -208,6 +208,7 @@ router.post('/reset-password', async (req, res) => {
     });
   }
 });
+
 // Test Firebase connection
 router.get('/test-firebase', async (req, res) => {
   try {

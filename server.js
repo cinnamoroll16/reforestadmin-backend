@@ -75,9 +75,9 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/locations', locationsRoutes);
 app.use('/api/notifications', notificationsRoutes);
-app.use('/api/planting-requests', plantingRequestsRoutes);
-app.use('/api/planting-records', plantingRecordsRoutes);
-app.use('/api/planting-tasks', plantingTasksRoutes);
+app.use('/api/plantingrequests', plantingRequestsRoutes);
+app.use('/api/plantingrecords', plantingRecordsRoutes);
+app.use('/api/plantingtasks', plantingTasksRoutes);
 app.use('/api/recommendations', recommendationsRoutes);
 app.use('/api/sensors', sensorsRoutes);
 app.use('/api/tree-seedlings', treeSeedlingsRoutes);
@@ -118,9 +118,9 @@ app.get('/', (req, res) => {
       users: '/api/users',
       locations: '/api/locations',
       notifications: '/api/notifications',
-      plantingRequests: '/api/planting-requests',
-      plantingRecords: '/api/planting-records',
-      plantingTasks: '/api/planting-tasks',
+      plantingRequests: '/api/plantingrequests',
+      plantingRecords: '/api/plantingrecords',
+      plantingTasks: '/api/plantingtasks',
       recommendations: '/api/recommendations',
       sensors: '/api/sensors',
       treeSeedlings: '/api/tree-seedlings'

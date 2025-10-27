@@ -1,3 +1,4 @@
+// config/firebaseAdmin.js
 const admin = require('firebase-admin');
 
 // Initialize Firebase Admin
@@ -22,12 +23,19 @@ try {
   process.exit(1);
 }
 
+// Initialize services
 const db = admin.firestore();
 const auth = admin.auth();
+const rtdb = admin.database(); // Add this for Realtime Database
 
 // Firestore settings
 db.settings({ ignoreUndefinedProperties: true });
 
-console.log('✅ Firestore and Auth services initialized');
+console.log('✅ Firestore, Auth, and Realtime Database services initialized');
 
-module.exports = { admin, db, auth };
+module.exports = { 
+  admin, 
+  db, 
+  auth,
+  rtdb // Export RTDB reference
+};
