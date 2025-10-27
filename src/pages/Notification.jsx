@@ -1,4 +1,4 @@
-// src/pages/Notification.js
+// src/pages/Notification.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Button, Chip, Dialog, DialogTitle, DialogContent,
@@ -6,11 +6,6 @@ import {
   Badge, useMediaQuery, useTheme, Avatar, LinearProgress, alpha,
   Tabs, Tab
 } from '@mui/material';
-import { 
-  collection, getDocs, doc, updateDoc, addDoc,
-  query, where, onSnapshot, serverTimestamp, getDoc
-} from 'firebase/firestore';
-import { auth, firestore } from "../firebase.js";
 import ReForestAppBar from './AppBar.jsx';
 import Navigation from './Navigation.jsx';
 import NotificationsIcon from '@mui/icons-material/Notifications';
@@ -22,8 +17,123 @@ import NewReleasesIcon from '@mui/icons-material/NewReleases';
 import DeleteIcon from '@mui/icons-material/Delete';
 import MarkAsReadIcon from '@mui/icons-material/DoneAll';
 import AssignmentIcon from '@mui/icons-material/Assignment';
+import { useAuth } from '../context/AuthContext';
+import { apiService } from '../services/api.js';
 
 const drawerWidth = 240;
+
+// =============================================================================
+// NOTIFICATION API SERVICE (FIXED - Proper parameter handling)
+// =============================================================================
+
+export const notificationAPI = {
+  // Get all notifications - FIXED: Proper query parameter handling
+  async getNotifications(filters = {}) {
+    try {
+      // Build query string properly without duplicates
+      const queryParams = {};
+      if (filters.targetRole) queryParams.targetRole = filters.targetRole;
+      if (filters.read !== undefined) queryParams.read = filters.read;
+      if (filters.resolved !== undefined) queryParams.resolved = filters.resolved;
+
+      const queryString = new URLSearchParams(queryParams).toString();
+      const notifications = await apiService.getNotifications(queryString);
+      return notifications;
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+      throw error;
+    }
+  },
+
+  // Create notification
+  async createNotification(notificationData) {
+    try {
+      const result = await apiService.createNotification(notificationData);
+      return result;
+    } catch (error) {
+      console.error('Error creating notification:', error);
+      throw error;
+    }
+  },
+
+  // Mark notification as read
+  async markAsRead(notificationId) {
+    try {
+      const result = await apiService.updateNotification(notificationId, { read: true });
+      return result;
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+      throw error;
+    }
+  },
+
+  // Mark notification as resolved
+  async markAsResolved(notificationId) {
+    try {
+      const result = await apiService.updateNotification(notificationId, { resolved: true });
+      return result;
+    } catch (error) {
+      console.error('Error resolving notification:', error);
+      throw error;
+    }
+  },
+
+  // Delete notification
+  async deleteNotification(notificationId) {
+    try {
+      await apiService.deleteNotification(notificationId);
+      console.log('✓ Notification deleted via API');
+    } catch (error) {
+      console.error('Error deleting notification via API:', error);
+      throw error;
+    }
+  }
+};
+
+// =============================================================================
+// PLANTING REQUESTS API SERVICE (FIXED - Proper parameter handling)
+// =============================================================================
+
+export const plantingRequestsAPI = {
+  // Get all planting requests - FIXED: Proper query parameter handling
+  async getPlantingRequests(filters = {}) {
+    try {
+      // Build query string properly without duplicates
+      const queryParams = {};
+      if (filters.status) queryParams.status = filters.status;
+      if (filters.userId) queryParams.userId = filters.userId;
+
+      const queryString = new URLSearchParams(queryParams).toString();
+      const requests = await apiService.getPlantingRequests(queryString);
+      return requests;
+    } catch (error) {
+      console.error('Error fetching planting requests:', error);
+      throw error;
+    }
+  },
+
+  // Get planting request by ID
+  async getPlantingRequestById(requestId) {
+    try {
+      const request = await apiService.getPlantingRequest(requestId);
+      return request;
+    } catch (error) {
+      console.error('Error fetching planting request:', error);
+      throw error;
+    }
+  },
+
+  // Update planting request status
+  async updatePlantingRequestStatus(requestId, status) {
+    try {
+      const result = await apiService.updatePlantingRequestStatus(requestId, { status });
+      return result;
+    } catch (error) {
+      console.error('Error updating planting request:', error);
+      throw error;
+    }
+  }
+};
 
 // =============================================================================
 // NOTIFICATION HELPER FUNCTIONS
@@ -36,6 +146,7 @@ export const createPlantRequestNotification = async (plantRequestData, plantRequ
       notification_type: 'pending',
       title: 'New Planting Request',
       notif_message: `New planting request from ${plantRequestData.fullName} for ${plantRequestData.preferred_date}`,
+      message: `New planting request from ${plantRequestData.fullName} for ${plantRequestData.preferred_date}`,
       data: {
         plantRequestId: plantRequestId,
         userRef: plantRequestData.userRef,
@@ -48,52 +159,44 @@ export const createPlantRequestNotification = async (plantRequestData, plantRequ
       read: false,
       resolved: false,
       hidden: false,
-      priority: 'medium',
-      notif_timestamp: serverTimestamp(),
-      updatedAt: serverTimestamp()
+      priority: 'medium'
     };
 
-    const docRef = await addDoc(collection(firestore, 'notifications'), notificationData);
-    console.log('✓ Notification created:', docRef.id);
-    return docRef.id;
+    const result = await notificationAPI.createNotification(notificationData);
+    console.log('✓ Notification created via API:', result.id);
+    return result.id;
   } catch (error) {
-    console.error('Error creating notification:', error);
+    console.error('Error creating notification via API:', error);
     throw error;
   }
 };
 
 export const markNotificationAsRead = async (notificationId) => {
   try {
-    const notificationRef = doc(firestore, 'notifications', notificationId);
-    await updateDoc(notificationRef, {
-      read: true,
-      updatedAt: serverTimestamp()
-    });
+    await notificationAPI.markAsRead(notificationId);
+    console.log('✓ Notification marked as read via API');
   } catch (error) {
-    console.error('Error marking notification as read:', error);
+    console.error('Error marking notification as read via API:', error);
     throw error;
   }
 };
 
 export const hideNotification = async (notificationId) => {
   try {
-    const notificationRef = doc(firestore, 'notifications', notificationId);
-    await updateDoc(notificationRef, {
-      hidden: true,
-      hiddenAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
+    await notificationAPI.deleteNotification(notificationId);
+    console.log('✓ Notification deleted via API');
   } catch (error) {
-    console.error('Error hiding notification:', error);
+    console.error('Error deleting notification via API:', error);
     throw error;
   }
 };
 
 // =============================================================================
-// MAIN COMPONENT
+// MAIN COMPONENT (FIXED - Proper error handling and parameter passing)
 // =============================================================================
 
 const NotificationPanel = () => {
+  const { user } = useAuth();
   const [plantingRequests, setPlantingRequests] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [selectedRequest, setSelectedRequest] = useState(null);
@@ -120,24 +223,7 @@ const NotificationPanel = () => {
     setActiveTab(newValue);
   };
 
-  const convertTimestamp = (timestamp) => {
-    if (!timestamp) return null;
-    if (timestamp.toDate && typeof timestamp.toDate === 'function') {
-      return timestamp.toDate();
-    }
-    if (timestamp.seconds !== undefined) {
-      return new Date(timestamp.seconds * 1000);
-    }
-    if (timestamp instanceof Date) {
-      return timestamp;
-    }
-    if (typeof timestamp === 'string') {
-      return new Date(timestamp);
-    }
-    return null;
-  };
-
-  // Helper function to resolve location reference
+  // Helper function to resolve location reference via API
   const resolveLocationRef = async (locationRef) => {
     if (!locationRef) return 'Unknown Location';
     
@@ -145,17 +231,16 @@ const NotificationPanel = () => {
       // If it's a string path like "/locations/abc123"
       if (typeof locationRef === 'string') {
         const locationId = locationRef.split('/').pop();
-        const locationDoc = await getDoc(doc(firestore, 'locations', locationId));
-        if (locationDoc.exists()) {
-          return locationDoc.data().location_name || 'Unknown Location';
+        const locationData = await apiService.getLocation(locationId);
+        if (locationData) {
+          return locationData.location_name || locationData.name || 'Unknown Location';
         }
       }
-      // If it's a reference object
-      else if (locationRef.path) {
-        const locationId = locationRef.path.split('/').pop();
-        const locationDoc = await getDoc(doc(firestore, 'locations', locationId));
-        if (locationDoc.exists()) {
-          return locationDoc.data().location_name || 'Unknown Location';
+      // If it's a direct ID
+      else if (typeof locationRef === 'string' && locationRef.length > 0) {
+        const locationData = await apiService.getLocation(locationRef);
+        if (locationData) {
+          return locationData.location_name || locationData.name || 'Unknown Location';
         }
       }
     } catch (error) {
@@ -165,7 +250,7 @@ const NotificationPanel = () => {
     return 'Unknown Location';
   };
 
-  // Helper function to resolve user reference
+  // Helper function to resolve user reference via API
   const resolveUserRef = async (userRef) => {
     if (!userRef) return { name: 'Unknown User', email: 'N/A' };
     
@@ -173,27 +258,20 @@ const NotificationPanel = () => {
       // If it's a string path like "/users/abc123"
       if (typeof userRef === 'string') {
         const userId = userRef.split('/').pop();
-        const userDoc = await getDoc(doc(firestore, 'users', userId));
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
+        const userData = await apiService.getUser(userId);
+        if (userData) {
           return {
-            name: `${userData.user_Firstname || ''} ${userData.user_Lastname || ''}`.trim() || 
-                  `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 
-                  'Unknown User',
+            name: `${userData.user_Firstname || userData.firstName || ''} ${userData.user_Lastname || userData.lastName || ''}`.trim() || 'Unknown User',
             email: userData.user_email || userData.email || 'N/A'
           };
         }
       }
-      // If it's a reference object
-      else if (userRef.path) {
-        const userId = userRef.path.split('/').pop();
-        const userDoc = await getDoc(doc(firestore, 'users', userId));
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
+      // If it's a direct ID
+      else if (typeof userRef === 'string' && userRef.length > 0) {
+        const userData = await apiService.getUser(userRef);
+        if (userData) {
           return {
-            name: `${userData.user_Firstname || ''} ${userData.user_Lastname || ''}`.trim() || 
-                  `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 
-                  'Unknown User',
+            name: `${userData.user_Firstname || userData.firstName || ''} ${userData.user_Lastname || userData.lastName || ''}`.trim() || 'Unknown User',
             email: userData.user_email || userData.email || 'N/A'
           };
         }
@@ -205,132 +283,147 @@ const NotificationPanel = () => {
     return { name: 'Unknown User', email: 'N/A' };
   };
 
+  // Fetch notifications from API - FIXED: Proper parameter passing
+  const fetchNotifications = async () => {
+    try {
+      console.log('🔔 Fetching notifications from API...');
+      // FIXED: Pass parameters correctly without duplication
+      const notificationsData = await notificationAPI.getNotifications({ 
+        targetRole: 'admin' 
+      });
+      
+      const processedNotifications = notificationsData.map(notification => {
+        const timestamp = convertTimestamp(notification.notif_timestamp || notification.createdAt) || new Date();
+        
+        return {
+          id: notification.id,
+          ...notification,
+          timestamp: timestamp,
+          notif_timestamp: timestamp,
+          createdAt: convertTimestamp(notification.createdAt),
+          updatedAt: convertTimestamp(notification.updatedAt),
+          resolvedAt: convertTimestamp(notification.resolvedAt)
+        };
+      });
+
+      // Filter out hidden notifications and sort by timestamp
+      const visibleNotifications = processedNotifications
+        .filter(notification => notification.hidden !== true)
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+      console.log(`✓ Retrieved ${visibleNotifications.length} notifications via API`);
+      setNotifications(visibleNotifications);
+    } catch (error) {
+      console.error('❌ Error fetching notifications via API:', error);
+      setAlert({
+        open: true,
+        message: 'Error loading notifications: ' + error.message,
+        severity: 'error'
+      });
+    }
+  };
+
+  // Fetch planting requests from API - FIXED: Proper parameter passing
+  const fetchPlantingRequests = async () => {
+    try {
+      console.log('📋 Fetching planting requests from API...');
+      // FIXED: Pass parameters correctly without duplication
+      const requestsData = await plantingRequestsAPI.getPlantingRequests({ 
+        status: 'pending' 
+      });
+      
+      // Process all requests and resolve references
+      const requestsPromises = requestsData.map(async (request) => {
+        // Resolve user and location references
+        const userInfo = await resolveUserRef(request.userRef || request.userId);
+        const locationName = await resolveLocationRef(request.locationRef || request.locationId);
+        
+        return {
+          id: request.id,
+          ...request,
+          fullName: userInfo.name,
+          createdBy: userInfo.email,
+          locationName: locationName,
+          request_date: convertTimestamp(request.request_date || request.createdAt),
+          approvedAt: convertTimestamp(request.approvedAt),
+          rejectedAt: convertTimestamp(request.rejectedAt),
+          submittedAt: convertTimestamp(request.submittedAt || request.createdAt)
+        };
+      });
+      
+      const allRequests = await Promise.all(requestsPromises);
+      
+      console.log(`✓ Retrieved ${allRequests.length} pending requests via API`);
+      setPlantingRequests(allRequests);
+    } catch (error) {
+      console.error('❌ Error fetching planting requests via API:', error);
+      setAlert({
+        open: true,
+        message: 'Error loading planting requests: ' + error.message,
+        severity: 'error'
+      });
+    }
+  };
+
+  // Convert timestamp helper
+  const convertTimestamp = (timestamp) => {
+    if (!timestamp) return null;
+    
+    // Handle Firestore timestamp format from backend
+    if (timestamp._seconds !== undefined) {
+      return new Date(timestamp._seconds * 1000);
+    }
+    
+    // Handle ISO string
+    if (typeof timestamp === 'string') {
+      return new Date(timestamp);
+    }
+    
+    // Handle Date object
+    if (timestamp instanceof Date) {
+      return timestamp;
+    }
+    
+    return null;
+  };
+
+  // Fetch all data
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+      await Promise.all([
+        fetchNotifications(),
+        fetchPlantingRequests()
+      ]);
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+      setAlert({
+        open: true,
+        message: 'Error loading dashboard data: ' + error.message,
+        severity: 'error'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // FIXED: Proper useEffect with cleanup
   useEffect(() => {
-    let unsubscribeRequests = null;
-    let unsubscribeNotifications = null;
+    let pollInterval;
 
-    const setupListeners = async () => {
+    const setupData = async () => {
       try {
-        setLoading(true);
+        // Initial fetch of data
+        await fetchDashboardData();
 
-        // ========== FETCH ALL PLANTING REQUESTS ==========
-        console.log('📋 Fetching planting requests from "plantingrequests" collection...');
-        
-        // Get ALL requests first to see what we have
-        const requestsQuery = collection(firestore, 'plantingrequests');
-        
-        unsubscribeRequests = onSnapshot(requestsQuery, 
-          async (snapshot) => {
-            console.log(`✓ Found ${snapshot.docs.length} total planting requests`);
-            
-            if (snapshot.docs.length > 0) {
-              // Log first document structure to understand the data
-              const firstDoc = snapshot.docs[0].data();
-              console.log('Sample request structure:', Object.keys(firstDoc));
-            }
-            
-            // Process all requests and resolve references
-            const requestsPromises = snapshot.docs.map(async (docSnap) => {
-              const data = docSnap.data();
-              
-              // Resolve user and location references
-              const userInfo = await resolveUserRef(data.userRef);
-              const locationName = await resolveLocationRef(data.locationRef);
-              
-              return {
-                id: docSnap.id,
-                ...data,
-                fullName: userInfo.name,
-                createdBy: userInfo.email,
-                locationName: locationName,
-                request_date: convertTimestamp(data.request_date),
-                approvedAt: convertTimestamp(data.approvedAt),
-                rejectedAt: convertTimestamp(data.rejectedAt),
-                submittedAt: convertTimestamp(data.submittedAt)
-              };
-            });
-            
-            const allRequests = await Promise.all(requestsPromises);
-            
-            // Filter for pending requests (check both possible field names)
-            const pendingRequests = allRequests.filter(req => {
-              const status = req.requestStatus || req.request_status || 'pending';
-              return status.toLowerCase() === 'pending';
-            });
-            
-            console.log(`✓ Filtered to ${pendingRequests.length} pending requests`);
-            setPlantingRequests(pendingRequests);
-          },
-          (error) => {
-            console.error('❌ Error fetching requests:', error);
-            setAlert({
-              open: true,
-              message: 'Error loading planting requests: ' + error.message,
-              severity: 'error'
-            });
-          }
-        );
-
-        // ========== FETCH ALL NOTIFICATIONS ==========
-        console.log('🔔 Fetching notifications from "notifications" collection...');
-        
-        // Get ALL notifications first to see what we have
-        const notificationsQuery = collection(firestore, 'notifications');
-
-        unsubscribeNotifications = onSnapshot(notificationsQuery, 
-          (snapshot) => {
-            console.log(`✓ Found ${snapshot.docs.length} total notifications`);
-            
-            if (snapshot.docs.length > 0) {
-              // Log first document structure to understand the data
-              const firstDoc = snapshot.docs[0].data();
-              console.log('Sample notification structure:', Object.keys(firstDoc));
-            }
-            
-            const allNotifications = snapshot.docs.map(doc => {
-              const data = doc.data();
-              const timestamp = convertTimestamp(data.notif_timestamp || data.createdAt) || new Date();
-              
-              return {
-                id: doc.id,
-                ...data,
-                timestamp: timestamp,
-                notif_timestamp: timestamp,
-                createdAt: convertTimestamp(data.createdAt),
-                updatedAt: convertTimestamp(data.updatedAt),
-                resolvedAt: convertTimestamp(data.resolvedAt)
-              };
-            });
-            
-            // Filter for admin notifications that are not hidden
-            const adminNotifications = allNotifications.filter(notification => {
-              const isAdmin = !notification.targetRole || notification.targetRole === 'admin';
-              const notHidden = notification.hidden !== true;
-              return isAdmin && notHidden;
-            });
-            
-            // Sort by timestamp (newest first)
-            const sortedNotifications = adminNotifications.sort((a, b) => 
-              new Date(b.timestamp) - new Date(a.timestamp)
-            );
-            
-            console.log(`✓ Filtered to ${sortedNotifications.length} admin notifications`);
-            setNotifications(sortedNotifications);
-          },
-          (error) => {
-            console.error('❌ Error fetching notifications:', error);
-            setAlert({
-              open: true,
-              message: 'Error loading notifications: ' + error.message,
-              severity: 'error'
-            });
-          }
-        );
-
-        setLoading(false);
+        // Start polling for data - every 30 seconds instead of 10 to reduce load
+        pollInterval = setInterval(() => {
+          fetchNotifications();
+          fetchPlantingRequests();
+        }, 30000);
 
       } catch (error) {
-        console.error('❌ Error setting up listeners:', error);
+        console.error('❌ Error setting up data:', error);
         setAlert({
           open: true,
           message: 'Error setting up data connections: ' + error.message,
@@ -340,13 +433,15 @@ const NotificationPanel = () => {
       }
     };
 
-    setupListeners();
+    setupData();
 
+    // Cleanup function
     return () => {
-      if (unsubscribeRequests) unsubscribeRequests();
-      if (unsubscribeNotifications) unsubscribeNotifications();
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
     };
-  }, []);
+  }, []); // Empty dependency array since we only want this to run once on mount
 
   const handleViewDetails = (request) => {
     setSelectedRequest(request);
@@ -426,14 +521,6 @@ const NotificationPanel = () => {
         return date;
       }
       
-      if (date && typeof date === 'object' && 'seconds' in date) {
-        return new Date(date.seconds * 1000).toLocaleDateString();
-      }
-      
-      if (date && typeof date.toDate === 'function') {
-        return date.toDate().toLocaleDateString();
-      }
-      
       if (date instanceof Date) {
         return date.toLocaleDateString();
       }
@@ -460,10 +547,6 @@ const NotificationPanel = () => {
       
       if (typeof date === 'string') {
         dateObj = new Date(date);
-      } else if (date && typeof date === 'object' && 'seconds' in date) {
-        dateObj = new Date(date.seconds * 1000);
-      } else if (date && typeof date.toDate === 'function') {
-        dateObj = date.toDate();
       } else if (date instanceof Date) {
         dateObj = date;
       }
@@ -491,8 +574,8 @@ const NotificationPanel = () => {
   if (loading) {
     return (
       <Box sx={{ display: 'flex', bgcolor: '#f8fafc', minHeight: '100vh' }}>
-        <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={auth.currentUser} onLogout={handleLogout} />
-        <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
+        <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={user} onLogout={handleLogout} />
+        <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} user={user} />
         <Box
           component="main"
           sx={{
@@ -680,8 +763,8 @@ const NotificationPanel = () => {
 
   return (
     <Box sx={{ display: 'flex', bgcolor: '#f8fafc', minHeight: '100vh' }}>
-      <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={auth.currentUser} onLogout={handleLogout} />
-      <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} />
+      <ReForestAppBar handleDrawerToggle={handleDrawerToggle} user={user} onLogout={handleLogout} />
+      <Navigation mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} isMobile={isMobile} user={user} />
 
       <Box 
         component="main" 

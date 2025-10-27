@@ -30,14 +30,10 @@ import {
   Business
 } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
-
-// ✅ Import LegalDocumentsCard
 import LegalDocumentsCard from '../components/LegalDocumentsCard';
 
-// ✅ Firebase imports
-import { auth, firestore } from '../firebase.js';
-import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+// Backend API URL - update this to match your backend
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 const Registration = () => {
   const navigate = useNavigate();
@@ -57,11 +53,11 @@ const Registration = () => {
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState('');
 
-  // ✅ State for legal documents modal
+  // State for legal documents modal
   const [legalDocOpen, setLegalDocOpen] = useState(false);
-  const [docType, setDocType] = useState(''); // 'terms' or 'privacy'
+  const [docType, setDocType] = useState('');
 
-  // ✅ Handlers for opening legal documents
+  // Handlers for opening legal documents
   const handleOpenTerms = (e) => {
     e.preventDefault();
     setDocType('terms');
@@ -82,71 +78,101 @@ const Registration = () => {
     const { name, value } = e.target;
     setFormData((s) => ({ ...s, [name]: value }));
     if (errors[name]) setErrors((s) => ({ ...s, [name]: '' }));
+    if (serverError) setServerError('');
   };
 
   const validateForm = () => {
     const errors = {};
-    if (!formData.firstName.trim()) errors.firstName = 'First name is required';
-    if (!formData.lastName.trim()) errors.lastName = 'Last name is required';
+    
+    // First name validation
+    if (!formData.firstName.trim()) {
+      errors.firstName = 'First name is required';
+    } else if (formData.firstName.trim().length < 2) {
+      errors.firstName = 'First name must be at least 2 characters';
+    }
+    
+    // Last name validation
+    if (!formData.lastName.trim()) {
+      errors.lastName = 'Last name is required';
+    } else if (formData.lastName.trim().length < 2) {
+      errors.lastName = 'Last name must be at least 2 characters';
+    }
+    
+    // Email validation
     if (!formData.email.trim()) {
       errors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      errors.email = 'Email is invalid';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      errors.email = 'Please enter a valid email address';
     }
+    
+    // Password validation
     if (!formData.password) {
       errors.password = 'Password is required';
-    } else if (formData.password.length < 8) {
-      errors.password = 'Password must be at least 8 characters';
+    } else if (formData.password.length < 6) {
+      errors.password = 'Password must be at least 6 characters';
+    } else if (!/(?=.*[a-z])/.test(formData.password)) {
+      errors.password = 'Password must contain at least one lowercase letter';
+    } else if (!/(?=.*[A-Z])/.test(formData.password)) {
+      errors.password = 'Password must contain at least one uppercase letter';
+    } else if (!/(?=.*\d)/.test(formData.password)) {
+      errors.password = 'Password must contain at least one number';
     }
-    if (formData.password !== formData.confirmPassword) {
+    
+    // Confirm password validation
+    if (!formData.confirmPassword) {
+      errors.confirmPassword = 'Please confirm your password';
+    } else if (formData.password !== formData.confirmPassword) {
       errors.confirmPassword = 'Passwords do not match';
     }
-    if (!formData.role) errors.role = 'Please select a role';
-    if (!acceptedTerms) errors.terms = 'You must accept the terms and conditions';
+    
+    // Role validation
+    if (!formData.role) {
+      errors.role = 'Please select a role';
+    }
+    
+    // Terms validation
+    if (!acceptedTerms) {
+      errors.terms = 'You must accept the terms and conditions to continue';
+    }
+    
     return errors;
-  };
-
-  const getRoleRef = (roleValue) => {
-    const roleMapping = {
-      'admin': '/roles/admin',
-      'officer': '/roles/officer', 
-      'stakeholder': '/roles/stakeholder'
-    };
-    return roleMapping[roleValue] || `/roles/${roleValue}`;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setServerError('');
+    
     const validationErrors = validateForm();
 
     if (Object.keys(validationErrors).length === 0) {
       setLoading(true);
 
       try {
-        const userCredential = await createUserWithEmailAndPassword(
-          auth,
-          formData.email,
-          formData.password
-        );
-        const user = userCredential.user;
-
-        const fullName = `${formData.firstName} ${formData.lastName}`;
-        await updateProfile(user, {
-          displayName: fullName,
+        // Call backend API for registration - UPDATED TO MATCH BACKEND
+        const response = await fetch(`${API_URL}/api/auth/register`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: formData.email.toLowerCase().trim(),
+            password: formData.password,
+            firstName: formData.firstName.trim(),
+            lastName: formData.lastName.trim(),
+            role: formData.role,
+          }),
         });
 
-        await setDoc(doc(firestore, 'users', user.uid), {
-          user_lastname: formData.lastName.trim(),
-          user_firstname: formData.firstName.trim(),
-          user_email: formData.email.toLowerCase().trim(),
-          roleRef: getRoleRef(formData.role),
-          user_password: "hashed_password",
-          createdAt: new Date(),
-          status: 'active',
-          uid: user.uid
-        });
+        const data = await response.json();
 
+        if (!response.ok) {
+          // Handle error from backend
+          throw new Error(data.error || data.message || 'Registration failed');
+        }
+
+        // Registration successful
+        console.log('Registration successful:', data);
+        
         setSubmitted(true);
         setFormData({ 
           firstName: '', 
@@ -158,24 +184,65 @@ const Registration = () => {
         });
         setAcceptedTerms(false);
 
+        // Redirect to login after 2 seconds
         setTimeout(() => {
-          navigate('/login');
+          navigate('/login', { 
+            state: { 
+              message: 'Registration successful! Please log in with your credentials.',
+              email: formData.email 
+            } 
+          });
         }, 2000);
+
       } catch (err) {
         console.error('Registration error:', err);
-        setServerError(err.message);
+        
+        // Handle specific error messages from your backend
+        let errorMessage = err.message;
+        
+        if (errorMessage.includes('email-already-exists') || errorMessage.includes('already exists')) {
+          errorMessage = 'An account with this email already exists. Please use a different email or try logging in.';
+        } else if (errorMessage.includes('invalid-email')) {
+          errorMessage = 'The email address is invalid. Please check and try again.';
+        } else if (errorMessage.includes('weak-password')) {
+          errorMessage = 'The password is too weak. Please use a stronger password.';
+        } else if (errorMessage.includes('network') || errorMessage.includes('Failed to fetch')) {
+          errorMessage = 'Cannot connect to server. Please check your internet connection and try again.';
+        } else if (errorMessage.includes('Firebase configuration')) {
+          errorMessage = 'Server configuration error. Please contact support.';
+        } else if (!errorMessage || errorMessage === 'Registration failed') {
+          errorMessage = 'Registration failed. Please try again later.';
+        }
+        
+        setServerError(errorMessage);
+      } finally {
+        setLoading(false);
       }
-
-      setLoading(false);
     } else {
       setErrors(validationErrors);
     }
   };
 
+  // UPDATED ROLE OPTIONS TO MATCH BACKEND EXPECTATIONS
   const roleOptions = [
-    { value: 'admin', label: 'Admin', description: 'Handles system management, user monitoring, and data operations', icon: <Nature sx={{ fontSize: 20, color: '#2e7d32' }} /> },
-    { value: 'officer', label: 'DENR Officer', description: 'Monitor and verify plantations', icon: <Security sx={{ fontSize: 20, color: '#2e7d32' }} /> },
-    { value: 'stakeholder', label: 'Stakeholder', description: 'Support and fund initiatives', icon: <Business sx={{ fontSize: 20, color: '#2e7d32' }} /> }
+    { 
+      value: 'admin', 
+      label: 'Admin', 
+      description: 'System management and operations', 
+      icon: <Nature sx={{ fontSize: 20, color: '#2e7d32' }} /> 
+    },
+    { 
+      value: 'officer', 
+      label: 'Officer', 
+      description: 'Monitor and verify plantation activities', 
+      icon: <Security sx={{ fontSize: 20, color: '#2e7d32' }} /> 
+    },
+    { 
+      value: 'user', 
+      label: 'User', 
+      description: 'Regular user access', 
+      icon: <Business sx={{ fontSize: 20, color: '#2e7d32' }} /> 
+    },
   ];
 
   return (
@@ -290,7 +357,7 @@ const Registration = () => {
 
             {submitted && (
               <Alert severity="success" sx={{ mb: 2, width: '100%', borderRadius: 1 }}>
-                Account created successfully! You can now log in.
+                Account created successfully! Redirecting to login...
               </Alert>
             )}
 
@@ -301,7 +368,7 @@ const Registration = () => {
             )}
 
             {/* Form */}
-            <Box component="form" onSubmit={handleSubmit} sx={{ width: '100%' }}>
+            <Box component="form" onSubmit={handleSubmit} sx={{ width: '100%' }} noValidate>
               {/* First Name and Last Name Row */}
               <Grid container spacing={2} sx={{ mb: 2 }}>
                 <Grid item xs={6}>
@@ -316,6 +383,7 @@ const Registration = () => {
                     onChange={handleChange}
                     error={!!errors.firstName}
                     helperText={errors.firstName}
+                    disabled={loading}
                     InputProps={{
                       startAdornment: (
                         <InputAdornment position="start">
@@ -338,6 +406,7 @@ const Registration = () => {
                     onChange={handleChange}
                     error={!!errors.lastName}
                     helperText={errors.lastName}
+                    disabled={loading}
                     InputProps={{
                       startAdornment: (
                         <InputAdornment position="start">
@@ -363,6 +432,7 @@ const Registration = () => {
                 onChange={handleChange}
                 error={!!errors.email}
                 helperText={errors.email}
+                disabled={loading}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -386,6 +456,7 @@ const Registration = () => {
                 onChange={handleChange}
                 error={!!errors.password}
                 helperText={errors.password}
+                disabled={loading}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -399,6 +470,7 @@ const Registration = () => {
                         onClick={() => setShowPassword((s) => !s)}
                         edge="end"
                         aria-label="toggle password visibility"
+                        disabled={loading}
                       >
                         {showPassword ? <VisibilityOff /> : <Visibility />}
                       </IconButton>
@@ -420,6 +492,7 @@ const Registration = () => {
                 onChange={handleChange}
                 error={!!errors.confirmPassword}
                 helperText={errors.confirmPassword}
+                disabled={loading}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -433,6 +506,7 @@ const Registration = () => {
                         onClick={() => setShowConfirmPassword((s) => !s)}
                         edge="end"
                         aria-label="toggle confirm password visibility"
+                        disabled={loading}
                       >
                         {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
                       </IconButton>
@@ -451,6 +525,7 @@ const Registration = () => {
                   value={formData.role}
                   label="Select Your Role"
                   onChange={handleChange}
+                  disabled={loading}
                 >
                   {roleOptions.map((option) => (
                     <MenuItem key={option.value} value={option.value}>
@@ -469,20 +544,26 @@ const Registration = () => {
                   ))}
                 </Select>
                 {errors.role && (
-                  <Typography variant="caption" color="error" sx={{ mt: 0.5 }}>
+                  <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.5 }}>
                     {errors.role}
                   </Typography>
                 )}
               </FormControl>
 
-              {/* ✅ Updated Terms section with click handlers */}
+              {/* Terms and Conditions */}
               <FormControlLabel
                 sx={{ mb: 2, alignItems: 'flex-start' }}
                 control={
                   <Checkbox
                     checked={acceptedTerms}
-                    onChange={(e) => setAcceptedTerms(e.target.checked)}
+                    onChange={(e) => {
+                      setAcceptedTerms(e.target.checked);
+                      if (errors.terms) {
+                        setErrors(prev => ({ ...prev, terms: '' }));
+                      }
+                    }}
                     color="primary"
+                    disabled={loading}
                   />
                 }
                 label={
@@ -517,12 +598,12 @@ const Registration = () => {
                 }
               />
               {errors.terms && (
-                <Typography variant="caption" color="error" display="block" sx={{ mb: 2 }}>
+                <Typography variant="caption" color="error" display="block" sx={{ mb: 2, ml: 1.5 }}>
                   {errors.terms}
                 </Typography>
               )}
 
-              {/* Submit */}
+              {/* Submit Button */}
               <Button
                 type="submit"
                 fullWidth
@@ -531,7 +612,7 @@ const Registration = () => {
                 sx={{
                   backgroundColor: '#2e7d32',
                   '&:hover': { backgroundColor: '#1b5e20' },
-                  '&:disabled': { backgroundColor: '#a5d6a7' },
+                  '&:disabled': { backgroundColor: '#a5d6a7', color: '#fff' },
                   py: 1.5,
                   borderRadius: 1.5,
                   textTransform: 'none',
@@ -546,7 +627,16 @@ const Registration = () => {
               <Box sx={{ textAlign: 'center', mt: 2 }}>
                 <Typography variant="body2" color="text.secondary">
                   Already have an account?{' '}
-                  <Link component={RouterLink} to="/login" sx={{ color: '#2e7d32', textDecoration: 'none', fontWeight: 600, '&:hover': { textDecoration: 'underline' } }}>
+                  <Link 
+                    component={RouterLink} 
+                    to="/login" 
+                    sx={{ 
+                      color: '#2e7d32', 
+                      textDecoration: 'none', 
+                      fontWeight: 600, 
+                      '&:hover': { textDecoration: 'underline' } 
+                    }}
+                  >
                     Sign in
                   </Link>
                 </Typography>
@@ -556,7 +646,7 @@ const Registration = () => {
         </Grid>
       </Grid>
 
-      {/* ✅ Add LegalDocumentsCard component */}
+      {/* Legal Documents Modal */}
       <LegalDocumentsCard 
         open={legalDocOpen}
         onClose={handleCloseLegalDoc}

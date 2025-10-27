@@ -1,4 +1,4 @@
-// src/pages/AdminProfile.js
+// src/pages/Profile.jsx
 import React, { useState, useEffect } from "react";
 import {
   Container,
@@ -78,23 +78,10 @@ import {
   Verified as VerifiedIcon,
   AccessTime as AccessTimeIcon,
 } from "@mui/icons-material";
-import { 
-  doc, 
-  setDoc, 
-  onSnapshot, 
-  collection, 
-  query, 
-  updateDoc, 
-  getDocs, 
-  serverTimestamp,
-  where, 
-  orderBy, 
-  limit
-} from "firebase/firestore";
-import { firestore } from "../firebase.js";
 import ReForestAppBar from "./AppBar.jsx";
 import Navigation from "./Navigation.jsx";
 import { useAuth } from '../context/AuthContext.js';
+import { apiService } from '../services/api.js';
 
 const drawerWidth = 240;
 
@@ -112,7 +99,7 @@ function TabPanel({ children, value, index, ...other }) {
   );
 }
 
-const AdminProfile = () => {
+const Profile = () => {
   const { user, logout } = useAuth();
   const [profile, setProfile] = useState({
     user_firstname: "",
@@ -158,133 +145,70 @@ const AdminProfile = () => {
     setMobileOpen(!mobileOpen);
   };
 
-  // Load admin profile and user data
+  // Load admin profile and user data using API service
   useEffect(() => {
     if (!user) {
       setLoading(false);
       return;
     }
 
-    let unsubscribers = [];
-
     const loadData = async () => {
-      try {
-        console.log('========== LOADING ADMIN PROFILE ==========');
+    try {
+      console.log('========== LOADING ADMIN PROFILE ==========');
+      
+      // Load admin profile - pass the user UID from auth context
+      const userData = await apiService.getUser(user.uid);
+      if (userData) {
+        console.log('✓ Admin profile data loaded:', userData);
         
-        // Load admin profile
-        const userDocRef = doc(firestore, "users", user.uid);
-        const userUnsubscribe = onSnapshot(
-          userDocRef,
-          (docSnap) => {
-            if (docSnap.exists()) {
-              const data = docSnap.data();
-              console.log('✓ Admin profile data loaded');
-              
-              setProfile({
-                user_firstname: data.user_Firstname || data.user_firstname || data.firstName || "",
-                user_middlename: data.user_Middlename || data.user_middlename || data.middleName || "",
-                user_lastname: data.user_Lastname || data.user_lastname || data.lastName || "",
-                user_email: data.user_email || data.email || user.email || "",
-                phone: data.phone || data.user_phone || "",
-                organization: data.organization || "DENR",
-                designation: data.designation || "System Administrator",
-                department: data.department || "Administration",
-                notifications: data.notifications ?? true,
-                twoFactor: data.twoFactor ?? false,
-                theme: data.theme || "light",
-                dashboardLayout: data.dashboardLayout || "default",
-                deactivated: data.deactivated || false,
-                lastLogin: data.lastLogin || null,
-              });
-            } else {
-              setError('Profile not found');
-            }
-          },
-          (error) => {
-            console.error("✗ Error loading admin profile:", error);
-            setError("Failed to load profile data");
-          }
-        );
-        unsubscribers.push(userUnsubscribe);
-
-        // Load roles
-        const rolesSnapshot = await getDocs(collection(firestore, "roles"));
-        const rolesData = rolesSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setRoles(rolesData);
+        setProfile({
+          user_firstname: userData.user_firstname || userData.user_Firstname || "",
+          user_middlename: userData.user_middlename || userData.user_Middlename || "",
+          user_lastname: userData.user_lastname || userData.user_Lastname || "",
+          user_email: userData.user_email || userData.email || user.email || "",
+          phone: userData.phone || userData.user_phone || "",
+          organization: userData.organization || "DENR",
+          designation: userData.designation || "System Administrator",
+          department: userData.department || "Administration",
+          notifications: userData.notifications ?? true,
+          twoFactor: userData.twoFactor ?? false,
+          theme: userData.theme || "light",
+          dashboardLayout: userData.dashboardLayout || "default",
+          deactivated: userData.deactivated || false,
+          lastLogin: userData.lastLogin ? new Date(userData.lastLogin) : null,
+        });
+      } else {
+        setError('Profile not found');
+      }
 
         // Load all users
-        const usersQuery = query(collection(firestore, "users"));
-        const usersUnsubscribe = onSnapshot(
-          usersQuery, 
-          (snapshot) => {
-            const usersData = snapshot.docs.map(doc => ({
-              id: doc.id,
-              ...doc.data()
-            }));
-            setUsers(usersData);
-          },
-          (error) => {
-            console.error('✗ Error loading users:', error);
-          }
-        );
-        unsubscribers.push(usersUnsubscribe);
+        const usersData = await apiService.getUsers();
+        setUsers(usersData);
+
+        // Load roles
+        try {
+          const rolesData = await apiService.getRoles();
+          setRoles(rolesData);
+        } catch (error) {
+          console.warn('⚠ Roles not available:', error.message);
+          setRoles([]);
+        }
 
         // Load login history
         try {
-          const loginHistoryQuery = query(
-            collection(firestore, "loginHistory"),
-            where("userId", "==", user.uid),
-            orderBy("timestamp", "desc"),
-            limit(10)
-          );
-          
-          const loginHistoryUnsubscribe = onSnapshot(
-            loginHistoryQuery, 
-            (snapshot) => {
-              const historyData = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-              }));
-              setLoginHistory(historyData);
-            },
-            (error) => {
-              console.warn('⚠ Login history error:', error.message);
-              setLoginHistory([]);
-            }
-          );
-          unsubscribers.push(loginHistoryUnsubscribe);
+          const loginHistoryData = await apiService.getLoginHistory(user.uid);
+          setLoginHistory(loginHistoryData);
         } catch (error) {
+          console.warn('⚠ Login history not available:', error.message);
           setLoginHistory([]);
         }
 
         // Load audit logs
         try {
-          const auditLogsQuery = query(
-            collection(firestore, "auditLogs"),
-            where("userId", "==", user.uid),
-            orderBy("timestamp", "desc"),
-            limit(20)
-          );
-          
-          const auditLogsUnsubscribe = onSnapshot(
-            auditLogsQuery,
-            (snapshot) => {
-              const logsData = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-              }));
-              setAuditLogs(logsData);
-            },
-            (error) => {
-              console.warn('⚠ Audit logs error:', error.message);
-              setAuditLogs([]);
-            }
-          );
-          unsubscribers.push(auditLogsUnsubscribe);
+          const auditLogsData = await apiService.getAuditLogs(user.uid);
+          setAuditLogs(auditLogsData);
         } catch (error) {
+          console.warn('⚠ Audit logs not available:', error.message);
           setAuditLogs([]);
         }
 
@@ -299,16 +223,13 @@ const AdminProfile = () => {
 
     loadData();
 
+    // Set up polling for real-time updates
+    const pollInterval = setInterval(() => {
+      loadData();
+    }, 30000); // Poll every 30 seconds
+
     return () => {
-      unsubscribers.forEach((unsubscribe) => {
-        if (typeof unsubscribe === 'function') {
-          try {
-            unsubscribe();
-          } catch (err) {
-            console.error('Error unsubscribing:', err);
-          }
-        }
-      });
+      clearInterval(pollInterval);
     };
   }, [user]);
 
@@ -340,8 +261,6 @@ const AdminProfile = () => {
     setError(null);
 
     try {
-      const userDocRef = doc(firestore, "users", user.uid);
-      
       const updates = {
         user_Firstname: profile.user_firstname,
         user_Middlename: profile.user_middlename,
@@ -355,18 +274,17 @@ const AdminProfile = () => {
         twoFactor: profile.twoFactor,
         theme: profile.theme,
         dashboardLayout: profile.dashboardLayout,
-        lastUpdated: serverTimestamp(),
+        lastUpdated: new Date().toISOString(),
       };
       
-      await updateDoc(userDocRef, updates);
+      await apiService.updateUser(user.uid, updates);
       
       setSuccess("Profile updated successfully");
       
       try {
-        await setDoc(doc(collection(firestore, "auditLogs")), {
+        await apiService.createAuditLog({
           userId: user.uid,
           action: "Profile updated",
-          timestamp: serverTimestamp(),
           details: "Admin profile information updated"
         });
       } catch (auditError) {
@@ -387,7 +305,19 @@ const AdminProfile = () => {
       return;
     }
 
+    if (passwordData.newPassword.length < 6) {
+      setError("Password must be at least 6 characters long");
+      return;
+    }
+
     try {
+      setSaving(true);
+      
+      await apiService.changePassword({
+        currentPassword: passwordData.currentPassword,
+        newPassword: passwordData.newPassword
+      });
+      
       setSuccess("Password changed successfully");
       setChangePasswordDialogOpen(false);
       setPasswordData({
@@ -396,7 +326,10 @@ const AdminProfile = () => {
         confirmPassword: "",
       });
     } catch (error) {
+      console.error('Change password error:', error);
       setError("Failed to change password: " + error.message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -407,17 +340,19 @@ const AdminProfile = () => {
     }
 
     try {
-      const userDocRef = doc(firestore, "users", userId);
-      await updateDoc(userDocRef, {
+      await apiService.updateUser(userId, {
         deactivated: deactivate,
-        deactivatedAt: deactivate ? serverTimestamp() : null,
+        deactivatedAt: deactivate ? new Date().toISOString() : null,
         deactivatedBy: deactivate ? user.uid : null,
-        lastUpdated: serverTimestamp()
       });
 
       setSuccess(`User ${deactivate ? 'deactivated' : 'reactivated'} successfully`);
       setDeactivateDialogOpen(false);
       setSelectedUser(null);
+      
+      // Refresh users list
+      const usersData = await apiService.getUsers();
+      setUsers(usersData);
     } catch (error) {
       setError(`Failed to ${deactivate ? 'deactivate' : 'reactivate'} user: ` + error.message);
     }
@@ -425,12 +360,10 @@ const AdminProfile = () => {
 
   const handleDeactivateAdmin = async () => {
     try {
-      const userDocRef = doc(firestore, "users", user.uid);
-      await updateDoc(userDocRef, {
+      await apiService.updateUser(user.uid, {
         deactivated: true,
-        deactivatedAt: serverTimestamp(),
+        deactivatedAt: new Date().toISOString(),
         deactivatedBy: user.uid,
-        lastUpdated: serverTimestamp()
       });
 
       setSuccess("Your admin account has been deactivated");
@@ -445,14 +378,22 @@ const AdminProfile = () => {
   };
 
   const handleRevokeSession = async (sessionId) => {
-    console.log('Revoking session:', sessionId);
-    setSuccess("Session revoked successfully");
+    try {
+      await apiService.revokeSession(sessionId);
+      setSuccess("Session revoked successfully");
+      
+      // Refresh active sessions
+      const sessions = await apiService.getActiveSessions(user.uid);
+      setActiveSessions(sessions);
+    } catch (error) {
+      setError("Failed to revoke session: " + error.message);
+    }
   };
 
-  const handleDownloadLogs = () => {
+  const handleDownloadLogs = async () => {
     try {
-      const logsData = JSON.stringify(auditLogs, null, 2);
-      const blob = new Blob([logsData], { type: 'application/json' });
+      const logsData = await apiService.exportAuditLogs(user.uid);
+      const blob = new Blob([JSON.stringify(logsData, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -617,7 +558,7 @@ const AdminProfile = () => {
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <AccessTimeIcon sx={{ fontSize: 18 }} />
                           <Typography variant="body2">
-                            Last login: {new Date(profile.lastLogin.toDate()).toLocaleString()}
+                            Last login: {new Date(profile.lastLogin).toLocaleString()}
                           </Typography>
                         </Box>
                       )}
@@ -909,6 +850,13 @@ const AdminProfile = () => {
                         variant="outlined"
                         icon={<BlockIcon />}
                       />
+                      <Button 
+                        startIcon={<RefreshIcon />}
+                        onClick={() => window.location.reload()}
+                        size="small"
+                      >
+                        Refresh
+                      </Button>
                     </Box>
                   </Box>
 
@@ -1194,7 +1142,7 @@ const AdminProfile = () => {
                                 secondary={
                                   <Typography variant="caption" color="text.secondary">
                                     {login.timestamp ? 
-                                      `${new Date(login.timestamp.toDate()).toLocaleString()} • ${login.success ? 'Success' : 'Failed'}` :
+                                      `${new Date(login.timestamp).toLocaleString()} • ${login.success ? 'Success' : 'Failed'}` :
                                       'Unknown time'
                                     }
                                   </Typography>
@@ -1248,7 +1196,7 @@ const AdminProfile = () => {
                                 secondary={
                                   <Typography variant="caption" color="text.secondary">
                                     {log.timestamp ? 
-                                      `${new Date(log.timestamp.toDate()).toLocaleString()} • IP: ${log.ip || 'Unknown'}` :
+                                      `${new Date(log.timestamp).toLocaleString()} • IP: ${log.ip || 'Unknown'}` :
                                       'Unknown time'
                                     }
                                   </Typography>
@@ -1751,4 +1699,4 @@ const AdminProfile = () => {
   );
 };
 
-export default AdminProfile;
+export default Profile;

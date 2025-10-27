@@ -1,4 +1,4 @@
-// src/utils/datasetLoader.js - Complete Production-Ready Version
+// src/utils/datasetLoader.js - Complete Production-Ready Version with Random Forest
 import * as XLSX from 'xlsx';
 import { 
   collection, 
@@ -23,7 +23,11 @@ const CONFIG = {
   DATASET_PATH: process.env.REACT_APP_DATASET_PATH || '/data/Tree_Seedling_Dataset.xlsx',
   NEARBY_RADIUS_KM: 5,
   MIN_READINGS_FOR_TREND: 7,
-  EARTH_RADIUS_KM: 6371
+  EARTH_RADIUS_KM: 6371,
+  // Random Forest Configuration
+  RF_NUM_TREES: 100,
+  RF_MAX_DEPTH: 10,
+  RF_MIN_SAMPLES_SPLIT: 2
 };
 
 // Validation ranges for sensor data
@@ -41,13 +45,283 @@ const SEASONAL_FACTORS = {
 };
 
 // ============================================================================
+// RANDOM FOREST IMPLEMENTATION
+// ============================================================================
+
+/**
+ * Decision Tree Node Class
+ */
+class TreeNode {
+  constructor() {
+    this.featureIndex = null;
+    this.threshold = null;
+    this.left = null;
+    this.right = null;
+    this.value = null; // For leaf nodes
+    this.isLeaf = false;
+  }
+}
+
+/**
+ * Random Forest Classifier
+ */
+class RandomForest {
+  constructor(numTrees = CONFIG.RF_NUM_TREES, maxDepth = CONFIG.RF_MAX_DEPTH, minSamplesSplit = CONFIG.RF_MIN_SAMPLES_SPLIT) {
+    this.numTrees = numTrees;
+    this.maxDepth = maxDepth;
+    this.minSamplesSplit = minSamplesSplit;
+    this.trees = [];
+    this.featureImportances = {};
+  }
+
+  /**
+   * Bootstrap sampling with replacement
+   */
+  bootstrapSample(X, y) {
+    const n = X.length;
+    const indices = Array.from({ length: n }, () => 
+      Math.floor(Math.random() * n)
+    );
+    
+    const XSample = indices.map(i => X[i]);
+    const ySample = indices.map(i => y[i]);
+    
+    return { XSample, ySample, indices };
+  }
+
+  /**
+   * Calculate Gini impurity
+   */
+  giniImpurity(y) {
+    if (y.length === 0) return 0;
+    
+    const classCounts = {};
+    y.forEach(label => {
+      classCounts[label] = (classCounts[label] || 0) + 1;
+    });
+    
+    let impurity = 1;
+    Object.values(classCounts).forEach(count => {
+      const probability = count / y.length;
+      impurity -= probability * probability;
+    });
+    
+    return impurity;
+  }
+
+  /**
+   * Find best split for a node
+   */
+  findBestSplit(X, y) {
+    const nFeatures = X[0].length;
+    const nSamples = X.length;
+    
+    if (nSamples <= this.minSamplesSplit) {
+      return null;
+    }
+    
+    let bestGini = Infinity;
+    let bestFeature = null;
+    let bestThreshold = null;
+    
+    // Random feature selection (sqrt of total features)
+    const numFeaturesToTry = Math.max(1, Math.floor(Math.sqrt(nFeatures)));
+    const featureIndices = Array.from({ length: nFeatures }, (_, i) => i)
+      .sort(() => Math.random() - 0.5)
+      .slice(0, numFeaturesToTry);
+    
+    for (const featureIndex of featureIndices) {
+      // Get unique values for this feature
+      const featureValues = [...new Set(X.map(sample => sample[featureIndex]))].sort((a, b) => a - b);
+      
+      // Try potential thresholds
+      for (let i = 0; i < featureValues.length - 1; i++) {
+        const threshold = (featureValues[i] + featureValues[i + 1]) / 2;
+        
+        // Split data
+        const leftIndices = [];
+        const rightIndices = [];
+        
+        X.forEach((sample, index) => {
+          if (sample[featureIndex] <= threshold) {
+            leftIndices.push(index);
+          } else {
+            rightIndices.push(index);
+          }
+        });
+        
+        if (leftIndices.length === 0 || rightIndices.length === 0) {
+          continue;
+        }
+        
+        // Calculate weighted Gini impurity
+        const leftGini = this.giniImpurity(leftIndices.map(i => y[i]));
+        const rightGini = this.giniImpurity(rightIndices.map(i => y[i]));
+        
+        const weightedGini = 
+          (leftIndices.length / nSamples) * leftGini + 
+          (rightIndices.length / nSamples) * rightGini;
+        
+        if (weightedGini < bestGini) {
+          bestGini = weightedGini;
+          bestFeature = featureIndex;
+          bestThreshold = threshold;
+        }
+      }
+    }
+    
+    return bestFeature !== null ? { featureIndex: bestFeature, threshold: bestThreshold, gini: bestGini } : null;
+  }
+
+  /**
+   * Build a decision tree recursively
+   */
+  buildTree(X, y, depth = 0) {
+    const node = new TreeNode();
+    
+    // Stopping conditions
+    if (depth >= this.maxDepth || 
+        y.length <= this.minSamplesSplit || 
+        new Set(y).size === 1) {
+      node.isLeaf = true;
+      node.value = this.calculateLeafValue(y);
+      return node;
+    }
+    
+    // Find best split
+    const split = this.findBestSplit(X, y);
+    if (!split) {
+      node.isLeaf = true;
+      node.value = this.calculateLeafValue(y);
+      return node;
+    }
+    
+    // Split data
+    const leftIndices = [];
+    const rightIndices = [];
+    
+    X.forEach((sample, index) => {
+      if (sample[split.featureIndex] <= split.threshold) {
+        leftIndices.push(index);
+      } else {
+        rightIndices.push(index);
+      }
+    });
+    
+    // Update feature importance
+    this.featureImportances[split.featureIndex] = 
+      (this.featureImportances[split.featureIndex] || 0) + split.gini;
+    
+    // Recursively build left and right subtrees
+    node.featureIndex = split.featureIndex;
+    node.threshold = split.threshold;
+    node.left = this.buildTree(
+      leftIndices.map(i => X[i]),
+      leftIndices.map(i => y[i]),
+      depth + 1
+    );
+    node.right = this.buildTree(
+      rightIndices.map(i => X[i]),
+      rightIndices.map(i => y[i]),
+      depth + 1
+    );
+    
+    return node;
+  }
+
+  /**
+   * Calculate leaf node value (most common class)
+   */
+  calculateLeafValue(y) {
+    const classCounts = {};
+    y.forEach(label => {
+      classCounts[label] = (classCounts[label] || 0) + 1;
+    });
+    
+    return Object.keys(classCounts).reduce((a, b) => 
+      classCounts[a] > classCounts[b] ? a : b
+    );
+  }
+
+  /**
+   * Predict single sample using one tree
+   */
+  predictSingle(tree, sample) {
+    if (tree.isLeaf) {
+      return tree.value;
+    }
+    
+    if (sample[tree.featureIndex] <= tree.threshold) {
+      return this.predictSingle(tree.left, sample);
+    } else {
+      return this.predictSingle(tree.right, sample);
+    }
+  }
+
+  /**
+   * Fit Random Forest to training data
+   */
+  fit(X, y) {
+    this.trees = [];
+    this.featureImportances = {};
+    
+    for (let i = 0; i < this.numTrees; i++) {
+      const { XSample, ySample } = this.bootstrapSample(X, y);
+      const tree = this.buildTree(XSample, ySample);
+      this.trees.push(tree);
+    }
+    
+    // Normalize feature importances
+    const totalImportance = Object.values(this.featureImportances).reduce((a, b) => a + b, 0);
+    Object.keys(this.featureImportances).forEach(featureIndex => {
+      this.featureImportances[featureIndex] /= totalImportance;
+    });
+  }
+
+  /**
+   * Predict using Random Forest (majority vote)
+   */
+  predict(X) {
+    return X.map(sample => {
+      const votes = {};
+      this.trees.forEach(tree => {
+        const prediction = this.predictSingle(tree, sample);
+        votes[prediction] = (votes[prediction] || 0) + 1;
+      });
+      
+      return Object.keys(votes).reduce((a, b) => 
+        votes[a] > votes[b] ? a : b
+      );
+    });
+  }
+
+  /**
+   * Predict probabilities
+   */
+  predictProba(X) {
+    return X.map(sample => {
+      const votes = {};
+      this.trees.forEach(tree => {
+        const prediction = this.predictSingle(tree, sample);
+        votes[prediction] = (votes[prediction] || 0) + 1;
+      });
+      
+      const probabilities = {};
+      Object.keys(votes).forEach(label => {
+        probabilities[label] = votes[label] / this.numTrees;
+      });
+      
+      return probabilities;
+    });
+  }
+}
+
+// ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
 
 /**
  * Parse range strings from dataset (handles various formats)
- * @param {string|number} rangeStr - Range string like "20-30", "25", "20–30°C"
- * @returns {Object} { min, max, valid }
  */
 export const parseRange = (rangeStr) => {
   if (!rangeStr || rangeStr === 'N/A' || rangeStr === '' || rangeStr === null) {
@@ -55,15 +329,13 @@ export const parseRange = (rangeStr) => {
   }
   
   try {
-    // Convert to string and clean
     let cleaned = String(rangeStr)
       .replace(/°C/gi, '')
       .replace(/%/g, '')
-      .replace(/[–—−]/g, '-') // Handle different dash types
+      .replace(/[–—−]/g, '-')
       .replace(/\s+/g, '')
       .trim();
     
-    // Handle scientific notation (e.g., 1.5e2)
     if (/[eE]/.test(cleaned)) {
       const value = parseFloat(cleaned);
       if (isNaN(value)) {
@@ -72,7 +344,6 @@ export const parseRange = (rangeStr) => {
       return { min: value, max: value, valid: true };
     }
     
-    // Handle single values
     if (!cleaned.includes('-')) {
       const value = parseFloat(cleaned);
       if (isNaN(value)) {
@@ -81,7 +352,6 @@ export const parseRange = (rangeStr) => {
       return { min: value, max: value, valid: true };
     }
     
-    // Handle ranges (e.g., "20-30")
     const parts = cleaned.split('-').filter(p => p.length > 0);
     
     if (parts.length === 2) {
@@ -92,7 +362,6 @@ export const parseRange = (rangeStr) => {
         return { min: 0, max: 0, valid: false };
       }
       
-      // Ensure min is always less than max
       return {
         min: Math.min(min, max),
         max: Math.max(min, max),
@@ -100,7 +369,6 @@ export const parseRange = (rangeStr) => {
       };
     }
     
-    // Invalid format
     return { min: 0, max: 0, valid: false };
     
   } catch (error) {
@@ -110,59 +378,41 @@ export const parseRange = (rangeStr) => {
 };
 
 /**
- * Calculate compatibility score based on sensor value vs optimal range
- * @param {number} value - Current sensor value
- * @param {number} min - Minimum optimal value
- * @param {number} max - Maximum optimal value
- * @param {number} seasonalMultiplier - Seasonal adjustment factor
- * @returns {number} Compatibility score (0-1)
+ * Calculate compatibility score
  */
 export const calculateRangeCompatibility = (value, min, max, seasonalMultiplier = 1.0) => {
-  // Handle invalid ranges
-  if (min === 0 && max === 0) return 0.3; // Default low score for missing data
+  if (min === 0 && max === 0) return 0.3;
   if (isNaN(value) || isNaN(min) || isNaN(max)) return 0;
   
-  // Apply seasonal adjustment
   const adjustedMin = min * seasonalMultiplier;
   const adjustedMax = max * seasonalMultiplier;
   
-  // Value within optimal range
   if (value >= adjustedMin && value <= adjustedMax) {
-    // Perfect match - score higher for values closer to center
     const center = (adjustedMin + adjustedMax) / 2;
     const distanceFromCenter = Math.abs(value - center);
     const rangeSize = adjustedMax - adjustedMin;
     
-    if (rangeSize === 0) return 1.0; // Single value match
+    if (rangeSize === 0) return 1.0;
     
-    // Score decreases as we move away from center
     return Math.max(0.8, 1.0 - (distanceFromCenter / rangeSize) * 0.2);
   }
   
-  // Value outside optimal range - calculate degraded score
   const distance = value < adjustedMin 
     ? adjustedMin - value 
     : value - adjustedMax;
   
   const rangeSize = adjustedMax - adjustedMin;
-  const tolerance = Math.max(rangeSize * 0.8, 5); // At least 5 units tolerance
+  const tolerance = Math.max(rangeSize * 0.8, 5);
   
-  // Exponential decay for values outside range
   const score = Math.exp(-distance / tolerance);
   
   return Math.max(0, Math.min(1, score));
 };
 
 /**
- * Calculate distance between two coordinates using Haversine formula
- * @param {number} lat1 - Latitude 1
- * @param {number} lon1 - Longitude 1
- * @param {number} lat2 - Latitude 2
- * @param {number} lon2 - Longitude 2
- * @returns {number} Distance in kilometers
+ * Calculate distance between coordinates
  */
 export const calculateDistance = (lat1, lon1, lat2, lon2) => {
-  // Validate inputs
   if ([lat1, lon1, lat2, lon2].some(coord => isNaN(coord) || coord === null)) {
     return Infinity;
   }
@@ -184,9 +434,7 @@ export const calculateDistance = (lat1, lon1, lat2, lon2) => {
 };
 
 /**
- * Calculate linear regression trend from array of values
- * @param {number[]} values - Array of numerical values
- * @returns {Object} { slope, intercept, r2 }
+ * Calculate linear regression trend
  */
 export const calculateTrend = (values) => {
   const n = values.length;
@@ -201,7 +449,6 @@ export const calculateTrend = (values) => {
   
   const indices = Array.from({length: n}, (_, i) => i);
   
-  // Calculate sums for linear regression
   const sumX = indices.reduce((a, b) => a + b, 0);
   const sumY = values.reduce((a, b) => a + b, 0);
   const sumXY = indices.reduce((sum, x, i) => sum + x * values[i], 0);
@@ -213,11 +460,9 @@ export const calculateTrend = (values) => {
     return { slope: 0, intercept: sumY / n, r2: 0 };
   }
   
-  // Calculate slope and intercept
   const slope = (n * sumXY - sumX * sumY) / denominator;
   const intercept = (sumY - slope * sumX) / n;
   
-  // Calculate R² (coefficient of determination)
   const yMean = sumY / n;
   const ssTotal = values.reduce((sum, y) => sum + Math.pow(y - yMean, 2), 0);
   const ssResidual = values.reduce((sum, y, i) => 
@@ -230,7 +475,7 @@ export const calculateTrend = (values) => {
 };
 
 /**
- * Safe localStorage operations with error handling
+ * Safe localStorage operations
  */
 const safeLocalStorage = {
   getItem: (key) => {
@@ -267,7 +512,6 @@ const safeLocalStorage = {
 
 /**
  * Load and parse tree dataset from Excel file with caching
- * @returns {Promise<Array>} Array of tree species objects
  */
 export const loadTreeDataset = async () => {
   try {
@@ -291,7 +535,6 @@ export const loadTreeDataset = async () => {
     
     console.log('Loading tree dataset from Excel file...');
     
-    // Try multiple possible paths
     const possiblePaths = [
       CONFIG.DATASET_PATH,
       '/public/data/Tree_Seedling_Dataset.xlsx',
@@ -326,11 +569,7 @@ export const loadTreeDataset = async () => {
       );
     }
     
-    console.log(`Successfully loaded Excel file from: ${usedPath}`);
-    
     const arrayBuffer = await response.arrayBuffer();
-    
-    // Parse Excel file
     const workbook = XLSX.read(arrayBuffer, {
       type: 'array',
       cellDates: true,
@@ -342,7 +581,6 @@ export const loadTreeDataset = async () => {
       throw new Error('Excel file does not contain any worksheets');
     }
     
-    // Get the first sheet
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     
@@ -350,7 +588,6 @@ export const loadTreeDataset = async () => {
       throw new Error(`Worksheet "${sheetName}" is empty or invalid`);
     }
     
-    // Convert to JSON
     const rawData = XLSX.utils.sheet_to_json(worksheet, { 
       defval: null,
       blankrows: false 
@@ -362,10 +599,8 @@ export const loadTreeDataset = async () => {
     
     console.log(`Loaded ${rawData.length} rows from Excel dataset`);
     
-    // Parse and validate each species
     const parsedDataset = rawData.map((species, index) => {
       try {
-        // Parse ranges with multiple possible column names
         const moistureRange = parseRange(
           species["Soil Moisture"] || 
           species["Moisture"] || 
@@ -387,7 +622,6 @@ export const loadTreeDataset = async () => {
           species["temperature"]
         );
         
-        // Validate all ranges
         if (!moistureRange.valid || !pHRange.valid || !tempRange.valid) {
           console.warn(
             `Row ${index + 2}: Invalid range data - ` +
@@ -396,17 +630,14 @@ export const loadTreeDataset = async () => {
           return null;
         }
         
-        // Calculate optimal values as range midpoint
         const prefMoisture = (moistureRange.min + moistureRange.max) / 2;
         const prefTemp = (tempRange.min + tempRange.max) / 2;
         const prefpH = (pHRange.min + pHRange.max) / 2;
         
-        // Calculate tolerance ranges (±20% for moisture, ±15% for temp, ±10% for pH)
         const moistureTolerance = Math.max(5, prefMoisture * 0.2);
         const tempTolerance = Math.max(2, prefTemp * 0.15);
         const pHTolerance = Math.max(0.5, prefpH * 0.1);
         
-        // Determine native status (multiple possible values)
         const nativeValue = String(
           species["Native"] || 
           species["Is Native"] || 
@@ -416,7 +647,6 @@ export const loadTreeDataset = async () => {
         
         const isNative = ['true', 'yes', 'y', '1', 'native'].includes(nativeValue);
         
-        // Extract other fields with defaults
         const commonName = species["Common Name"] || species["common_name"] || 'Unknown';
         const scientificName = species["Scientific Name"] || species["scientific_name"] || 'Unknown';
         
@@ -431,7 +661,6 @@ export const loadTreeDataset = async () => {
           scientificName,
           soilType: species["Soil Type"] || species["soil_type"] || 'Various soil types',
           
-          // ML-compatible ranges (with tolerance)
           moistureMin: Math.max(0, prefMoisture - moistureTolerance),
           moistureMax: Math.min(100, prefMoisture + moistureTolerance),
           pHMin: Math.max(0, prefpH - pHTolerance),
@@ -439,12 +668,10 @@ export const loadTreeDataset = async () => {
           tempMin: prefTemp - tempTolerance,
           tempMax: prefTemp + tempTolerance,
           
-          // Optimal values (for display)
           prefMoisture: Math.round(prefMoisture * 10) / 10,
           prefTemp: Math.round(prefTemp * 10) / 10,
           prefpH: Math.round(prefpH * 10) / 10,
           
-          // Additional attributes
           category: species["Category"] || species["category"] || (isNative ? 'native' : 'non-native'),
           successRate: parseInt(species["Success Rate (%)"] || species["Success Rate"] || species["success_rate"]) || (isNative ? 85 : 75),
           adaptabilityScore: parseInt(species["Adaptability Score"] || species["adaptability_score"]) || (isNative ? 90 : 80),
@@ -453,7 +680,6 @@ export const loadTreeDataset = async () => {
           growthRate: species["Growth Rate"] || species["growth_rate"] || 'Medium',
           uses: species["Uses"] || species["uses"] || 'Reforestation',
           
-          // Original ranges (for reference)
           originalRanges: {
             moisture: `${moistureRange.min}-${moistureRange.max}`,
             pH: `${pHRange.min}-${pHRange.max}`,
@@ -466,11 +692,9 @@ export const loadTreeDataset = async () => {
       }
     });
     
-    // Filter out invalid entries
     const validDataset = parsedDataset.filter(tree => {
       if (!tree) return false;
       
-      // Additional validation
       const isValid = 
         tree.commonName !== 'Unknown' && 
         tree.scientificName !== 'Unknown' &&
@@ -500,7 +724,6 @@ export const loadTreeDataset = async () => {
     
     console.log(`${validDataset.length} valid tree species ready for ML processing`);
     
-    // Cache the processed data
     const cacheSuccess = safeLocalStorage.setItem(
       CONFIG.CACHE_KEY, 
       JSON.stringify(validDataset)
@@ -519,7 +742,6 @@ export const loadTreeDataset = async () => {
   } catch (error) {
     console.error('Error loading tree dataset:', error);
     
-    // Try to use cached data as fallback (even if expired)
     const cachedData = safeLocalStorage.getItem(CONFIG.CACHE_KEY);
     if (cachedData) {
       console.warn('Using expired cached data due to loading error');
@@ -540,11 +762,8 @@ export const loadTreeDataset = async () => {
 
 /**
  * Get nearby sensors within specified radius
- * @param {Object} currentLocation - { latitude, longitude }
- * @param {number} radiusKm - Search radius in kilometers
- * @returns {Promise<Array>} Array of nearby sensors with distances
  */
-export const getNearbySernsorsData = async (currentLocation, radiusKm = CONFIG.NEARBY_RADIUS_KM) => {
+export const getNearbySensorsData = async (currentLocation, radiusKm = CONFIG.NEARBY_RADIUS_KM) => {
   try {
     if (!currentLocation || !currentLocation.latitude || !currentLocation.longitude) {
       return [];
@@ -570,13 +789,12 @@ export const getNearbySernsorsData = async (currentLocation, radiusKm = CONFIG.N
       if (distance <= radiusKm && !isNaN(distance) && distance !== Infinity) {
         nearbySensors.push({
           locationId: doc.id,
-          distance: Math.round(distance * 100) / 100, // Round to 2 decimals
+          distance: Math.round(distance * 100) / 100,
           ...location
         });
       }
     });
     
-    // Sort by distance (closest first)
     nearbySensors.sort((a, b) => a.distance - b.distance);
     
     return nearbySensors;
@@ -589,9 +807,6 @@ export const getNearbySernsorsData = async (currentLocation, radiusKm = CONFIG.N
 
 /**
  * Aggregate sensor data with inverse-distance weighted averaging
- * @param {Array} sensorReadings - Array of sensor reading objects
- * @param {Array} distances - Corresponding distances for each reading
- * @returns {Object|null} Aggregated sensor data
  */
 export const aggregateSensorData = (sensorReadings, distances) => {
   if (!sensorReadings || sensorReadings.length === 0) {
@@ -607,8 +822,8 @@ export const aggregateSensorData = (sensorReadings, distances) => {
   let totalWeight = 0;
   
   sensorReadings.forEach((reading, index) => {
-    const distance = distances[index] || 1; // Avoid division by zero
-    const weight = 1 / (1 + distance); // Inverse distance weighting
+    const distance = distances[index] || 1;
+    const weight = 1 / (1 + distance);
     
     const ph = parseFloat(reading.ph || reading.pH || 0);
     const moisture = parseFloat(reading.soilMoisture || reading.moisture || 0);
@@ -641,8 +856,6 @@ export const aggregateSensorData = (sensorReadings, distances) => {
 
 /**
  * Analyze soil trends from historical readings
- * @param {Array} historicalReadings - Array of historical sensor readings
- * @returns {Object} Trend analysis results
  */
 export const analyzeSoilTrends = (historicalReadings) => {
   if (!historicalReadings || historicalReadings.length < CONFIG.MIN_READINGS_FOR_TREND) {
@@ -657,14 +870,12 @@ export const analyzeSoilTrends = (historicalReadings) => {
   }
   
   try {
-    // Sort by timestamp
     const sortedReadings = [...historicalReadings].sort((a, b) => {
       const dateA = new Date(a.timestamp);
       const dateB = new Date(b.timestamp);
       return dateA - dateB;
     });
     
-    // Extract valid values (filter out null, undefined, "N/A")
     const moistureValues = sortedReadings
       .map(r => parseFloat(r.soilMoisture))
       .filter(v => !isNaN(v) && v > 0);
@@ -686,17 +897,14 @@ export const analyzeSoilTrends = (historicalReadings) => {
       };
     }
     
-    // Calculate trends for each parameter
     const trends = {
       moisture: calculateTrend(moistureValues),
       ph: calculateTrend(phValues),
       temperature: calculateTrend(tempValues)
     };
     
-    // Generate alerts based on trends
     const alerts = [];
     
-    // Moisture alerts
     if (trends.moisture.slope < -2 && trends.moisture.r2 > 0.5) {
       alerts.push({
         type: 'moisture_declining',
@@ -715,7 +923,6 @@ export const analyzeSoilTrends = (historicalReadings) => {
       });
     }
     
-    // pH alerts
     if (Math.abs(trends.ph.slope) > 0.3 && trends.ph.r2 > 0.5) {
       alerts.push({
         type: 'ph_unstable',
@@ -726,7 +933,6 @@ export const analyzeSoilTrends = (historicalReadings) => {
       });
     }
     
-    // Temperature alerts
     if (trends.temperature.slope > 0.5 && trends.temperature.r2 > 0.5) {
       alerts.push({
         type: 'temperature_rising',
@@ -745,7 +951,6 @@ export const analyzeSoilTrends = (historicalReadings) => {
       });
     }
     
-    // Calculate overall confidence (average R²)
     const confidence = (trends.moisture.r2 + trends.ph.r2 + trends.temperature.r2) / 3;
     
     return { 
@@ -774,14 +979,11 @@ export const analyzeSoilTrends = (historicalReadings) => {
 
 /**
  * Get planting history for a location
- * @param {string} locationRef - Location reference path
- * @returns {Promise<Object>} Species count object
  */
 export const getLocationPlantingHistory = async (locationRef) => {
   try {
     if (!locationRef) return {};
     
-    // Extract location ID from reference path
     const locationId = locationRef.includes('/') 
       ? locationRef.split('/').pop() 
       : locationRef;
@@ -811,9 +1013,6 @@ export const getLocationPlantingHistory = async (locationRef) => {
 
 /**
  * Ensure biodiversity by penalizing over-represented species
- * @param {Array} recommendations - Array of tree recommendations
- * @param {Object} existingSpeciesInArea - Object with species counts
- * @returns {Array} Adjusted recommendations
  */
 export const ensureBiodiversity = (recommendations, existingSpeciesInArea) => {
   if (!existingSpeciesInArea || Object.keys(existingSpeciesInArea).length === 0) {
@@ -824,21 +1023,18 @@ export const ensureBiodiversity = (recommendations, existingSpeciesInArea) => {
     }));
   }
   
-  // Calculate total existing trees
   const totalExisting = Object.values(existingSpeciesInArea).reduce((sum, count) => sum + count, 0);
   
   return recommendations.map(tree => {
     const existingCount = existingSpeciesInArea[tree.commonName] || 0;
-    
-    // Calculate diversity penalty (increases with representation)
     const representationRatio = totalExisting > 0 ? existingCount / totalExisting : 0;
-    const diversityPenalty = Math.min(0.4, representationRatio * 0.5); // Max 40% penalty
+    const diversityPenalty = Math.min(0.4, representationRatio * 0.5);
     
     const adjustedConfidence = tree.confidenceScore * (1 - diversityPenalty);
     
     return {
       ...tree,
-      confidenceScore: Math.max(0.05, adjustedConfidence), // Minimum 5%
+      confidenceScore: Math.max(0.05, adjustedConfidence),
       diversityScore: 1 - diversityPenalty,
       existingInArea: existingCount,
       representationRatio: Math.round(representationRatio * 100)
@@ -848,9 +1044,6 @@ export const ensureBiodiversity = (recommendations, existingSpeciesInArea) => {
 
 /**
  * Apply historical learning based on past performance
- * @param {string} treeName - Tree species common name
- * @param {string} location - Location identifier
- * @returns {Promise<number>} Historical performance multiplier (0.8-1.2)
  */
 export const applyHistoricalLearning = async (treeName, location) => {
   try {
@@ -865,7 +1058,7 @@ export const applyHistoricalLearning = async (treeName, location) => {
     const snapshot = await getDocs(performanceQuery);
     
     if (snapshot.empty) {
-      return 1.0; // Neutral multiplier (no history)
+      return 1.0;
     }
     
     let totalSuccess = 0;
@@ -879,9 +1072,6 @@ export const applyHistoricalLearning = async (treeName, location) => {
     });
     
     const avgSuccess = totalSuccess / count;
-    
-    // Convert to multiplier range: 0.8 (poor) to 1.2 (excellent)
-    // avgSuccess ranges from 0 to 1
     const multiplier = 0.8 + (avgSuccess * 0.4);
     
     console.log(`Historical learning for ${treeName} at ${location}: ${(multiplier * 100).toFixed(0)}%`);
@@ -890,15 +1080,12 @@ export const applyHistoricalLearning = async (treeName, location) => {
     
   } catch (error) {
     console.error('Error fetching historical performance:', error);
-    return 1.0; // Neutral on error
+    return 1.0;
   }
 };
 
 /**
  * Update recommendation performance (for future learning)
- * @param {string} recommendationId - Recommendation ID
- * @param {Object} actualOutcome - Actual planting outcome data
- * @returns {Promise<boolean>} Success status
  */
 export const updateRecommendationPerformance = async (recommendationId, actualOutcome) => {
   try {
@@ -933,23 +1120,63 @@ export const updateRecommendationPerformance = async (recommendationId, actualOu
 };
 
 // ============================================================================
-// MAIN ML RECOMMENDATION ALGORITHM
+// RANDOM FOREST RECOMMENDATION ALGORITHM
 // ============================================================================
 
 /**
- * Generate tree seedling recommendations using ML algorithm
- * @param {Object} sensorData - Current sensor readings
- * @param {Object} additionalContext - Optional context (season, elevation, etc.)
- * @returns {Promise<Array>} Top 3 tree recommendations
+ * Train Random Forest model on tree dataset
  */
-export const generateSeedlingRecommendations = async (sensorData, additionalContext = {}) => {
+export const trainRandomForestModel = async () => {
   try {
-    const { ph, soilMoisture, temperature, location } = sensorData;
+    const dataset = await loadTreeDataset();
+    
+    if (!dataset || dataset.length === 0) {
+      throw new Error('No dataset available for training');
+    }
+    
+    // Prepare features and labels for training
+    const features = [];
+    const labels = [];
+    
+    dataset.forEach(tree => {
+      const featureVector = [
+        tree.prefMoisture,
+        tree.prefpH,
+        tree.prefTemp,
+        tree.successRate,
+        tree.adaptabilityScore,
+        tree.isNative ? 1 : 0
+      ];
+      
+      features.push(featureVector);
+      labels.push(tree.commonName); // Use common name as label
+    });
+    
+    // Train Random Forest
+    const rf = new RandomForest();
+    rf.fit(features, labels);
+    
+    console.log('Random Forest model trained successfully');
+    console.log('Feature importances:', rf.featureImportances);
+    
+    return rf;
+    
+  } catch (error) {
+    console.error('Error training Random Forest model:', error);
+    throw error;
+  }
+};
+
+/**
+ * Generate recommendations using Random Forest
+ */
+export const generateRFRecommendations = async (sensorData, additionalContext = {}) => {
+  try {
+    const { ph, soilMoisture, temperature } = sensorData;
     const { 
-      season = 'moderate', 
-      elevation = 0, 
+      season = 'moderate',
       useHistoricalLearning = false,
-      coordinates = null
+      location = null
     } = additionalContext;
     
     // Validate input
@@ -957,7 +1184,159 @@ export const generateSeedlingRecommendations = async (sensorData, additionalCont
       throw new Error('Invalid sensor data: pH, soilMoisture, and temperature are required');
     }
     
-    // Load dataset
+    // Load dataset and train model
+    const dataset = await loadTreeDataset();
+    const rfModel = await trainRandomForestModel();
+    
+    if (!dataset || dataset.length === 0) {
+      throw new Error('Tree dataset is empty or could not be loaded');
+    }
+    
+    console.log(`Generating recommendations using Random Forest for ${dataset.length} species...`);
+    
+    // Prepare input features for prediction
+    const inputFeatures = dataset.map(tree => [
+      tree.prefMoisture,
+      tree.prefpH,
+      tree.prefTemp,
+      tree.successRate,
+      tree.adaptabilityScore,
+      tree.isNative ? 1 : 0,
+      ph,
+      soilMoisture,
+      temperature
+    ]);
+    
+    // Get predictions and probabilities
+    const predictions = rfModel.predict(inputFeatures);
+    const probabilities = rfModel.predictProba(inputFeatures);
+    
+    // Combine results with tree data
+    const scoredTrees = await Promise.all(dataset.map(async (tree, index) => {
+      const probability = probabilities[index][tree.commonName] || 0;
+      
+      // Apply historical learning if enabled
+      let historicalMultiplier = 1.0;
+      if (useHistoricalLearning && location) {
+        historicalMultiplier = await applyHistoricalLearning(tree.commonName, location);
+      }
+      
+      const confidenceScore = Math.min(1, probability * historicalMultiplier);
+      
+      return {
+        id: tree.id,
+        commonName: tree.commonName,
+        scientificName: tree.scientificName,
+        category: tree.category,
+        successRate: tree.successRate,
+        adaptabilityScore: tree.adaptabilityScore,
+        climateSuitability: tree.climateSuitability,
+        soilType: tree.soilType,
+        growthRate: tree.growthRate,
+        uses: tree.uses,
+        
+        // Optimal conditions
+        prefMoisture: tree.prefMoisture,
+        prefpH: tree.prefpH,
+        prefTemp: tree.prefTemp,
+        
+        // ML scores
+        confidenceScore: Math.max(0.05, confidenceScore),
+        rfProbability: probability,
+        historicalMultiplier: historicalMultiplier,
+        
+        // Range information
+        moistureRange: `${tree.moistureMin.toFixed(1)}-${tree.moistureMax.toFixed(1)}%`,
+        pHRange: `${tree.pHMin.toFixed(1)}-${tree.pHMax.toFixed(1)}`,
+        tempRange: `${tree.tempMin.toFixed(1)}-${tree.tempMax.toFixed(1)}°C`,
+        
+        // Native status
+        isNative: tree.isNative,
+        
+        // Prediction info
+        predictedBy: 'Random Forest',
+        featureImportance: rfModel.featureImportances
+      };
+    }));
+    
+    // Sort by confidence score
+    const sortedTrees = scoredTrees.sort((a, b) => b.confidenceScore - a.confidenceScore);
+    
+    // Get top 3 recommendations
+    const topRecommendations = sortedTrees.slice(0, 3);
+    
+    console.log('Random Forest Top 3 recommendations:');
+    topRecommendations.forEach((tree, idx) => {
+      console.log(
+        `${idx + 1}. ${tree.commonName}: ` +
+        `${(tree.confidenceScore * 100).toFixed(1)}% confidence, ` +
+        `${(tree.rfProbability * 100).toFixed(1)}% RF probability, ` +
+        `Native: ${tree.isNative}`
+      );
+    });
+    
+    return topRecommendations;
+    
+  } catch (error) {
+    console.error('Error generating Random Forest recommendations:', error);
+    throw error;
+  }
+};
+
+/**
+ * Hybrid recommendation system (combines traditional and RF)
+ */
+export const generateHybridRecommendations = async (sensorData, additionalContext = {}) => {
+  try {
+    // Generate both traditional and RF recommendations
+    const [traditionalRecs, rfRecs] = await Promise.all([
+      generateSeedlingRecommendations(sensorData, additionalContext).catch(() => []),
+      generateRFRecommendations(sensorData, additionalContext).catch(() => [])
+    ]);
+    
+    // Combine and deduplicate recommendations
+    const allRecs = [...traditionalRecs, ...rfRecs];
+    const uniqueRecs = [];
+    const seenNames = new Set();
+    
+    allRecs.forEach(rec => {
+      if (!seenNames.has(rec.commonName)) {
+        seenNames.add(rec.commonName);
+        uniqueRecs.push(rec);
+      }
+    });
+    
+    // Sort by confidence score
+    uniqueRecs.sort((a, b) => b.confidenceScore - a.confidenceScore);
+    
+    return uniqueRecs.slice(0, 3);
+    
+  } catch (error) {
+    console.error('Error generating hybrid recommendations:', error);
+    // Fallback to traditional method
+    return generateSeedlingRecommendations(sensorData, additionalContext);
+  }
+};
+
+// ============================================================================
+// MAIN ML RECOMMENDATION ALGORITHM (ORIGINAL)
+// ============================================================================
+
+/**
+ * Generate tree seedling recommendations using traditional algorithm
+ */
+export const generateSeedlingRecommendations = async (sensorData, additionalContext = {}) => {
+  try {
+    const { ph, soilMoisture, temperature, location } = sensorData;
+    const { 
+      season = 'moderate', 
+      useHistoricalLearning = false
+    } = additionalContext;
+    
+    if ([ph, soilMoisture, temperature].some(v => v === null || v === undefined || isNaN(v))) {
+      throw new Error('Invalid sensor data: pH, soilMoisture, and temperature are required');
+    }
+    
     const dataset = await loadTreeDataset();
     
     if (!dataset || dataset.length === 0) {
@@ -965,14 +1344,10 @@ export const generateSeedlingRecommendations = async (sensorData, additionalCont
     }
     
     console.log(`Analyzing ${dataset.length} tree species...`);
-    console.log(`Conditions: pH=${ph}, Moisture=${soilMoisture}%, Temp=${temperature}°C, Season=${season}`);
     
-    // Get seasonal adjustment factors
     const seasonalFactors = SEASONAL_FACTORS[season] || SEASONAL_FACTORS.moderate;
     
-    // Calculate compatibility scores for each tree
     const scoredTrees = await Promise.all(dataset.map(async tree => {
-      // Environmental compatibility with seasonal adjustments
       const pHScore = calculateRangeCompatibility(
         ph, 
         tree.pHMin, 
@@ -994,30 +1369,23 @@ export const generateSeedlingRecommendations = async (sensorData, additionalCont
         seasonalFactors.temperature
       );
       
-      // Success and adaptability factors
       const successFactor = tree.successRate / 100;
       const adaptabilityFactor = tree.adaptabilityScore / 100;
-      
-      // Native species bonus
       const nativeBonus = tree.isNative ? 0.1 : 0;
       
-      // Calculate weighted base confidence
       const baseConfidence = 
-        (pHScore * 0.25) +           // 25% weight
-        (moistureScore * 0.30) +     // 30% weight (most important)
-        (tempScore * 0.25) +         // 25% weight
-        (successFactor * 0.10) +     // 10% weight
-        (adaptabilityFactor * 0.10); // 10% weight
+        (pHScore * 0.25) +
+        (moistureScore * 0.30) +
+        (tempScore * 0.25) +
+        (successFactor * 0.10) +
+        (adaptabilityFactor * 0.10);
       
-      // Apply historical learning multiplier
       let historicalMultiplier = 1.0;
       if (useHistoricalLearning && location) {
         historicalMultiplier = await applyHistoricalLearning(tree.commonName, location);
       }
       
       const confidenceScore = Math.min(1, (baseConfidence + nativeBonus) * historicalMultiplier);
-      
-      // Calculate overall suitability score
       const overallScore = 
         (confidenceScore * 0.6) + 
         (successFactor * 0.2) + 
@@ -1035,59 +1403,48 @@ export const generateSeedlingRecommendations = async (sensorData, additionalCont
         growthRate: tree.growthRate,
         uses: tree.uses,
         
-        // Optimal conditions
         prefMoisture: tree.prefMoisture,
         prefpH: tree.prefpH,
         prefTemp: tree.prefTemp,
         
-        // Compatibility scores
         confidenceScore: Math.max(0.05, confidenceScore),
         pHCompatibility: pHScore,
         moistureCompatibility: moistureScore,
         tempCompatibility: tempScore,
         
-        // Native and bonuses
         isNative: tree.isNative,
         nativeBonus: nativeBonus,
         historicalMultiplier: historicalMultiplier,
         
-        // Range information
         moistureRange: `${tree.moistureMin.toFixed(1)}-${tree.moistureMax.toFixed(1)}%`,
         pHRange: `${tree.pHMin.toFixed(1)}-${tree.pHMax.toFixed(1)}`,
         tempRange: `${tree.tempMin.toFixed(1)}-${tree.tempMax.toFixed(1)}°C`,
         
-        // Overall score
         overallScore: overallScore,
         
-        // Context
         seasonalAdjustment: season,
-        adjustmentFactors: seasonalFactors
+        adjustmentFactors: seasonalFactors,
+        predictedBy: 'Traditional Algorithm'
       };
     }));
     
-    // Sort by multiple criteria
     const sortedTrees = scoredTrees.sort((a, b) => {
-      // Primary: Overall score
       const scoreDiff = b.overallScore - a.overallScore;
       if (Math.abs(scoreDiff) > 0.05) return scoreDiff;
       
-      // Secondary: Native preference
       if (a.isNative !== b.isNative) {
         return b.isNative ? 1 : -1;
       }
       
-      // Tertiary: Confidence
       const confDiff = b.confidenceScore - a.confidenceScore;
       if (Math.abs(confDiff) > 0.03) return confDiff;
       
-      // Quaternary: Success rate
       return b.successRate - a.successRate;
     });
     
-    // Get top 3 recommendations
     const topRecommendations = sortedTrees.slice(0, 3);
     
-    console.log('Top 3 recommendations:');
+    console.log('Traditional Algorithm Top 3 recommendations:');
     topRecommendations.forEach((tree, idx) => {
       console.log(
         `${idx + 1}. ${tree.commonName}: ` +
@@ -1110,8 +1467,7 @@ export const generateSeedlingRecommendations = async (sensorData, additionalCont
 // ============================================================================
 
 /**
- * Clear cached dataset (useful for forcing refresh)
- * @returns {boolean} Success status
+ * Clear cached dataset
  */
 export const clearDatasetCache = () => {
   console.log('Clearing dataset cache...');
@@ -1128,11 +1484,17 @@ export default {
   // Core functions
   loadTreeDataset,
   generateSeedlingRecommendations,
+  generateRFRecommendations,
+  generateHybridRecommendations,
   clearDatasetCache,
+  
+  // ML Models
+  trainRandomForestModel,
+  RandomForest,
   
   // Analysis functions
   analyzeSoilTrends,
-  getNearbySernsorsData,
+  getNearbySensorsData, // Fixed typo
   aggregateSensorData,
   getLocationPlantingHistory,
   ensureBiodiversity,

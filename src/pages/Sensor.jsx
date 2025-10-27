@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { ref, onValue } from 'firebase/database';
 import { rtdb, auth, firestore } from '../firebase.js';
+import { apiService } from '../services/api';
 import {
   collection,
   doc,
@@ -77,7 +78,7 @@ import {
   loadTreeDataset,
   generateSeedlingRecommendations,
   analyzeSoilTrends,
-  getNearbySernsorsData,
+  getNearbySensorsData,
   aggregateSensorData,
   getLocationPlantingHistory,
   ensureBiodiversity
@@ -499,132 +500,64 @@ function Sensors() {
   // ============================================================================
   // INITIALIZE DATA
   // ============================================================================
+  // In Sensors.js - Replace the entire data fetching
   useEffect(() => {
-    let unsubscribeSensors = null;
-
-    const initializeData = async () => {
+    const fetchSensorsAndLocations = async () => {
       setLoading(true);
-      setError(null);
-      
       try {
-        // Load locations first
-        const locationsData = await fetchLocations();
-        
-        // Listen to sensors
-        const sensorsRef = ref(rtdb, "sensors");
-        
-        unsubscribeSensors = onValue(
-          sensorsRef,
-          (sensorsSnap) => {
-            try {
-              const sensorsObj = sensorsSnap.val() || {};
-              console.log(`🔍 Found ${Object.keys(sensorsObj).length} sensors`);
+        const [sensorsData, locationsData] = await Promise.all([
+          apiService.getSensors(),
+          apiService.getLocations()
+        ]);
 
-              if (Object.keys(sensorsObj).length === 0) {
-                setSensors([]);
-                setLoading(false);
-                return;
-              }
+        // Create locations lookup map
+        const locationsMap = {};
+        locationsData.forEach(location => {
+          locationsMap[location.id] = location;
+        });
 
-              const sensorsArray = Object.entries(sensorsObj).map(([id, sensor]) => {
-                let locationName = "Unknown Location";
-                let locationRef = null;
-                let coordinates = null;
-                
-                // Parse location reference
-                if (sensor.sensor_location && typeof sensor.sensor_location === 'string') {
-                  locationRef = sensor.sensor_location;
-                  const locationParts = sensor.sensor_location.split('/');
-                  const locationId = locationParts[locationParts.length - 1];
-                  
-                  if (locationsData[locationId]) {
-                    const locationData = locationsData[locationId];
-                    locationName = locationData.location_name || "Unknown Location";
-                    
-                    const lat = parseFloat(locationData.location_latitude);
-                    const lon = parseFloat(locationData.location_longitude);
-                    
-                    if (!isNaN(lat) && !isNaN(lon)) {
-                      coordinates = { latitude: lat, longitude: lon };
-                    }
-                  } else {
-                    locationName = locationId;
-                  }
-                }
-                
-                // Process readings
-                const readingsObj = sensor.sensordata || {};
-                const readingsArr = Object.entries(readingsObj)
-                  .map(([rid, r]) => ({
-                    readingId: rid,
-                    ...r,
-                    timestamp: r.timestamp || null
-                  }))
-                  .sort((a, b) => {
-                    if (!a.timestamp) return 1;
-                    if (!b.timestamp) return -1;
-                    return new Date(b.timestamp) - new Date(a.timestamp);
-                  });
+        // Process sensors data
+        const processedSensors = sensorsData.map(sensor => {
+          const locationInfo = locationsMap[sensor.location_id];
+          
+          return {
+            id: sensor.id,
+            location: locationInfo?.location_name || 'Unknown Location',
+            locationRef: sensor.location_id ? `/locations/${sensor.location_id}` : null,
+            coordinates: sensor.latitude && sensor.longitude ? {
+              latitude: parseFloat(sensor.latitude),
+              longitude: parseFloat(sensor.longitude)
+            } : null,
+            status: sensor.sensor_status || "Unknown",
+            statusDescription: `Sensor is currently ${sensor.sensor_status || 'Unknown'}`,
+            lastCalibration: sensor.sensor_lastCalibrationDate || null,
+            
+            // Latest readings from backend
+            ph: sensor.latest_reading?.pH !== undefined ? parseFloat(sensor.latest_reading.pH) : "N/A",
+            soilMoisture: sensor.latest_reading?.soilMoisture !== undefined ? parseFloat(sensor.latest_reading.soilMoisture) : "N/A",
+            temperature: sensor.latest_reading?.temperature !== undefined ? parseFloat(sensor.latest_reading.temperature) : "N/A",
+            
+            // You'll need to implement sensor data fetching separately
+            readings: [], // This would require additional API call
+            timestamp: sensor.last_updated || null,
+            latestReadingId: null
+          };
+        });
 
-                const latest = readingsArr[0] || {};
-                
-                return {
-                  id,
-                  location: locationName,
-                  locationRef: locationRef,
-                  coordinates: coordinates,
-                  status: sensor.sensor_status || "Unknown",
-                  statusDescription: `Sensor is currently ${sensor.sensor_status || 'Unknown'}`,
-                  lastCalibration: sensor.sensor_lastCalibrationDate || null,
-                  
-                  // Latest readings
-                  ph: latest.pH !== undefined ? parseFloat(latest.pH) : "N/A",
-                  soilMoisture: latest.soilMoisture !== undefined ? parseFloat(latest.soilMoisture) : "N/A",
-                  temperature: latest.temperature !== undefined ? parseFloat(latest.temperature) : "N/A",
-                  
-                  readings: readingsArr,
-                  timestamp: latest.timestamp || null,
-                  latestReadingId: latest.readingId || null
-                };
-              });
-
-              console.log(`✅ Processed ${sensorsArray.length} sensors`);
-              setSensors(sensorsArray);
-              setLoading(false);
-              
-            } catch (processingError) {
-              console.error("❌ Error processing sensors:", processingError);
-              setError('Failed to process sensor data');
-              setLoading(false);
-              showNotification('Error processing sensor data', 'error');
-            }
-          },
-          (error) => {
-            console.error("❌ Error fetching sensors:", error);
-            setError('Failed to fetch sensor data');
-            setLoading(false);
-            showNotification('Failed to connect to sensor database', 'error');
-          }
-        );
+        setSensors(processedSensors);
+        setLocations(locationsMap);
 
       } catch (error) {
-        console.error("❌ Error initializing:", error);
-        setError('Failed to initialize application');
+        console.error("Error fetching data:", error);
+        setError('Failed to fetch sensor data');
+        showNotification('Error loading sensors', 'error');
+      } finally {
         setLoading(false);
-        showNotification('Application initialization failed', 'error');
       }
     };
 
-    initializeData();
-
-    // Cleanup
-    return () => {
-      if (unsubscribeSensors) {
-        unsubscribeSensors();
-      }
-    };
-  }, [fetchLocations, showNotification]);
-
+    fetchSensorsAndLocations();
+  }, [showNotification]);
   // ============================================================================
   // REFRESH HANDLER
   // ============================================================================
@@ -699,7 +632,7 @@ function Sensors() {
           );
           
           nearbySensorsData = await Promise.race([
-            getNearbySernsorsData(sensor.coordinates, 5),
+            getNearbySensorsData(sensor.coordinates, 5),
             timeout
           ]);
           

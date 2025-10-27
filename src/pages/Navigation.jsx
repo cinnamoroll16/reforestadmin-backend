@@ -21,28 +21,33 @@ import {
   Forest as ForestIcon,
 } from '@mui/icons-material';
 
-function Navigation({ mobileOpen, handleDrawerToggle, isMobile }) {
-  const navigate = useNavigate(); // ✅ Use React Router navigate
-  const location = useLocation(); // ✅ Use React Router location
+function Navigation({ mobileOpen, handleDrawerToggle, isMobile, user }) {
+  const navigate = useNavigate();
+  const location = useLocation();
 
-  // ✅ FIXED PATHS - all lowercase, matching your actual routes
-  const navItems = [
-    { text: 'Dashboard', icon: <HomeIcon />, path: '/' }, // ✅ Changed from /dashboard
-    { text: 'View Sensor', icon: <SensorsIcon />, path: '/sensors' }, // ✅ Changed from /sensor to /sensors (plural)
-    { text: 'Recommendation Logs', icon: <ListAltIcon />, path: '/recommendations' },
-    { text: 'Task', icon: <AssignmentIcon />, path: '/tasks' },
-    { text: 'Notification', icon: <NotificationsIcon />, path: '/notifications' },
+  // Get user role from user data
+  const userRole = user?.roleRef?.split('/').pop() || 'user';
+
+  // Base navigation items available to all users
+  const baseNavItems = [
+    { text: 'Dashboard', icon: <HomeIcon />, path: '/dashboard' },
+    { text: 'Sensors', icon: <SensorsIcon />, path: '/sensors' },
+    { text: 'Recommendations', icon: <ListAltIcon />, path: '/recommendations' },
+    { text: 'Planting Tasks', icon: <AssignmentIcon />, path: '/tasks' },
+    { text: 'Notifications', icon: <NotificationsIcon />, path: '/notifications' },
     { text: 'My Profile', icon: <PersonIcon />, path: '/profile' },
   ];
 
+  // You could later extend navigation items based on role if needed
+  const navItems = baseNavItems;
+
   const handleNavigation = (path) => {
-    navigate(path); // ✅ Use React Router navigation instead of window.location
+    navigate(path);
     if (isMobile) {
       handleDrawerToggle();
     }
   };
 
-  // ✅ Get current path from React Router
   const currentPath = location.pathname;
 
   const drawer = (
@@ -55,14 +60,15 @@ function Navigation({ mobileOpen, handleDrawerToggle, isMobile }) {
       </Toolbar>
       <List>
         {navItems.map((item) => (
-          <ListItem 
+          <ListItem
             key={item.text}
             disablePadding
             sx={{
-              backgroundColor: currentPath === item.path ? 'rgba(46, 125, 50, 0.1)' : 'transparent',
+              backgroundColor:
+                currentPath === item.path ? 'rgba(46, 125, 50, 0.1)' : 'transparent',
             }}
           >
-            <ListItemButton 
+            <ListItemButton
               onClick={() => handleNavigation(item.path)}
               selected={currentPath === item.path}
               sx={{
@@ -71,21 +77,21 @@ function Navigation({ mobileOpen, handleDrawerToggle, isMobile }) {
                   borderLeft: '4px solid #2e7d32',
                   '&:hover': {
                     backgroundColor: 'rgba(46, 125, 50, 0.2)',
-                  }
+                  },
                 },
                 '&:hover': {
                   backgroundColor: 'rgba(46, 125, 50, 0.08)',
-                }
+                },
               }}
             >
-              <ListItemIcon 
-                sx={{ 
-                  color: currentPath === item.path ? 'primary.main' : 'inherit' 
+              <ListItemIcon
+                sx={{
+                  color: currentPath === item.path ? 'primary.main' : 'inherit',
                 }}
               >
                 {item.icon}
               </ListItemIcon>
-              <ListItemText 
+              <ListItemText
                 primary={item.text}
                 primaryTypographyProps={{
                   fontWeight: currentPath === item.path ? 600 : 400,
@@ -100,10 +106,7 @@ function Navigation({ mobileOpen, handleDrawerToggle, isMobile }) {
   );
 
   return (
-    <Box
-      component="nav"
-      sx={{ width: { md: 240 }, flexShrink: { md: 0 } }}
-    >
+    <Box component="nav" sx={{ width: { md: 240 }, flexShrink: { md: 0 } }}>
       {isMobile ? (
         <Drawer
           variant="temporary"

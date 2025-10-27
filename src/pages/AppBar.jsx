@@ -14,12 +14,13 @@ import {
   Menu as MenuIcon,
   Notifications as NotificationsIcon,
   Person as PersonIcon,
-  Settings as SettingsIcon,
+  Logout as LogoutIcon,
 } from '@mui/icons-material';
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from "react-router-dom";
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { auth, firestore } from "../firebase.js";
+
+// Backend API URL
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
   const [anchorEl, setAnchorEl] = useState(null);
@@ -45,12 +46,6 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
     navigate("/profile");
   };
 
-  const handleSettings = () => {
-    handleMenuClose();
-    navigate("/settings");
-  };
-
-  // Navigate to notifications page
   const handleNotificationClick = () => {
     navigate("/notifications");
   };
@@ -62,53 +57,67 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
       case '/dashboard':
         return 'Dashboard';
       case '/sensors':
-        return 'Sensor Data';
+        return 'Sensors';
+      case '/locations':
+        return 'Locations';
+      case '/tree-seedlings':
+        return 'Tree Seedlings';
       case '/recommendations':
         return 'Recommendations';
-      case '/tasks':
+      case '/planting-tasks':
         return 'Planting Tasks';
       case '/notifications':
         return 'Notifications';
       case '/profile':
         return 'Profile';
-      case '/settings':
-        return 'Settings';
       default:
-        return 'Admin Dashboard';
+        return 'ReForest Dashboard';
     }
   };
 
-  // Fetch notification count from Firestore
+  // Fetch notification count from your backend API
   useEffect(() => {
-    const notificationsRef = collection(firestore, 'Notification');
-    const q = query(
-      notificationsRef,
-      where('status', '==', 'unread')
-    );
+    const fetchNotificationCount = async () => {
+      try {
+        const token = localStorage.getItem('token'); // Assuming you store JWT token
+        if (!token) return;
 
-    // Real-time listener for notification count
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      setNotificationCount(querySnapshot.size);
-    }, (error) => {
-      console.error('Error fetching notification count:', error);
-      setNotificationCount(0);
-    });
+        const response = await fetch(`${API_URL}/api/notifications/count/unread`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
 
-    // Cleanup subscription on unmount
-    return () => unsubscribe();
+        if (response.ok) {
+          const data = await response.json();
+          setNotificationCount(data.unreadCount || 0);
+        } else {
+          console.error('Failed to fetch notification count');
+          setNotificationCount(0);
+        }
+      } catch (error) {
+        console.error('Error fetching notification count:', error);
+        setNotificationCount(0);
+      }
+    };
+
+    fetchNotificationCount();
+
+    // Optional: Set up polling for real-time updates
+    const interval = setInterval(fetchNotificationCount, 30000); // Update every 30 seconds
+
+    return () => clearInterval(interval);
   }, []);
 
-  // Helper function to get user initials
+  // Helper function to get user initials from backend user data
   const getUserInitials = (user) => {
+    if (user?.user_firstname && user?.user_lastname) {
+      return `${user.user_firstname.charAt(0)}${user.user_lastname.charAt(0)}`.toUpperCase();
+    }
     if (user?.displayName) {
       const names = user.displayName.trim().split(' ');
-      if (names.length >= 2) {
-        return `${names[0].charAt(0)}${names[names.length - 1].charAt(0)}`.toUpperCase();
-      }
-      return names[0].charAt(0).toUpperCase();
-    }
-    if (user?.name) {
-      const names = user.name.trim().split(' ');
       if (names.length >= 2) {
         return `${names[0].charAt(0)}${names[names.length - 1].charAt(0)}`.toUpperCase();
       }
@@ -120,9 +129,27 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
     return 'U';
   };
 
-  // Helper function to get display name
+  // Helper function to get display name from backend user data
   const getDisplayName = (user) => {
-    return user?.displayName || user?.name || 'User';
+    if (user?.user_firstname && user?.user_lastname) {
+      return `${user.user_firstname} ${user.user_lastname}`;
+    }
+    return user?.displayName || user?.email || 'User';
+  };
+
+  // Helper function to get user role display name
+  const getUserRole = (user) => {
+    const role = user?.roleRef?.split('/').pop();
+    switch (role) {
+      case 'admin':
+        return 'Administrator';
+      case 'officer':
+        return 'DENR Officer';
+      case 'user':
+        return 'User';
+      default:
+        return 'User';
+    }
   };
 
   return (
@@ -131,6 +158,8 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
       sx={{
         width: { md: `calc(100% - 240px)` },
         ml: { md: `240px` },
+        backgroundColor: '#2e7d32',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
       }}
     >
       <Toolbar>
@@ -143,22 +172,19 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
         >
           <MenuIcon />
         </IconButton>
-        <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
+        <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1, fontWeight: 600 }}>
           {getCurrentPageTitle()}
         </Typography>
         
-        {/* Notifications Icon with Enhanced Badge */}
+        {/* Notifications Icon */}
         <IconButton 
           color="inherit" 
           onClick={handleNotificationClick}
           aria-label="notifications"
           sx={{ 
             mr: 1,
-            position: 'relative',
             '&:hover': {
               backgroundColor: 'rgba(255, 255, 255, 0.1)',
-              transform: 'scale(1.05)',
-              transition: 'all 0.2s ease-in-out'
             }
           }}
         >
@@ -167,90 +193,41 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
             color="error"
             max={99}
             showZero={false}
-            overlap="rectangular"
-            anchorOrigin={{
-              vertical: 'top',
-              horizontal: 'right',
-            }}
             sx={{
               '& .MuiBadge-badge': {
-                backgroundColor: '#ff3030',
+                backgroundColor: '#ff4444',
                 color: '#ffffff',
-                fontWeight: '700',
-                fontSize: '0.65rem',
-                minWidth: '18px',
-                height: '18px',
-                borderRadius: '50%',
-                border: '2px solid #ffffff',
-                boxShadow: '0 2px 8px rgba(255, 48, 48, 0.4), 0 0 0 2px rgba(255, 48, 48, 0.1)',
-                right: -2,
-                top: -2,
-                transform: 'scale(1)',
-                animation: notificationCount > 0 ? 'notification-pulse 2s ease-in-out infinite' : 'none',
-                '@keyframes notification-pulse': {
-                  '0%': {
-                    transform: 'scale(1)',
-                    boxShadow: '0 2px 8px rgba(255, 48, 48, 0.4), 0 0 0 2px rgba(255, 48, 48, 0.1)'
-                  },
-                  '50%': {
-                    transform: 'scale(1.1)',
-                    boxShadow: '0 4px 12px rgba(255, 48, 48, 0.6), 0 0 0 4px rgba(255, 48, 48, 0.2)'
-                  },
-                  '100%': {
-                    transform: 'scale(1)',
-                    boxShadow: '0 2px 8px rgba(255, 48, 48, 0.4), 0 0 0 2px rgba(255, 48, 48, 0.1)'
-                  },
-                },
-                '&::before': {
-                  content: '""',
-                  position: 'absolute',
-                  top: '-4px',
-                  left: '-4px',
-                  right: '-4px',
-                  bottom: '-4px',
-                  borderRadius: '50%',
-                  background: 'linear-gradient(45deg, rgba(255, 48, 48, 0.2), rgba(255, 100, 100, 0.1))',
-                  animation: notificationCount > 0 ? 'notification-glow 3s ease-in-out infinite' : 'none',
-                  zIndex: -1,
-                },
-                '@keyframes notification-glow': {
-                  '0%, 100%': {
-                    opacity: 0.3,
-                    transform: 'scale(1)'
-                  },
-                  '50%': {
-                    opacity: 0.7,
-                    transform: 'scale(1.2)'
-                  }
-                }
+                fontWeight: '600',
+                fontSize: '0.7rem',
+                minWidth: '20px',
+                height: '20px',
               }
             }}
           >
-            <NotificationsIcon 
-              sx={{ 
-                fontSize: '1.4rem',
-                filter: notificationCount > 0 ? 'drop-shadow(0 0 2px rgba(255, 255, 255, 0.3))' : 'none',
-                transition: 'all 0.3s ease'
-              }} 
-            />
+            <NotificationsIcon />
           </Badge>
         </IconButton>
         
-        {/* Avatar Icon - Click to open user menu */}
+        {/* User Menu */}
         <IconButton 
           color="inherit" 
-          sx={{ ml: 1 }}
           onClick={handleMenuOpen}
           aria-label="user menu"
+          sx={{ 
+            ml: 1,
+            '&:hover': {
+              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+            }
+          }}
         >
           <Avatar 
             sx={{ 
-              width: 32, 
-              height: 32,
-              bgcolor: 'secondary.main',
-              fontSize: '0.875rem'
+              width: 36, 
+              height: 36,
+              bgcolor: 'rgba(255, 255, 255, 0.2)',
+              fontSize: '0.9rem',
+              fontWeight: '600'
             }}
-            src={user?.photoURL} // Use profile picture if available
           >
             {getUserInitials(user)}
           </Avatar>
@@ -262,30 +239,36 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
           onClose={handleMenuClose}
           PaperProps={{
             sx: {
-              mt: 1,
-              minWidth: 200,
+              mt: 1.5,
+              minWidth: 220,
+              borderRadius: 2,
+              boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
             }
           }}
         >
           {/* User Info Header */}
-          <MenuItem disabled sx={{ opacity: 1 }}>
+          <MenuItem disabled sx={{ opacity: 1, py: 2 }}>
             <Avatar 
               sx={{ 
                 mr: 2, 
                 width: 40, 
                 height: 40,
-                bgcolor: 'secondary.main'
+                bgcolor: '#2e7d32',
+                fontSize: '1rem',
+                fontWeight: '600'
               }}
-              src={user?.photoURL}
             >
               {getUserInitials(user)}
             </Avatar>
             <div>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#1a1a1a' }}>
                 {getDisplayName(user)}
               </Typography>
+              <Typography variant="caption" color="text.secondary" display="block">
+                {getUserRole(user)}
+              </Typography>
               <Typography variant="caption" color="text.secondary">
-                {user?.email || 'user@example.com'}
+                {user?.email || user?.user_email}
               </Typography>
             </div>
           </MenuItem>
@@ -293,12 +276,16 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
           <Divider />
           
           {/* Menu Actions */}
-          <MenuItem onClick={handleProfile}>
-            <PersonIcon sx={{ mr: 2 }} />
-            Profile
+          <MenuItem onClick={handleProfile} sx={{ py: 1.5 }}>
+            <PersonIcon sx={{ mr: 2, fontSize: '1.2rem' }} />
+            <Typography variant="body2">My Profile</Typography>
           </MenuItem>
-          <MenuItem onClick={handleLogout} sx={{ color: 'error.main' }}>
-            Logout
+          
+          <Divider />
+          
+          <MenuItem onClick={handleLogout} sx={{ py: 1.5, color: '#d32f2f' }}>
+            <LogoutIcon sx={{ mr: 2, fontSize: '1.2rem' }} />
+            <Typography variant="body2" fontWeight="600">Logout</Typography>
           </MenuItem>
         </Menu>
       </Toolbar>

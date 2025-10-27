@@ -1,4 +1,4 @@
-// src/pages/Login.js
+// src/pages/Login.jsx - SIMPLIFIED VERSION
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -14,42 +14,53 @@ import {
   InputAdornment,
 } from '@mui/material';
 import { Visibility, VisibilityOff, Email, Lock } from '@mui/icons-material';
-import { Link as RouterLink, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext.js';
+import { Link as RouterLink, useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 const Login = () => {
   const navigate = useNavigate();
-  const { login, user, error, setError } = useAuth();
+  const location = useLocation();
+  const { login, user, error, loading, setError } = useAuth();
 
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+
+  // Check for success message from registration
+  useEffect(() => {
+    if (location.state?.message) {
+      setSuccessMessage(location.state.message);
+    }
+  }, [location.state]);
 
   useEffect(() => {
-    if (user) navigate('/dashboard');
+    if (user) {
+      console.log('✅ User authenticated, redirecting to dashboard');
+      navigate('/dashboard');
+    }
     setError('');
   }, [user, navigate, setError]);
 
   const handleChange = (e) => {
     setFormData((s) => ({ ...s, [e.target.name]: e.target.value }));
     if (error) setError('');
+    if (successMessage) setSuccessMessage('');
   };
 
   const handleSubmit = async (e) => {
-  e.preventDefault();
-  setLoading(true);
-  setError(''); // Clear previous errors
-  
-  const result = await login(formData.email, formData.password);
-  
-  if (result.success) {
-    navigate('/dashboard');
-  } else {
-    setError(result.error);
-  }
-  
-  setLoading(false);
-};
+    e.preventDefault();
+    setError('');
+    
+    // ✅ Use the AuthContext login function directly
+    const result = await login(formData.email, formData.password);
+    
+    if (result.success) {
+      console.log('✅ Login successful via AuthContext');
+      // The useEffect above will handle navigation when user state updates
+    } else {
+      console.error('❌ Login failed:', result.error);
+    }
+  };
 
   return (
     <Box
@@ -74,9 +85,6 @@ const Login = () => {
             bgcolor: '#f8f9fa',
             p: { xs: 3, md: 6 },
             minHeight: '100vh',
-            margin: 0,
-            width: '100%',
-            flex: 1,
           }}
         >
           <Paper
@@ -90,49 +98,31 @@ const Login = () => {
               alignItems: 'center',
               borderRadius: 3,
               bgcolor: '#ffffff',
-              margin: 0,
             }}
           >
-            <Typography 
-              variant="h4" 
-              fontWeight="600" 
-              align="center" 
-              gutterBottom
-              sx={{ color: '#1a1a1a', mb: 1 }}
-            >
+            <Typography variant="h4" fontWeight="600" align="center" gutterBottom>
               Welcome Back
             </Typography>
-            <Typography
-              variant="body1"
-              align="center"
-              color="text.secondary"
-              sx={{ mb: 4 }}
-            >
+            <Typography align="center" color="text.secondary" sx={{ mb: 4 }}>
               Sign in to your account
             </Typography>
 
+            {successMessage && (
+              <Alert severity="success" sx={{ mb: 3, width: '100%' }}>
+                {successMessage}
+              </Alert>
+            )}
+
             {error && (
-              <Alert 
-                severity="error" 
-                sx={{ 
-                  mb: 3, 
-                  width: '100%',
-                  borderRadius: 1
-                }}
-              >
+              <Alert severity="error" sx={{ mb: 3, width: '100%' }}>
                 {error}
               </Alert>
             )}
 
-            <Box
-              component="form"
-              onSubmit={handleSubmit}
-              sx={{ width: '100%' }}
-            >
+            <Box component="form" onSubmit={handleSubmit} sx={{ width: '100%' }}>
               <TextField
                 fullWidth
                 required
-                id="email"
                 label="Email Address"
                 name="email"
                 type="email"
@@ -140,19 +130,11 @@ const Login = () => {
                 autoFocus
                 value={formData.email}
                 onChange={handleChange}
+                disabled={loading}
                 InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Email fontSize="small" color="action" />
-                    </InputAdornment>
-                  ),
+                  startAdornment: <InputAdornment position="start"><Email /></InputAdornment>,
                 }}
-                sx={{ 
-                  mb: 3,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 1.5,
-                  }
-                }}
+                sx={{ mb: 3 }}
               />
 
               <TextField
@@ -161,50 +143,25 @@ const Login = () => {
                 name="password"
                 label="Password"
                 type={showPassword ? 'text' : 'password'}
-                id="password"
                 autoComplete="current-password"
                 value={formData.password}
                 onChange={handleChange}
+                disabled={loading}
                 InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Lock fontSize="small" color="action" />
-                    </InputAdornment>
-                  ),
+                  startAdornment: <InputAdornment position="start"><Lock /></InputAdornment>,
                   endAdornment: (
                     <InputAdornment position="end">
-                      <IconButton
-                        size="small"
-                        onClick={() => setShowPassword((s) => !s)}
-                        edge="end"
-                        aria-label="toggle password visibility"
-                      >
+                      <IconButton onClick={() => setShowPassword(!showPassword)} edge="end">
                         {showPassword ? <VisibilityOff /> : <Visibility />}
                       </IconButton>
                     </InputAdornment>
                   ),
                 }}
-                sx={{ 
-                  mb: 2,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 1.5,
-                  }
-                }}
+                sx={{ mb: 2 }}
               />
 
               <Box sx={{ textAlign: 'right', mb: 3 }}>
-                <Link 
-                  component={RouterLink} 
-                  to="/forgotpassword" 
-                  variant="body2"
-                  sx={{ 
-                    color: '#2e7d32',
-                    textDecoration: 'none',
-                    '&:hover': {
-                      textDecoration: 'underline'
-                    }
-                  }}
-                >
+                <Link component={RouterLink} to="/forgotpassword" variant="body2">
                   Forgot your password?
                 </Link>
               </Box>
@@ -216,18 +173,8 @@ const Login = () => {
                 disabled={loading}
                 sx={{
                   backgroundColor: '#2e7d32',
-                  '&:hover': { backgroundColor: '#1b5e20' },
-                  '&:disabled': { backgroundColor: '#a5d6a7' },
                   py: 1.5,
-                  borderRadius: 1.5,
-                  textTransform: 'none',
-                  fontSize: '16px',
-                  fontWeight: 600,
-                  boxShadow: 2,
-                  '&:hover': {
-                    backgroundColor: '#1b5e20',
-                    boxShadow: 4,
-                  }
+                  '&:hover': { backgroundColor: '#1b5e20' },
                 }}
               >
                 {loading ? 'Signing In...' : 'Sign In'}
@@ -236,18 +183,7 @@ const Login = () => {
               <Box sx={{ textAlign: 'center', mt: 3 }}>
                 <Typography variant="body2" color="text.secondary">
                   Don't have an account?{' '}
-                  <Link 
-                    component={RouterLink} 
-                    to="/register"
-                    sx={{ 
-                      color: '#2e7d32',
-                      textDecoration: 'none',
-                      fontWeight: 600,
-                      '&:hover': {
-                        textDecoration: 'underline'
-                      }
-                    }}
-                  >
+                  <Link component={RouterLink} to="/register" fontWeight="600">
                     Sign up
                   </Link>
                 </Typography>
@@ -268,7 +204,7 @@ const Login = () => {
             justifyContent: 'center',
             minHeight: '100vh',
             overflow: 'hidden',
-            width: '500%',
+            width: '100%', // Fixed from '500%' to '100%'
             flex: 1,
           }}
         >

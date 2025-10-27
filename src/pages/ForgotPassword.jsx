@@ -1,7 +1,6 @@
-// src/pages/ForgotPassword.js - Corrected version with consistent AuthContext usage
-import React, { useState, useEffect } from 'react';
+// src/pages/ForgotPassword.jsx - Updated to use Backend API
+import React, { useState } from 'react';
 import {
-  Container,
   Paper,
   TextField,
   Button,
@@ -17,41 +16,30 @@ import {
 } from '@mui/material';
 import { Email, CheckCircle, ArrowBack } from '@mui/icons-material';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext.js';
+import { useAuth } from '../context/AuthContext';
 
 const ForgotPassword = () => {
   const navigate = useNavigate();
-  const { 
-    resetPassword, 
-    loading: authLoading, 
-    error: authError, 
-    setError: clearAuthError,
-    user,
-    validateEmailFormat 
-  } = useAuth();
+  const { forgotPassword } = useAuth();
   
   const [formData, setFormData] = useState({ email: '' });
   const [success, setSuccess] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [fieldError, setFieldError] = useState('');
 
-  // Redirect if user is already logged in
-  useEffect(() => {
-    if (user && user.emailVerified) {
-      navigate('/dashboard');
-    }
-  }, [user, navigate]);
-
-  // Clear auth errors when component mounts
-  useEffect(() => {
-    clearAuthError();
-  }, [clearAuthError]);
+  // Email validation function
+  const validateEmailFormat = (email) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
     
     // Clear errors when user types
-    if (authError) clearAuthError();
+    if (error) setError('');
     if (fieldError) setFieldError('');
   };
 
@@ -75,7 +63,7 @@ const ForgotPassword = () => {
     e.preventDefault();
     
     // Clear previous errors
-    clearAuthError();
+    setError('');
     setFieldError('');
     
     // Validate form
@@ -84,16 +72,40 @@ const ForgotPassword = () => {
     }
 
     try {
-      await resetPassword(formData.email);
-      setSuccess(true);
+      setLoading(true);
+      console.log('📧 Sending password reset email to:', formData.email);
       
-      // Auto redirect after 8 seconds (longer than before to give user time to read)
-      setTimeout(() => {
-        navigate('/login');
-      }, 8000);
-    } catch (error) {
-      // Error is handled by AuthContext and displayed via authError
-      console.error('Password reset error:', error);
+      // Call API using the auth context
+      const result = await forgotPassword(formData.email);
+      
+      if (result.success) {
+        console.log('✅ Password reset email sent successfully');
+        setSuccess(true);
+        
+        // Auto redirect after 8 seconds
+        setTimeout(() => {
+          navigate('/login');
+        }, 8000);
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (err) {
+      console.error('❌ Forgot password error:', err);
+      
+      let errorMessage = 'Failed to send reset email. Please try again.';
+      
+      if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      // Check for specific errors
+      if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+        errorMessage = 'Cannot connect to server. Please check your connection.';
+      }
+      
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -103,7 +115,7 @@ const ForgotPassword = () => {
 
   const handleResendEmail = async () => {
     // Clear errors
-    clearAuthError();
+    setError('');
     setFieldError('');
     
     if (!validateForm()) {
@@ -111,12 +123,33 @@ const ForgotPassword = () => {
     }
 
     try {
-      await resetPassword(formData.email);
-      // Show success message without changing success state
-      clearAuthError(); // Clear any errors
-    } catch (error) {
-      // Error will be shown via authError
-      console.error('Resend email error:', error);
+      setLoading(true);
+      console.log('🔄 Resending password reset email to:', formData.email);
+      
+      const result = await forgotPassword(formData.email);
+      
+      if (result.success) {
+        console.log('✅ Password reset email resent successfully');
+        setError(''); // Clear any errors
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (err) {
+      console.error('❌ Resend error:', err);
+      
+      let errorMessage = 'Failed to resend email. Please try again.';
+      
+      if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+        errorMessage = 'Cannot connect to server. Please check your connection.';
+      }
+      
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -206,12 +239,26 @@ const ForgotPassword = () => {
                   If you don't see the email, check your spam folder.
                 </Alert>
 
+                {/* Error Alert for Resend */}
+                {error && (
+                  <Alert 
+                    severity="error" 
+                    sx={{ 
+                      mb: 3, 
+                      width: '100%',
+                      borderRadius: 2
+                    }}
+                  >
+                    {error}
+                  </Alert>
+                )}
+
                 {/* Resend Email Button */}
                 <Button
                   fullWidth
                   variant="outlined"
                   onClick={handleResendEmail}
-                  disabled={authLoading}
+                  disabled={loading}
                   sx={{
                     py: 1.5,
                     mb: 2,
@@ -224,10 +271,14 @@ const ForgotPassword = () => {
                     '&:hover': {
                       borderColor: '#1b5e20',
                       bgcolor: alpha('#2e7d32', 0.04),
+                    },
+                    '&:disabled': {
+                      borderColor: '#a5d6a7',
+                      color: '#a5d6a7',
                     }
                   }}
                 >
-                  {authLoading ? (
+                  {loading ? (
                     <CircularProgress size={20} color="inherit" />
                   ) : (
                     'Resend Email'
@@ -333,14 +384,14 @@ const ForgotPassword = () => {
                   fontWeight: 400,
                   maxWidth: 400,
                   mx: 'auto'
-                }}
-              >
-                Join us in restoring our planet, one tree at a time
-              </Typography>
-            </Box>
-          </Grid>
+              }}
+            >
+              Join us in restoring our planet, one tree at a time
+            </Typography>
+          </Box>
         </Grid>
-      </Box>
+      </Grid>
+    </Box>
     );
   }
 
@@ -401,7 +452,7 @@ const ForgotPassword = () => {
             </Typography>
 
             {/* Error Alerts */}
-            {authError && (
+            {error && (
               <Alert 
                 severity="error" 
                 sx={{ 
@@ -410,7 +461,7 @@ const ForgotPassword = () => {
                   borderRadius: 2
                 }}
               >
-                {authError}
+                {error}
               </Alert>
             )}
 
@@ -443,8 +494,8 @@ const ForgotPassword = () => {
                 autoFocus
                 value={formData.email}
                 onChange={handleChange}
-                disabled={authLoading}
-                error={!!fieldError || !!authError}
+                disabled={loading}
+                error={!!fieldError || !!error}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -464,10 +515,13 @@ const ForgotPassword = () => {
                 type="submit"
                 fullWidth
                 variant="contained"
-                disabled={authLoading || !formData.email.trim()}
+                disabled={loading || !formData.email.trim()}
                 sx={{
                   backgroundColor: '#2e7d32',
-                  '&:hover': { backgroundColor: '#1b5e20' },
+                  '&:hover': { 
+                    backgroundColor: '#1b5e20',
+                    boxShadow: 4,
+                  },
                   '&:disabled': { backgroundColor: '#a5d6a7' },
                   py: 1.5,
                   borderRadius: 1.5,
@@ -475,17 +529,13 @@ const ForgotPassword = () => {
                   fontSize: '16px',
                   fontWeight: 600,
                   boxShadow: 2,
-                  '&:hover': {
-                    backgroundColor: '#1b5e20',
-                    boxShadow: 4,
-                  }
                 }}
               >
-                {authLoading ? (
-                  <>
+                {loading ? (
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <CircularProgress size={20} color="inherit" sx={{ mr: 1 }} />
                     Sending Reset Email...
-                  </>
+                  </Box>
                 ) : (
                   'Send Reset Email'
                 )}
