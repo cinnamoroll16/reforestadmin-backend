@@ -1,6 +1,6 @@
-// src/pages/Sensors.js - Updated with Sensor History Grid
+// src/pages/Sensors.js - DEBUGGED AND UPDATED
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { ref, onValue } from 'firebase/database';
+import { ref, onValue, get } from 'firebase/database';
 import { rtdb, auth, firestore } from '../firebase.js';
 import { apiService } from '../services/api';
 import {
@@ -60,11 +60,9 @@ import {
   WaterDrop as WaterDropIcon,
   Science as pHIcon,
   Refresh as RefreshIcon,
-  CloudDownload as DownloadIcon,
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
   Timeline as TimelineIcon,
-  BubbleChart as BubbleChartIcon,
   Eco as EcoIcon,
   Info as InfoIcon,
   History as HistoryIcon
@@ -73,18 +71,21 @@ import ReForestAppBar from './AppBar.jsx';
 import Navigation from './Navigation.jsx';
 import { useNavigate } from 'react-router-dom';
 
-// Import ML functions from datasetLoader
-import {
-  loadTreeDataset,
-  generateSeedlingRecommendations,
-  analyzeSoilTrends,
-  getNearbySensorsData,
-  aggregateSensorData,
-  getLocationPlantingHistory,
-  ensureBiodiversity
-} from '../utils/datasetLoader.js';
-
 const drawerWidth = 240;
+
+// ============================================================================
+// BACKEND API CONFIGURATION
+// ============================================================================
+const BACKEND_CONFIG = {
+  BASE_URL: process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000/api',
+  ENDPOINTS: {
+    RECOMMENDATIONS: '/recommendations/generate',
+    SENSORS: '/sensors',
+    DATASET_STATS: '/recommendations/dataset/stats',
+    DATASET: '/dataset',
+    HEALTH: '/health'
+  }
+};
 
 // ============================================================================
 // VALIDATION SCHEMA
@@ -111,11 +112,17 @@ const validateSensorData = (sensorData) => {
   const errors = [];
   const warnings = [];
   
+  // Handle "N/A" values
+  if (ph === "N/A" || soilMoisture === "N/A" || temperature === "N/A") {
+    errors.push('Sensor data contains N/A values');
+    return { isValid: false, errors, warnings, hasWarnings: false };
+  }
+  
   Object.entries(SensorDataSchema).forEach(([field, rules]) => {
     const value = sensorData[field];
     
     // Check if required and valid
-    if (rules.required && (value === "N/A" || value === null || value === undefined)) {
+    if (rules.required && (value === null || value === undefined)) {
       errors.push(`${field} is missing or unavailable`);
       return;
     }
@@ -144,17 +151,43 @@ const validateSensorData = (sensorData) => {
   };
 };
 
-// Retry mechanism with exponential backoff
-const retryOperation = async (operation, maxRetries = 3, baseDelay = 1000) => {
-  for (let i = 0; i < maxRetries; i++) {
+// Backend API service
+const backendService = {
+  // Generate recommendations via backend
+  async generateRecommendations(sensorData, options = {}) {
     try {
-      return await operation();
-    } catch (error) {
-      if (i === maxRetries - 1) throw error;
+      console.log('Sending to backend:', { sensorData, options });
+      const response = await fetch(`${BACKEND_CONFIG.BASE_URL}${BACKEND_CONFIG.ENDPOINTS.RECOMMENDATIONS}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ sensorData, options })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('Backend response:', result);
+      return result;
       
-      const delay = baseDelay * Math.pow(2, i);
-      console.warn(`Operation failed, retrying in ${delay}ms... (${i + 1}/${maxRetries})`, error.message);
-      await new Promise(resolve => setTimeout(resolve, delay));
+    } catch (error) {
+      console.error('Backend API Error:', error);
+      throw new Error(`Backend service unavailable: ${error.message}`);
+    }
+  },
+
+  // Health check
+  async healthCheck() {
+    try {
+      const response = await fetch(`${BACKEND_CONFIG.BASE_URL}${BACKEND_CONFIG.ENDPOINTS.HEALTH}`);
+      return response.ok;
+    } catch (error) {
+      console.warn('Backend health check failed:', error.message);
+      return false;
     }
   }
 };
@@ -206,31 +239,6 @@ const getStatusIcon = (status) => {
 };
 
 // ============================================================================
-// TREND INDICATOR COMPONENT
-// ============================================================================
-const TrendIndicator = ({ trend, parameter }) => {
-  if (!trend || trend.r2 === undefined) return null;
-  
-  return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-      <Typography variant="caption" color="text.secondary">
-        {parameter}:
-      </Typography>
-      {trend.slope > 0.5 ? (
-        <Chip label="Rising" size="small" color="warning" icon={<TrendingUpIcon />} />
-      ) : trend.slope < -0.5 ? (
-        <Chip label="Falling" size="small" color="error" icon={<TrendingDownIcon />} />
-      ) : (
-        <Chip label="Stable" size="small" color="success" />
-      )}
-      <Typography variant="caption" color="text.secondary">
-        R²={trend.r2.toFixed(2)}
-      </Typography>
-    </Box>
-  );
-};
-
-// ============================================================================
 // SENSOR HISTORY GRID COMPONENT
 // ============================================================================
 const SensorHistoryGrid = ({ readings }) => {
@@ -261,27 +269,6 @@ const SensorHistoryGrid = ({ readings }) => {
     );
   }, [sortedReadings, historyPage, historyRowsPerPage]);
 
-  const getReadingQuality = (reading) => {
-    const validation = validateSensorData({
-      ph: reading.pH,
-      soilMoisture: reading.soilMoisture,
-      temperature: reading.temperature
-    });
-    
-    if (!validation.isValid) return 'error';
-    if (validation.hasWarnings) return 'warning';
-    return 'success';
-  };
-
-  const getQualityColor = (quality) => {
-    switch (quality) {
-      case 'success': return 'success.main';
-      case 'warning': return 'warning.main';
-      case 'error': return 'error.main';
-      default: return 'text.secondary';
-    }
-  };
-
   return (
     <Box sx={{ mt: 2 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
@@ -307,82 +294,39 @@ const SensorHistoryGrid = ({ readings }) => {
                   <TableCell align="center"><Typography variant="subtitle2" fontWeight="bold">pH</Typography></TableCell>
                   <TableCell align="center"><Typography variant="subtitle2" fontWeight="bold">Moisture (%)</Typography></TableCell>
                   <TableCell align="center"><Typography variant="subtitle2" fontWeight="bold">Temp (°C)</Typography></TableCell>
-                  <TableCell align="center"><Typography variant="subtitle2" fontWeight="bold">Quality</Typography></TableCell>
                   <TableCell><Typography variant="subtitle2" fontWeight="bold">Reading ID</Typography></TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {paginatedReadings.map((reading, index) => {
-                  const quality = getReadingQuality(reading);
-                  const qualityColor = getQualityColor(quality);
-                  
-                  return (
-                    <TableRow 
-                      key={reading.readingId || index}
-                      sx={{ 
-                        '&:last-child td, &:last-child th': { border: 0 },
-                        bgcolor: quality === 'error' ? 'error.light' : quality === 'warning' ? 'warning.light' : 'transparent'
-                      }}
-                    >
-                      <TableCell>
-                        <Typography variant="body2">
-                          {formatTimestamp(reading.timestamp)}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Typography 
-                          variant="body2" 
-                          sx={{ 
-                            color: reading.pH !== undefined && reading.pH >= SensorDataSchema.ph.optimal[0] && reading.pH <= SensorDataSchema.ph.optimal[1] 
-                              ? 'success.main' 
-                              : 'text.secondary',
-                            fontWeight: 'medium'
-                          }}
-                        >
-                          {formatValue(reading.pH)}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Typography 
-                          variant="body2"
-                          sx={{ 
-                            color: reading.soilMoisture !== undefined && reading.soilMoisture >= SensorDataSchema.soilMoisture.optimal[0] 
-                              ? 'success.main' 
-                              : 'text.secondary',
-                            fontWeight: 'medium'
-                          }}
-                        >
-                          {formatValue(reading.soilMoisture, '%')}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Typography 
-                          variant="body2"
-                          sx={{ 
-                            color: reading.temperature !== undefined && reading.temperature >= SensorDataSchema.temperature.optimal[0] && reading.temperature <= SensorDataSchema.temperature.optimal[1]
-                              ? 'success.main' 
-                              : 'text.secondary',
-                            fontWeight: 'medium'
-                          }}
-                        >
-                          {formatValue(reading.temperature, '°C')}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Chip
-                          label={quality === 'success' ? 'Good' : quality === 'warning' ? 'Warning' : 'Error'}
-                          color={quality === 'success' ? 'success' : quality === 'warning' ? 'warning' : 'error'}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="caption" color="text.secondary" fontFamily="monospace">
-                          {reading.readingId || `reading_${index}`}
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                {paginatedReadings.map((reading, index) => (
+                  <TableRow key={reading.readingId || index}>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {formatTimestamp(reading.timestamp)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Typography variant="body2">
+                        {formatValue(reading.pH)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Typography variant="body2">
+                        {formatValue(reading.soilMoisture, '%')}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Typography variant="body2">
+                        {formatValue(reading.temperature, '°C')}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="caption" color="text.secondary" fontFamily="monospace">
+                        {reading.readingId || `reading_${index}`}
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           </TableContainer>
@@ -395,7 +339,6 @@ const SensorHistoryGrid = ({ readings }) => {
             page={historyPage}
             onPageChange={handleHistoryPageChange}
             onRowsPerPageChange={handleHistoryRowsPerPageChange}
-            sx={{ borderTop: '1px solid', borderColor: 'divider' }}
           />
         </>
       )}
@@ -452,8 +395,10 @@ function Sensors() {
   // Modal State
   const [selectedSensor, setSelectedSensor] = useState(null);
   const [sensorDetailOpen, setSensorDetailOpen] = useState(false);
-  const [trendAnalysis, setTrendAnalysis] = useState(null);
   const [dialogTab, setDialogTab] = useState(0);
+  
+  // Backend State
+  const [backendStatus, setBackendStatus] = useState('checking');
   
   // Error/Notification State
   const [error, setError] = useState(null);
@@ -471,7 +416,99 @@ function Sensors() {
   };
 
   // ============================================================================
-  // FETCH LOCATIONS
+  // BACKEND HEALTH CHECK
+  // ============================================================================
+  useEffect(() => {
+    const checkBackendHealth = async () => {
+      try {
+        const isHealthy = await backendService.healthCheck();
+        setBackendStatus(isHealthy ? 'healthy' : 'unavailable');
+        
+        if (!isHealthy) {
+          console.warn('⚠️ Backend server is unavailable.');
+          showNotification('Backend server unavailable. ML recommendations will not work.', 'warning');
+        } else {
+          console.log('✅ Backend server is healthy');
+          showNotification('Backend server connected successfully', 'success');
+        }
+      } catch (error) {
+        setBackendStatus('unavailable');
+        console.error('Backend health check failed:', error);
+      }
+    };
+
+    checkBackendHealth();
+  }, [showNotification]);
+
+  // ============================================================================
+  // FETCH SENSORS FROM RTDB
+  // ============================================================================
+  const fetchSensorsFromRTDB = useCallback(async () => {
+    try {
+      console.log('📡 Fetching sensors from RTDB...');
+      const sensorsRef = ref(rtdb, 'sensors');
+      const snapshot = await get(sensorsRef);
+      
+      if (!snapshot.exists()) {
+        console.warn('No sensors found in RTDB');
+        return [];
+      }
+      
+      const sensorsData = snapshot.val();
+      const sensorsArray = [];
+      
+      // Convert RTDB object to array
+      Object.keys(sensorsData).forEach(sensorId => {
+        const sensor = sensorsData[sensorId];
+        const sensordata = sensor.sensordata || {};
+        
+        // Get all readings
+        const readings = [];
+        Object.keys(sensordata).forEach(readingId => {
+          const reading = sensordata[readingId];
+          readings.push({
+            ...reading,
+            readingId,
+            timestamp: reading.timestamp || new Date().toISOString()
+          });
+        });
+        
+        // Get latest reading
+        const latestReading = readings.length > 0 ? readings[0] : null;
+        
+        sensorsArray.push({
+          id: sensorId,
+          location_id: sensor.location_id,
+          latitude: sensor.latitude,
+          longitude: sensor.longitude,
+          sensor_status: sensor.sensor_status || 'active',
+          sensor_lastCalibrationDate: sensor.sensor_lastCalibrationDate,
+          coordinates: {
+            latitude: sensor.latitude,
+            longitude: sensor.longitude
+          },
+          // Current readings
+          ph: latestReading?.pH !== undefined ? parseFloat(latestReading.pH) : "N/A",
+          soilMoisture: latestReading?.soilMoisture !== undefined ? parseFloat(latestReading.soilMoisture) : "N/A",
+          temperature: latestReading?.temperature !== undefined ? parseFloat(latestReading.temperature) : "N/A",
+          // Historical data
+          readings: readings,
+          timestamp: latestReading?.timestamp || null,
+          latestReadingId: latestReading?.readingId || null
+        });
+      });
+      
+      console.log(`✅ Loaded ${sensorsArray.length} sensors from RTDB`);
+      return sensorsArray;
+      
+    } catch (error) {
+      console.error('❌ Error fetching sensors from RTDB:', error);
+      throw error;
+    }
+  }, []);
+
+  // ============================================================================
+  // FETCH LOCATIONS FROM FIRESTORE
   // ============================================================================
   const fetchLocations = useCallback(async () => {
     try {
@@ -488,7 +525,6 @@ function Sensors() {
       });
       
       console.log(`✅ Loaded ${Object.keys(locationsData).length} locations`);
-      setLocations(locationsData);
       return locationsData;
     } catch (error) {
       console.error('❌ Error fetching locations:', error);
@@ -500,64 +536,45 @@ function Sensors() {
   // ============================================================================
   // INITIALIZE DATA
   // ============================================================================
-  // In Sensors.js - Replace the entire data fetching
   useEffect(() => {
-    const fetchSensorsAndLocations = async () => {
+    const fetchData = async () => {
       setLoading(true);
       try {
         const [sensorsData, locationsData] = await Promise.all([
-          apiService.getSensors(),
-          apiService.getLocations()
+          fetchSensorsFromRTDB(),
+          fetchLocations()
         ]);
 
-        // Create locations lookup map
-        const locationsMap = {};
-        locationsData.forEach(location => {
-          locationsMap[location.id] = location;
-        });
-
-        // Process sensors data
+        // Process sensors with location information
         const processedSensors = sensorsData.map(sensor => {
-          const locationInfo = locationsMap[sensor.location_id];
+          const locationInfo = locationsData[sensor.location_id];
           
           return {
-            id: sensor.id,
-            location: locationInfo?.location_name || 'Unknown Location',
+            ...sensor,
+            location: locationInfo?.location_name || `Location ${sensor.location_id}`,
             locationRef: sensor.location_id ? `/locations/${sensor.location_id}` : null,
-            coordinates: sensor.latitude && sensor.longitude ? {
-              latitude: parseFloat(sensor.latitude),
-              longitude: parseFloat(sensor.longitude)
-            } : null,
             status: sensor.sensor_status || "Unknown",
             statusDescription: `Sensor is currently ${sensor.sensor_status || 'Unknown'}`,
             lastCalibration: sensor.sensor_lastCalibrationDate || null,
-            
-            // Latest readings from backend
-            ph: sensor.latest_reading?.pH !== undefined ? parseFloat(sensor.latest_reading.pH) : "N/A",
-            soilMoisture: sensor.latest_reading?.soilMoisture !== undefined ? parseFloat(sensor.latest_reading.soilMoisture) : "N/A",
-            temperature: sensor.latest_reading?.temperature !== undefined ? parseFloat(sensor.latest_reading.temperature) : "N/A",
-            
-            // You'll need to implement sensor data fetching separately
-            readings: [], // This would require additional API call
-            timestamp: sensor.last_updated || null,
-            latestReadingId: null
           };
         });
 
         setSensors(processedSensors);
-        setLocations(locationsMap);
+        setLocations(locationsData);
+        console.log(`🎯 Processed ${processedSensors.length} sensors with location data`);
 
       } catch (error) {
         console.error("Error fetching data:", error);
-        setError('Failed to fetch sensor data');
-        showNotification('Error loading sensors', 'error');
+        setError('Failed to fetch sensor data: ' + error.message);
+        showNotification('Error loading sensors: ' + error.message, 'error');
       } finally {
         setLoading(false);
       }
     };
 
-    fetchSensorsAndLocations();
-  }, [showNotification]);
+    fetchData();
+  }, [fetchSensorsFromRTDB, fetchLocations, showNotification]);
+
   // ============================================================================
   // REFRESH HANDLER
   // ============================================================================
@@ -566,10 +583,7 @@ function Sensors() {
     setError(null);
     
     try {
-      // Clear dataset cache
-      localStorage.removeItem('reforest_tree_dataset');
-      localStorage.removeItem('reforest_tree_dataset_expiry');
-      
+      await fetchSensorsFromRTDB();
       await fetchLocations();
       showNotification('Data refreshed successfully', 'success');
     } catch (error) {
@@ -581,169 +595,76 @@ function Sensors() {
   };
 
   // ============================================================================
-  // ML GENERATION WITH COMPLETE INTEGRATION
+  // BACKEND ML GENERATION
   // ============================================================================
   const handleGenerateML = async (sensor) => {
     const sensorId = sensor.id;
     
     try {
       setProcessingMLSensor(sensorId);
-      setMlProgress({ step: 'Initializing...', percent: 0 });
+      setMlProgress({ step: 'Initializing...', percent: 10 });
       
       const { ph, soilMoisture, temperature } = sensor;
       
       // ========== STEP 1: VALIDATION ==========
-      setMlProgress({ step: 'Validating sensor data...', percent: 10 });
+      setMlProgress({ step: 'Validating sensor data...', percent: 20 });
       
       const validation = validateSensorData({ ph, soilMoisture, temperature });
       
       if (!validation.isValid) {
-        throw new Error(`Invalid sensor data:\n${validation.errors.join('\n')}`);
+        throw new Error(`Invalid sensor data: ${validation.errors.join(', ')}`);
       }
       
       if (validation.hasWarnings) {
         showNotification(
-          `⚠️ Data warnings: ${validation.warnings.join('; ')}`,
+          `Data warnings: ${validation.warnings.join('; ')}`,
           'warning'
         );
       }
       
-      // ========== STEP 2: LOAD DATASET ==========
-      setMlProgress({ step: 'Loading tree species dataset...', percent: 20 });
+      // ========== STEP 2: PREPARE DATA FOR BACKEND ==========
+      setMlProgress({ step: 'Preparing data for ML processing...', percent: 30 });
       
-      const dataset = await retryOperation(async () => {
-        return await loadTreeDataset();
-      }, 3);
+      const sensorData = {
+        ph: parseFloat(ph),
+        soilMoisture: parseFloat(soilMoisture),
+        temperature: parseFloat(temperature),
+        location: sensor.location
+      };
       
-      if (!dataset || dataset.length === 0) {
-        throw new Error('Tree dataset is empty or unavailable');
+      const options = {
+        algorithm: 'hybrid',
+        useHistoricalLearning: true,
+        season: getCurrentSeason(),
+        coordinates: sensor.coordinates,
+        location: sensor.locationRef
+      };
+      
+      // ========== STEP 3: CALL BACKEND API ==========
+      setMlProgress({ step: 'Sending to ML backend...', percent: 50 });
+      
+      console.log('Calling backend with:', { sensorData, options });
+      const result = await backendService.generateRecommendations(sensorData, options);
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Backend processing failed');
       }
       
-      console.log(`📊 Loaded ${dataset.length} tree species`);
+      console.log('✅ Backend recommendations received:', result.recommendations);
       
-      // ========== STEP 3: NEARBY SENSORS (Optional) ==========
-      setMlProgress({ step: 'Analyzing nearby sensors...', percent: 30 });
-      
-      let nearbySensorsData = [];
-      if (sensor.coordinates) {
-        try {
-          const timeout = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout')), 5000)
-          );
-          
-          nearbySensorsData = await Promise.race([
-            getNearbySensorsData(sensor.coordinates, 5),
-            timeout
-          ]);
-          
-          console.log(`📡 Found ${nearbySensorsData.length} nearby sensors`);
-          
-          if (nearbySensorsData.length > 0) {
-            showNotification(
-              `Using ${nearbySensorsData.length} nearby sensor(s) for context`,
-              'info'
-            );
-          }
-        } catch (error) {
-          console.warn('⚠️ Nearby sensors unavailable:', error.message);
-          // Continue without nearby sensor data
-        }
-      }
-      
-      // ========== STEP 4: SOIL TRENDS (if enough data) ==========
-      setMlProgress({ step: 'Analyzing soil trends...', percent: 40 });
-      
-      let trends = null;
-      if (sensor.readings.length >= 7) {
-        try {
-          const trendAnalysis = analyzeSoilTrends(sensor.readings);
-          trends = trendAnalysis.trends;
-          
-          console.log('📈 Soil trends:', trends);
-          console.log('🎯 Trend confidence:', trendAnalysis.confidence);
-          
-          // Show alerts
-          if (trendAnalysis.alerts && trendAnalysis.alerts.length > 0) {
-            trendAnalysis.alerts.forEach(alert => {
-              showNotification(alert.message, alert.severity);
-            });
-          }
-          
-          setTrendAnalysis(trendAnalysis);
-        } catch (error) {
-          console.warn('⚠️ Trend analysis failed:', error.message);
-        }
-      } else {
-        console.log(`ℹ️ Only ${sensor.readings.length} readings. Need 7+ for trends.`);
-      }
-      
-      // ========== STEP 5: GENERATE RECOMMENDATIONS ==========
-      setMlProgress({ step: 'Generating ML recommendations...', percent: 50 });
-      
-      const recommendedTrees = await retryOperation(async () => {
-        return await generateSeedlingRecommendations(
-          {
-            ph: parseFloat(ph),
-            soilMoisture: parseFloat(soilMoisture),
-            temperature: parseFloat(temperature),
-            location: sensor.location
-          },
-          {
-            season: getCurrentSeason(),
-            elevation: 0,
-            coordinates: sensor.coordinates,
-            useHistoricalLearning: true
-          }
-        );
-      }, 3);
-      
-      if (!recommendedTrees || recommendedTrees.length === 0) {
-        throw new Error('No suitable tree species found for current conditions');
-      }
-      
-      console.log(`🌳 Generated ${recommendedTrees.length} recommendations`);
-      
-      // ========== STEP 6: BIODIVERSITY FILTER ==========
-      setMlProgress({ step: 'Applying biodiversity filter...', percent: 60 });
-      
-      let finalRecommendations = recommendedTrees;
-      
-      if (sensor.locationRef) {
-        try {
-          const existingSpecies = await getLocationPlantingHistory(sensor.locationRef);
-          
-          if (Object.keys(existingSpecies).length > 0) {
-            console.log('🌿 Existing species:', existingSpecies);
-            finalRecommendations = ensureBiodiversity(recommendedTrees, existingSpecies);
-            showNotification('Biodiversity analysis applied', 'info');
-          }
-        } catch (error) {
-          console.warn('⚠️ Planting history unavailable:', error.message);
-        }
-      }
-      
-      // ========== STEP 7: SAVE TO FIRESTORE ==========
+      // ========== STEP 4: SAVE TO FIRESTORE ==========
       setMlProgress({ step: 'Saving recommendations...', percent: 80 });
       
-      const avgConfidence = finalRecommendations.reduce((sum, tree) => 
-        sum + tree.confidenceScore, 0
-      ) / finalRecommendations.length;
-      
-      const sensorDataRef = `/sensors/${sensorId}/sensordata/${sensor.latestReadingId || 'latest'}`;
-
       const recommendationData = {
-        sensorDataRef,
-        locationRef: sensor.locationRef || `/locations/${sensor.location}`,
-        seedlingOptions: [],
-        reco_confidenceScore: parseFloat((avgConfidence * 100).toFixed(2)),
-        reco_generatedAt: new Date().toISOString(),
+        sensorId: sensorId,
+        locationId: sensor.location_id,
+        sensorData: sensorData,
+        recommendations: result.recommendations,
+        algorithm: result.algorithm,
+        confidenceScore: result.recommendations[0]?.confidenceScore || 0,
+        generatedAt: serverTimestamp(),
         season: getCurrentSeason(),
-        sensorConditions: {
-          ph: parseFloat(ph),
-          soilMoisture: parseFloat(soilMoisture),
-          temperature: parseFloat(temperature)
-        },
-        ...(trends && { soilTrends: trends })
+        backendProcessed: true
       };
 
       const recommendationsRef = collection(firestore, "recommendations");
@@ -751,58 +672,12 @@ function Sensors() {
       
       console.log(`💾 Recommendation saved: ${recoDocRef.id}`);
 
-      // ========== STEP 8: SAVE TREE SEEDLINGS ==========
-      setMlProgress({ step: 'Saving tree seedlings...', percent: 90 });
-      
-      const seedlingsRef = collection(firestore, "treeseedlings");
-      const allSeedlingsSnapshot = await getDocs(seedlingsRef);
-      
-      let maxIndex = 0;
-      allSeedlingsSnapshot.forEach(doc => {
-        const id = doc.id;
-        if (id.startsWith('ts')) {
-          const num = parseInt(id.replace('ts', ''), 10);
-          if (!isNaN(num) && num > maxIndex) maxIndex = num;
-        }
-      });
-
-      const seedlingOptions = [];
-
-      for (let i = 0; i < finalRecommendations.length; i++) {
-        const tree = finalRecommendations[i];
-        const tsId = `ts${String(maxIndex + i + 1).padStart(3, '0')}`;
-        const seedlingDocRef = doc(seedlingsRef, tsId);
-
-        await setDoc(seedlingDocRef, {
-          seedling_scientificName: tree.scientificName,
-          seedling_commonName: tree.commonName,
-          seedling_prefMoisture: parseFloat(tree.prefMoisture),
-          seedling_prefTemp: parseFloat(tree.prefTemp),
-          seedling_prefpH: parseFloat(tree.prefpH),
-          seedling_isNative: tree.isNative,
-          seedling_category: tree.category,
-          seedling_successRate: tree.successRate,
-          seedling_adaptabilityScore: tree.adaptabilityScore,
-          sourceRecommendationId: recoDocRef.id,
-          diversityScore: tree.diversityScore || 1.0,
-          existingInArea: tree.existingInArea || 0,
-          createdAt: serverTimestamp()
-        });
-
-        seedlingOptions.push(`/treeseedlings/${tsId}`);
-        
-        console.log(`🌱 Saved: ${tree.commonName} (${tsId})`);
-      }
-
-      // Update recommendation with seedling references
-      await updateDoc(recoDocRef, { seedlingOptions });
-
-      // ========== STEP 9: COMPLETE ==========
+      // ========== STEP 5: COMPLETE ==========
       setMlProgress({ step: 'Complete!', percent: 100 });
 
-      const topTree = finalRecommendations[0];
+      const topTree = result.recommendations[0];
       showNotification(
-        `✅ ML Complete! Top: ${topTree.commonName} (${(topTree.confidenceScore * 100).toFixed(1)}%)${topTree.isNative ? ' 🌿 Native' : ''}`,
+        `✅ ML Complete! Top recommendation: ${topTree.commonName} (${(topTree.confidenceScore * 100).toFixed(1)}% confidence)`,
         'success'
       );
 
@@ -818,10 +693,8 @@ function Sensors() {
       
       if (error.message.includes('Invalid sensor data')) {
         errorMessage += error.message;
-      } else if (error.message.includes('Excel') || error.message.includes('dataset')) {
-        errorMessage += 'Tree dataset unavailable. Ensure Tree_Seedling_Dataset.xlsx is in /public/data/ folder.';
-      } else if (error.message.includes('No suitable tree')) {
-        errorMessage += 'No trees match current conditions. Check sensor readings.';
+      } else if (error.message.includes('Backend service unavailable')) {
+        errorMessage += 'Backend server is unavailable. Please ensure the backend is running.';
       } else {
         errorMessage += error.message || 'Unknown error occurred.';
       }
@@ -848,26 +721,12 @@ function Sensors() {
   const handleSensorClick = (sensor) => {
     setSelectedSensor(sensor);
     setSensorDetailOpen(true);
-    setDialogTab(0); // Reset to first tab
-    
-    // Analyze trends if enough data
-    if (sensor.readings.length >= 7) {
-      try {
-        const analysis = analyzeSoilTrends(sensor.readings);
-        setTrendAnalysis(analysis);
-      } catch (error) {
-        console.warn('Trend analysis failed:', error);
-        setTrendAnalysis(null);
-      }
-    } else {
-      setTrendAnalysis(null);
-    }
+    setDialogTab(0);
   };
 
   const handleCloseSensorDetail = () => {
     setSensorDetailOpen(false);
     setSelectedSensor(null);
-    setTrendAnalysis(null);
     setDialogTab(0);
   };
 
@@ -881,6 +740,20 @@ function Sensors() {
   const displayedSensors = useMemo(() => {
     return sensors.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
   }, [sensors, page, rowsPerPage]);
+
+  // Backend status indicator
+  const getBackendStatusInfo = () => {
+    switch (backendStatus) {
+      case 'healthy':
+        return { color: 'success', text: 'Backend Connected', icon: <CheckCircleIcon /> };
+      case 'unavailable':
+        return { color: 'warning', text: 'Backend Unavailable', icon: <WarningIcon /> };
+      default:
+        return { color: 'info', text: 'Checking Backend...', icon: <InfoIcon /> };
+    }
+  };
+
+  const backendStatusInfo = getBackendStatusInfo();
 
   // ============================================================================
   // RENDER
@@ -905,15 +778,22 @@ function Sensors() {
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Box>
             <Typography variant="h4" sx={{ color: '#2e7d32', fontWeight: 600, mb: 1 }}>
-              ReForest Sensor  
+              ReForest Sensors
             </Typography>
             <Typography variant="body2" color="text.secondary">
               {sensors.length} sensor{sensors.length !== 1 ? 's' : ''} 
               {Object.keys(locations).length > 0 && ` • ${Object.keys(locations).length} locations`}
             </Typography>
           </Box>
-          <Box sx={{ display: 'flex', gap: 2 }}>
-            <Tooltip title="Refresh all data and clear cache">
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            <Chip
+              label={backendStatusInfo.text}
+              color={backendStatusInfo.color}
+              icon={backendStatusInfo.icon}
+              size="small"
+              variant={backendStatus === 'healthy' ? 'filled' : 'outlined'}
+            />
+            <Tooltip title="Refresh all data">
               <Button 
                 variant="outlined" 
                 onClick={handleRefresh} 
@@ -933,6 +813,13 @@ function Sensors() {
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
             {error}
+          </Alert>
+        )}
+
+        {/* Backend Status Warning */}
+        {backendStatus === 'unavailable' && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Backend server is unavailable. ML recommendations will not work. Please ensure the backend is running on {BACKEND_CONFIG.BASE_URL}.
           </Alert>
         )}
 
@@ -980,6 +867,8 @@ function Sensors() {
                       soilMoisture: sensor.soilMoisture,
                       temperature: sensor.temperature
                     });
+
+                    const canGenerateML = validation.isValid && backendStatus === 'healthy';
 
                     return (
                       <TableRow 
@@ -1064,9 +953,11 @@ function Sensors() {
                         </TableCell>
                         <TableCell align="center" onClick={(e) => e.stopPropagation()}>
                           <Tooltip title={
-                            !validation.isValid 
-                              ? `Cannot generate: ${validation.errors.join(', ')}`
-                              : "Generate ML recommendations with advanced analysis"
+                            !canGenerateML 
+                              ? backendStatus !== 'healthy' 
+                                ? 'Backend server unavailable' 
+                                : `Cannot generate: ${validation.errors.join(', ')}`
+                              : "Generate ML recommendations with backend processing"
                           }>
                             <span>
                               <Button 
@@ -1076,7 +967,7 @@ function Sensors() {
                                 disabled={
                                   processingMLSensor === sensor.id ||
                                   loading || 
-                                  !validation.isValid
+                                  !canGenerateML
                                 }
                                 sx={{ 
                                   minWidth: 100,
@@ -1118,7 +1009,6 @@ function Sensors() {
           onClose={handleCloseSensorDetail}
           maxWidth="lg"
           fullWidth
-          sx={{ '& .MuiDialog-paper': { minHeight: '70vh' } }}
         >
           <DialogTitle>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1204,43 +1094,6 @@ function Sensors() {
                       </Card>
                     </Grid>
 
-                    {/* Trend Analysis */}
-                    {trendAnalysis && trendAnalysis.trends && (
-                      <Grid item xs={12}>
-                        <Card variant="outlined">
-                          <CardContent>
-                            <Typography variant="subtitle2" gutterBottom>
-                              <TimelineIcon sx={{ fontSize: 16, verticalAlign: 'middle', mr: 0.5 }} />
-                              Soil Trend Analysis ({selectedSensor.readings.length} readings)
-                            </Typography>
-                            <Divider sx={{ my: 1 }} />
-                            <TrendIndicator trend={trendAnalysis.trends.moisture} parameter="Moisture" />
-                            <TrendIndicator trend={trendAnalysis.trends.ph} parameter="pH" />
-                            <TrendIndicator trend={trendAnalysis.trends.temperature} parameter="Temperature" />
-                            
-                            {trendAnalysis.alerts && trendAnalysis.alerts.length > 0 && (
-                              <Box sx={{ mt: 2 }}>
-                                <Typography variant="caption" color="text.secondary">Alerts:</Typography>
-                                <List dense>
-                                  {trendAnalysis.alerts.map((alert, idx) => (
-                                    <ListItem key={idx}>
-                                      <ListItemIcon>
-                                        <WarningIcon color={alert.severity} fontSize="small" />
-                                      </ListItemIcon>
-                                      <ListItemText 
-                                        primary={alert.message}
-                                        secondary={`Current: ${alert.currentValue}`}
-                                      />
-                                    </ListItem>
-                                  ))}
-                                </List>
-                              </Box>
-                            )}
-                          </CardContent>
-                        </Card>
-                      </Grid>
-                    )}
-
                     {/* Status */}
                     <Grid item xs={12}>
                       <Card variant="outlined">
@@ -1266,7 +1119,7 @@ function Sensors() {
 
                 {/* HISTORY TAB */}
                 <TabPanel value={dialogTab} index={1}>
-                  <SensorHistoryGrid readings={selectedSensor.readings} />
+                  <SensorHistoryGrid readings={selectedSensor.readings || []} />
                 </TabPanel>
               </>
             )}
@@ -1277,7 +1130,7 @@ function Sensors() {
               ph: selectedSensor.ph,
               soilMoisture: selectedSensor.soilMoisture,
               temperature: selectedSensor.temperature
-            }).isValid && (
+            }).isValid && backendStatus === 'healthy' && (
               <Button 
                 variant="contained" 
                 onClick={() => {
@@ -1311,6 +1164,11 @@ function Sensors() {
             <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
               {mlProgress.percent}% Complete
             </Typography>
+            {backendStatus === 'healthy' && (
+              <Typography variant="caption" color="primary" sx={{ mt: 1, display: 'block' }}>
+                Using backend ML processing
+              </Typography>
+            )}
           </DialogContent>
         </Dialog>
 

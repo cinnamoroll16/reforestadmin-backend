@@ -1,4 +1,4 @@
-// src/pages/Notification.jsx
+// src/pages/Notification.js - UPDATED FOR YOUR DATABASE STRUCTURE
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Button, Chip, Dialog, DialogTitle, DialogContent,
@@ -6,6 +6,9 @@ import {
   Badge, useMediaQuery, useTheme, Avatar, LinearProgress, alpha,
   Tabs, Tab
 } from '@mui/material';
+import { auth } from "../firebase.js";
+import { apiService } from '../services/api.js';
+import { useAuth } from '../context/AuthContext.js';
 import ReForestAppBar from './AppBar.jsx';
 import Navigation from './Navigation.jsx';
 import NotificationsIcon from '@mui/icons-material/Notifications';
@@ -17,28 +20,18 @@ import NewReleasesIcon from '@mui/icons-material/NewReleases';
 import DeleteIcon from '@mui/icons-material/Delete';
 import MarkAsReadIcon from '@mui/icons-material/DoneAll';
 import AssignmentIcon from '@mui/icons-material/Assignment';
-import { useAuth } from '../context/AuthContext';
-import { apiService } from '../services/api.js';
 
 const drawerWidth = 240;
 
 // =============================================================================
-// NOTIFICATION API SERVICE (FIXED - Proper parameter handling)
+// NOTIFICATION API SERVICE
 // =============================================================================
 
-export const notificationAPI = {
-  // Get all notifications - FIXED: Proper query parameter handling
+const notificationAPI = {
+  // Get notifications
   async getNotifications(filters = {}) {
     try {
-      // Build query string properly without duplicates
-      const queryParams = {};
-      if (filters.targetRole) queryParams.targetRole = filters.targetRole;
-      if (filters.read !== undefined) queryParams.read = filters.read;
-      if (filters.resolved !== undefined) queryParams.resolved = filters.resolved;
-
-      const queryString = new URLSearchParams(queryParams).toString();
-      const notifications = await apiService.getNotifications(queryString);
-      return notifications;
+      return await apiService.getNotifications(filters);
     } catch (error) {
       console.error('Error fetching notifications:', error);
       throw error;
@@ -59,21 +52,10 @@ export const notificationAPI = {
   // Mark notification as read
   async markAsRead(notificationId) {
     try {
-      const result = await apiService.updateNotification(notificationId, { read: true });
+      const result = await apiService.markNotificationAsRead(notificationId);
       return result;
     } catch (error) {
       console.error('Error marking notification as read:', error);
-      throw error;
-    }
-  },
-
-  // Mark notification as resolved
-  async markAsResolved(notificationId) {
-    try {
-      const result = await apiService.updateNotification(notificationId, { resolved: true });
-      return result;
-    } catch (error) {
-      console.error('Error resolving notification:', error);
       throw error;
     }
   },
@@ -91,42 +73,53 @@ export const notificationAPI = {
 };
 
 // =============================================================================
-// PLANTING REQUESTS API SERVICE (FIXED - Proper parameter handling)
+// PLANTING REQUESTS API SERVICE (UPDATED FOR YOUR DATA STRUCTURE)
 // =============================================================================
 
-export const plantingRequestsAPI = {
-  // Get all planting requests - FIXED: Proper query parameter handling
+const plantingRequestsAPI = {
+  // Get all planting requests - UPDATED for your data structure
   async getPlantingRequests(filters = {}) {
     try {
-      // Build query string properly without duplicates
-      const queryParams = {};
-      if (filters.status) queryParams.status = filters.status;
-      if (filters.userId) queryParams.userId = filters.userId;
-
-      const queryString = new URLSearchParams(queryParams).toString();
-      const requests = await apiService.getPlantingRequests(queryString);
+      const requests = await apiService.getPlantingRequests(filters);
       return requests;
     } catch (error) {
       console.error('Error fetching planting requests:', error);
+      
+      // For development, return mock data if API fails
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Using mock planting requests data for development');
+        return this.getMockPlantingRequests();
+      }
       throw error;
     }
   },
 
-  // Get planting request by ID
-  async getPlantingRequestById(requestId) {
-    try {
-      const request = await apiService.getPlantingRequest(requestId);
-      return request;
-    } catch (error) {
-      console.error('Error fetching planting request:', error);
-      throw error;
-    }
+  // Mock data that matches your structure
+  getMockPlantingRequests() {
+    return [
+      {
+        id: 'HSAtJSrtmnEza45l43YZ',
+        requestId: 'HSAtJSrtmnEza45l43YZ',
+        fullName: 'Adriane Racaza',
+        locationRef: '/locations/Candyman',
+        preferred_date: '2025-10-31',
+        request_date: '2025-10-23T00:00:00.000Z',
+        request_notes: 'Requesting seedlings for Candyman site.',
+        request_status: 'pending',
+        reviewedAt: null,
+        reviewedBy: null,
+        userRef: '/users/hasS8FBp66XIkf42m1C2EfaAocc2'
+      }
+    ];
   },
 
   // Update planting request status
-  async updatePlantingRequestStatus(requestId, status) {
+  async updatePlantingRequestStatus(requestId, status, reviewedBy = null) {
     try {
-      const result = await apiService.updatePlantingRequestStatus(requestId, { status });
+      const result = await apiService.updatePlantingRequestStatus(requestId, {
+        status: status,
+        reviewedBy: reviewedBy
+      });
       return result;
     } catch (error) {
       console.error('Error updating planting request:', error);
@@ -152,8 +145,7 @@ export const createPlantRequestNotification = async (plantRequestData, plantRequ
         userRef: plantRequestData.userRef,
         locationRef: plantRequestData.locationRef,
         preferredDate: plantRequestData.preferred_date,
-        createdBy: plantRequestData.createdBy,
-        requestStatus: 'pending'
+        requestStatus: plantRequestData.request_status || 'pending'
       },
       targetRole: 'admin',
       read: false,
@@ -192,7 +184,7 @@ export const hideNotification = async (notificationId) => {
 };
 
 // =============================================================================
-// MAIN COMPONENT (FIXED - Proper error handling and parameter passing)
+// MAIN COMPONENT (UPDATED FOR YOUR DATA STRUCTURE)
 // =============================================================================
 
 const NotificationPanel = () => {
@@ -223,71 +215,45 @@ const NotificationPanel = () => {
     setActiveTab(newValue);
   };
 
-  // Helper function to resolve location reference via API
-  const resolveLocationRef = async (locationRef) => {
+  // Helper function to extract location name from locationRef
+  const getLocationName = (locationRef) => {
     if (!locationRef) return 'Unknown Location';
     
-    try {
-      // If it's a string path like "/locations/abc123"
-      if (typeof locationRef === 'string') {
-        const locationId = locationRef.split('/').pop();
-        const locationData = await apiService.getLocation(locationId);
-        if (locationData) {
-          return locationData.location_name || locationData.name || 'Unknown Location';
-        }
-      }
-      // If it's a direct ID
-      else if (typeof locationRef === 'string' && locationRef.length > 0) {
-        const locationData = await apiService.getLocation(locationRef);
-        if (locationData) {
-          return locationData.location_name || locationData.name || 'Unknown Location';
-        }
-      }
-    } catch (error) {
-      console.error('Error resolving location:', error);
+    // If it's a path like "/locations/Candyman", extract "Candyman"
+    if (typeof locationRef === 'string' && locationRef.includes('/')) {
+      const parts = locationRef.split('/');
+      return parts[parts.length - 1] || 'Unknown Location';
     }
     
-    return 'Unknown Location';
+    return locationRef || 'Unknown Location';
   };
 
-  // Helper function to resolve user reference via API
-  const resolveUserRef = async (userRef) => {
-    if (!userRef) return { name: 'Unknown User', email: 'N/A' };
+  // Convert timestamp helper
+  const convertTimestamp = (timestamp) => {
+    if (!timestamp) return null;
     
-    try {
-      // If it's a string path like "/users/abc123"
-      if (typeof userRef === 'string') {
-        const userId = userRef.split('/').pop();
-        const userData = await apiService.getUser(userId);
-        if (userData) {
-          return {
-            name: `${userData.user_Firstname || userData.firstName || ''} ${userData.user_Lastname || userData.lastName || ''}`.trim() || 'Unknown User',
-            email: userData.user_email || userData.email || 'N/A'
-          };
-        }
-      }
-      // If it's a direct ID
-      else if (typeof userRef === 'string' && userRef.length > 0) {
-        const userData = await apiService.getUser(userRef);
-        if (userData) {
-          return {
-            name: `${userData.user_Firstname || userData.firstName || ''} ${userData.user_Lastname || userData.lastName || ''}`.trim() || 'Unknown User',
-            email: userData.user_email || userData.email || 'N/A'
-          };
-        }
-      }
-    } catch (error) {
-      console.error('Error resolving user:', error);
+    // Handle Firestore timestamp format
+    if (timestamp._seconds !== undefined) {
+      return new Date(timestamp._seconds * 1000);
     }
     
-    return { name: 'Unknown User', email: 'N/A' };
+    // Handle ISO string
+    if (typeof timestamp === 'string') {
+      return new Date(timestamp);
+    }
+    
+    // Handle Date object
+    if (timestamp instanceof Date) {
+      return timestamp;
+    }
+    
+    return null;
   };
 
-  // Fetch notifications from API - FIXED: Proper parameter passing
+  // Fetch notifications from API
   const fetchNotifications = async () => {
     try {
       console.log('🔔 Fetching notifications from API...');
-      // FIXED: Pass parameters correctly without duplication
       const notificationsData = await notificationAPI.getNotifications({ 
         targetRole: 'admin' 
       });
@@ -306,7 +272,6 @@ const NotificationPanel = () => {
         };
       });
 
-      // Filter out hidden notifications and sort by timestamp
       const visibleNotifications = processedNotifications
         .filter(notification => notification.hidden !== true)
         .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
@@ -323,38 +288,41 @@ const NotificationPanel = () => {
     }
   };
 
-  // Fetch planting requests from API - FIXED: Proper parameter passing
+  // Fetch planting requests from API - UPDATED for your data structure
   const fetchPlantingRequests = async () => {
     try {
       console.log('📋 Fetching planting requests from API...');
-      // FIXED: Pass parameters correctly without duplication
       const requestsData = await plantingRequestsAPI.getPlantingRequests({ 
         status: 'pending' 
       });
       
-      // Process all requests and resolve references
-      const requestsPromises = requestsData.map(async (request) => {
-        // Resolve user and location references
-        const userInfo = await resolveUserRef(request.userRef || request.userId);
-        const locationName = await resolveLocationRef(request.locationRef || request.locationId);
+      console.log('Raw planting requests data:', requestsData);
+      
+      // Process requests to match the expected frontend structure
+      const processedRequests = requestsData.map(request => {
+        const requestDate = convertTimestamp(request.request_date);
+        const reviewedAt = convertTimestamp(request.reviewedAt);
         
         return {
-          id: request.id,
-          ...request,
-          fullName: userInfo.name,
-          createdBy: userInfo.email,
-          locationName: locationName,
-          request_date: convertTimestamp(request.request_date || request.createdAt),
-          approvedAt: convertTimestamp(request.approvedAt),
-          rejectedAt: convertTimestamp(request.rejectedAt),
-          submittedAt: convertTimestamp(request.submittedAt || request.createdAt)
+          id: request.id || request.requestId,
+          requestId: request.requestId,
+          fullName: request.fullName,
+          locationRef: request.locationRef,
+          locationName: getLocationName(request.locationRef),
+          preferred_date: request.preferred_date,
+          request_date: requestDate,
+          request_notes: request.request_notes,
+          request_status: request.request_status,
+          requestStatus: request.request_status, // Add both for compatibility
+          reviewedAt: reviewedAt,
+          reviewedBy: request.reviewedBy,
+          userRef: request.userRef,
+          createdBy: request.userRef ? `User: ${request.userRef.split('/').pop()}` : 'Unknown User'
         };
       });
       
-      const allRequests = await Promise.all(requestsPromises);
-      
-      console.log(`✓ Retrieved ${allRequests.length} pending requests via API`);
-      setPlantingRequests(allRequests);
+      console.log(`✓ Processed ${processedRequests.length} planting requests`);
+      setPlantingRequests(processedRequests);
     } catch (error) {
       console.error('❌ Error fetching planting requests via API:', error);
       setAlert({
@@ -363,28 +331,6 @@ const NotificationPanel = () => {
         severity: 'error'
       });
     }
-  };
-
-  // Convert timestamp helper
-  const convertTimestamp = (timestamp) => {
-    if (!timestamp) return null;
-    
-    // Handle Firestore timestamp format from backend
-    if (timestamp._seconds !== undefined) {
-      return new Date(timestamp._seconds * 1000);
-    }
-    
-    // Handle ISO string
-    if (typeof timestamp === 'string') {
-      return new Date(timestamp);
-    }
-    
-    // Handle Date object
-    if (timestamp instanceof Date) {
-      return timestamp;
-    }
-    
-    return null;
   };
 
   // Fetch all data
@@ -407,16 +353,15 @@ const NotificationPanel = () => {
     }
   };
 
-  // FIXED: Proper useEffect with cleanup
+  // Data fetching effect
   useEffect(() => {
     let pollInterval;
 
     const setupData = async () => {
       try {
-        // Initial fetch of data
         await fetchDashboardData();
 
-        // Start polling for data - every 30 seconds instead of 10 to reduce load
+        // Start polling for data
         pollInterval = setInterval(() => {
           fetchNotifications();
           fetchPlantingRequests();
@@ -435,13 +380,33 @@ const NotificationPanel = () => {
 
     setupData();
 
-    // Cleanup function
     return () => {
       if (pollInterval) {
         clearInterval(pollInterval);
       }
     };
-  }, []); // Empty dependency array since we only want this to run once on mount
+  }, []);
+
+  // Action handlers for planting requests
+  const handleApproveRequest = async (requestId) => {
+    try {
+      await plantingRequestsAPI.updatePlantingRequestStatus(requestId, 'approved', user?.email || 'Admin');
+      setAlert({ open: true, message: 'Planting request approved', severity: 'success' });
+      fetchPlantingRequests(); // Refresh the list
+    } catch (error) {
+      setAlert({ open: true, message: 'Error approving request', severity: 'error' });
+    }
+  };
+
+  const handleRejectRequest = async (requestId) => {
+    try {
+      await plantingRequestsAPI.updatePlantingRequestStatus(requestId, 'rejected', user?.email || 'Admin');
+      setAlert({ open: true, message: 'Planting request rejected', severity: 'success' });
+      fetchPlantingRequests(); // Refresh the list
+    } catch (error) {
+      setAlert({ open: true, message: 'Error rejecting request', severity: 'error' });
+    }
+  };
 
   const handleViewDetails = (request) => {
     setSelectedRequest(request);
@@ -571,6 +536,7 @@ const NotificationPanel = () => {
   const unreadCount = notifications.filter(n => !n.read).length;
   const pendingCount = plantingRequests.length;
 
+  // Loading state
   if (loading) {
     return (
       <Box sx={{ display: 'flex', bgcolor: '#f8fafc', minHeight: '100vh' }}>
@@ -691,6 +657,7 @@ const NotificationPanel = () => {
     </Paper>
   );
 
+  // Updated RequestRow with action buttons
   const RequestRow = ({ request }) => (
     <Paper 
       sx={{ 
@@ -709,7 +676,7 @@ const NotificationPanel = () => {
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <Avatar sx={{ bgcolor: '#2e7d32', width: 40, height: 40 }}>
-            {(request.fullName || 'U').charAt(0)}
+            {(request.fullName || 'U').charAt(0).toUpperCase()}
           </Avatar>
           
           <Box>
@@ -726,24 +693,44 @@ const NotificationPanel = () => {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <LocationOnIcon fontSize="small" color="action" />
             <Typography variant="body2">
-              {request.locationName || 'Unknown Location'}
+              {request.locationName || getLocationName(request.locationRef)}
             </Typography>
           </Box>
           
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <CalendarTodayIcon fontSize="small" color="action" />
             <Typography variant="body2">
-              {typeof request.preferred_date === 'string' 
-                ? request.preferred_date 
-                : formatDate(request.preferred_date)}
+              {request.preferred_date || 'No date specified'}
             </Typography>
           </Box>
           
           <Chip 
-            label={request.requestStatus || request.request_status || 'pending'} 
-            color={getStatusColor(request.requestStatus || request.request_status || 'pending')}
+            label={request.request_status || 'pending'} 
+            color={getStatusColor(request.request_status || 'pending')}
             size="small"
           />
+        </Box>
+
+        {/* Action Buttons */}
+        <Box sx={{ display: 'flex', gap: 1 }} onClick={(e) => e.stopPropagation()}>
+          <Button
+            variant="contained"
+            color="success"
+            size="small"
+            startIcon={<CheckCircleIcon />}
+            onClick={() => handleApproveRequest(request.id)}
+          >
+            Approve
+          </Button>
+          <Button
+            variant="outlined"
+            color="error"
+            size="small"
+            startIcon={<CancelIcon />}
+            onClick={() => handleRejectRequest(request.id)}
+          >
+            Reject
+          </Button>
         </Box>
       </Box>
     </Paper>
@@ -759,6 +746,57 @@ const NotificationPanel = () => {
         {description}
       </Typography>
     </Paper>
+  );
+
+  // Updated Detail Dialog Content
+  const DetailDialogContent = ({ request }) => (
+    <Grid container spacing={2} sx={{ mt: 1 }}>
+      <Grid item xs={12} md={6}>
+        <Typography variant="subtitle2" color="text.secondary">Requester Information</Typography>
+        <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+          <Typography><strong>Name:</strong> {request.fullName || 'Unknown User'}</Typography>
+          <Typography><strong>User Reference:</strong> {request.userRef || 'N/A'}</Typography>
+          <Typography><strong>Request ID:</strong> {request.requestId || request.id}</Typography>
+        </Box>
+      </Grid>
+      <Grid item xs={12} md={6}>
+        <Typography variant="subtitle2" color="text.secondary">Location Information</Typography>
+        <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+          <Typography><strong>Location:</strong> {request.locationName || getLocationName(request.locationRef)}</Typography>
+          <Typography><strong>Location Reference:</strong> {request.locationRef || 'N/A'}</Typography>
+        </Box>
+      </Grid>
+      <Grid item xs={12}>
+        <Typography variant="subtitle2" color="text.secondary">Request Details</Typography>
+        <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+          <Typography>
+            <strong>Preferred Date:</strong> {request.preferred_date || 'N/A'}
+          </Typography>
+          <Typography>
+            <strong>Submitted At:</strong> {formatDateTime(request.request_date) || 'N/A'}
+          </Typography>
+          <Typography>
+            <strong>Status:</strong> 
+            <Chip 
+              label={request.request_status || 'pending'} 
+              color={getStatusColor(request.request_status || 'pending')}
+              size="small"
+              sx={{ ml: 1 }}
+            />
+          </Typography>
+          {request.request_notes && (
+            <Typography sx={{ mt: 1 }}>
+              <strong>Notes:</strong> {request.request_notes}
+            </Typography>
+          )}
+          {request.reviewedBy && (
+            <Typography sx={{ mt: 1 }}>
+              <strong>Reviewed By:</strong> {request.reviewedBy} at {formatDateTime(request.reviewedAt)}
+            </Typography>
+          )}
+        </Box>
+      </Grid>
+    </Grid>
   );
 
   return (
@@ -919,7 +957,7 @@ const NotificationPanel = () => {
         {activeTab === 1 && (
           <>
             <Typography variant="h6" sx={{ color: '#2e7d32', fontWeight: 600, mb: 2 }}>
-              Planting Requests
+              Planting Requests ({pendingCount} pending)
             </Typography>
 
             {plantingRequests.length === 0 ? (
@@ -938,57 +976,38 @@ const NotificationPanel = () => {
           </>
         )}
 
-        {/* Detail Dialog */}
+        {/* Updated Detail Dialog */}
         <Dialog open={detailDialogOpen} onClose={() => setDetailDialogOpen(false)} maxWidth="md" fullWidth>
           <DialogTitle>Planting Request Details</DialogTitle>
           <DialogContent>
-            {selectedRequest && (
-              <Grid container spacing={2} sx={{ mt: 1 }}>
-                <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle2" color="text.secondary">Requester Information</Typography>
-                  <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
-                    <Typography><strong>Name:</strong> {selectedRequest.fullName || 'Unknown User'}</Typography>
-                    <Typography><strong>Email:</strong> {selectedRequest.createdBy || 'N/A'}</Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle2" color="text.secondary">Location Information</Typography>
-                  <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
-                    <Typography><strong>Location:</strong> {selectedRequest.locationName || 'Unknown Location'}</Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={12}>
-                  <Typography variant="subtitle2" color="text.secondary">Request Details</Typography>
-                  <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
-                    <Typography>
-                      <strong>Preferred Date:</strong>{' '}
-                      {typeof selectedRequest.preferred_date === 'string' 
-                        ? selectedRequest.preferred_date 
-                        : formatDate(selectedRequest.preferred_date) || 'N/A'}
-                    </Typography>
-                    <Typography>
-                      <strong>Submitted At:</strong>{' '}
-                      {formatDateTime(selectedRequest.request_date) || 'N/A'}
-                    </Typography>
-                    <Typography>
-                      <strong>Status:</strong> 
-                      <Chip 
-                        label={selectedRequest.requestStatus || selectedRequest.request_status || 'pending'} 
-                        color={getStatusColor(selectedRequest.requestStatus || selectedRequest.request_status || 'pending')}
-                        size="small"
-                        sx={{ ml: 1 }}
-                      />
-                    </Typography>
-                    {selectedRequest.request_remarks && (
-                      <Typography sx={{ mt: 1 }}><strong>Remarks:</strong> {selectedRequest.request_remarks}</Typography>
-                    )}
-                  </Box>
-                </Grid>
-              </Grid>
-            )}
+            {selectedRequest && <DetailDialogContent request={selectedRequest} />}
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setDetailDialogOpen(false)}>Close</Button>
+            {selectedRequest?.request_status === 'pending' && (
+              <>
+                <Button 
+                  color="success" 
+                  variant="contained"
+                  onClick={() => {
+                    handleApproveRequest(selectedRequest.id);
+                    setDetailDialogOpen(false);
+                  }}
+                >
+                  Approve
+                </Button>
+                <Button 
+                  color="error" 
+                  variant="outlined"
+                  onClick={() => {
+                    handleRejectRequest(selectedRequest.id);
+                    setDetailDialogOpen(false);
+                  }}
+                >
+                  Reject
+                </Button>
+              </>
+            )}
           </DialogActions>
         </Dialog>
 

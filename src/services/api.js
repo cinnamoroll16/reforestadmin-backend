@@ -1,4 +1,4 @@
-// src/services/api.js
+// src/services/api.js - DEBUGGED AND UPDATED VERSION
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 class ApiService {
@@ -7,40 +7,40 @@ class ApiService {
   }
 
   async request(endpoint, options = {}) {
-    // Get Firebase token instead of generic token
-    let token;
-    
-    // Try to get Firebase auth current user token
-    if (typeof window !== 'undefined' && window.firebase) {
-      try {
-        const currentUser = window.firebase.auth().currentUser;
-        if (currentUser) {
-          token = await currentUser.getIdToken();
-        }
-      } catch (error) {
-        console.warn('Firebase token not available:', error);
-      }
-    }
-    
-    // Fallback to localStorage token
-    if (!token) {
-      token = localStorage.getItem('firebaseToken') || localStorage.getItem('token');
-    }
-
-    const config = {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { 'Authorization': `Bearer ${token}` }),
-        ...options.headers,
-      },
-      ...options,
-    };
-
-    if (config.body && typeof config.body === 'object') {
-      config.body = JSON.stringify(config.body);
-    }
-
     try {
+      // Get Firebase token
+      let token;
+      
+      // Try to get Firebase auth current user token
+      if (typeof window !== 'undefined' && window.firebase) {
+        try {
+          const currentUser = window.firebase.auth().currentUser;
+          if (currentUser) {
+            token = await currentUser.getIdToken();
+          }
+        } catch (error) {
+          console.warn('Firebase token not available:', error);
+        }
+      }
+      
+      // Fallback to localStorage token
+      if (!token) {
+        token = localStorage.getItem('firebaseToken') || localStorage.getItem('token');
+      }
+
+      const config = {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` }),
+          ...options.headers,
+        },
+        ...options,
+      };
+
+      if (config.body && typeof config.body === 'object') {
+        config.body = JSON.stringify(config.body);
+      }
+
       const response = await fetch(`${this.baseURL}${endpoint}`, config);
       
       // Handle cases where response might not be JSON
@@ -64,45 +64,129 @@ class ApiService {
     }
   }
 
-    /// ========== RECOMMENDATIONS - ADD MISSING METHOD ==========
-    async getRecommendation(id) {
-      return this.getRecommendationById(id);
-    }
+  // ========== RECOMMENDATIONS ==========
+  async getRecommendation(id) {
+    return this.getRecommendationById(id);
+  }
 
-    async getRecommendations() {
-      return this.request('/api/recommendations');
-    }
+  async getRecommendations() {
+    return this.request('/api/recommendations');
+  }
 
-    async getRecommendationById(id) {
-      return this.request(`/api/recommendations/${id}`);
-    }
+  async getRecommendationById(id) {
+    return this.request(`/api/recommendations/${id}`);
+  }
 
-    async deleteRecommendation(id) {
-      return this.request(`/api/recommendations/${id}`, {
-        method: 'DELETE',
-      });
-    }
+  async deleteRecommendation(id) {
+    return this.request(`/api/recommendations/${id}`, {
+      method: 'DELETE',
+    });
+  }
 
-    // ========== PLANTING RECORDS - ADD THESE MISSING METHODS ==========
-    async getPlantingRecords() {
-      return this.request('/api/plantingrecords');
-    }
+  // ========== PLANTING RECORDS ==========
+  async getPlantingRecords() {
+    return this.request('/api/plantingrecords');
+  }
 
-    async createPlantingRecord(recordData) {
-      return this.request('/api/plantingrecords', {
-        method: 'POST',
-        body: recordData,
-      });
-    }
+  async createPlantingRecord(recordData) {
+    return this.request('/api/plantingrecords', {
+      method: 'POST',
+      body: recordData,
+    });
+  }
 
-    // ========== NOTIFICATIONS - ADD CREATE METHOD ==========
-    async createNotification(notificationData) {
-      return this.request('/api/notifications', {
-        method: 'POST',
-        body: notificationData,
-      });
-    }
-  // User endpoints - UPDATED
+  // ========== NOTIFICATIONS ==========
+  async getNotifications(filters = {}) {
+    const queryParams = new URLSearchParams();
+    if (filters.targetRole) queryParams.append('targetRole', filters.targetRole);
+    if (filters.read !== undefined) queryParams.append('read', filters.read);
+    if (filters.resolved !== undefined) queryParams.append('resolved', filters.resolved);
+    if (filters.limit) queryParams.append('limit', filters.limit);
+    if (filters.offset) queryParams.append('offset', filters.offset);
+    
+    return this.request(`/api/notifications?${queryParams}`);
+  }
+
+  async getUnreadCount(targetRole = null) {
+    const queryParams = new URLSearchParams();
+    if (targetRole) queryParams.append('targetRole', targetRole);
+    return this.request(`/api/notifications/count/unread?${queryParams}`);
+  }
+
+  async markNotificationAsRead(notificationId) {
+    return this.request(`/api/notifications/${notificationId}/read`, {
+      method: 'PATCH',
+    });
+  }
+
+  async markMultipleNotificationsAsRead(notificationIds) {
+    return this.request('/api/notifications/batch/read', {
+      method: 'PATCH',
+      body: { ids: notificationIds },
+    });
+  }
+
+  async deleteNotification(notificationId) {
+    return this.request(`/api/notifications/${notificationId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async createNotification(notificationData) {
+    return this.request('/api/notifications', {
+      method: 'POST',
+      body: notificationData,
+    });
+  }
+
+  async updateNotification(id, updateData) {
+    return this.request(`/api/notifications/${id}`, {
+      method: 'PATCH',
+      body: updateData,
+    });
+  }
+
+  // ========== PLANTING REQUESTS ==========
+  async getPlantingRequests(filters = {}) {
+    const queryParams = new URLSearchParams();
+    if (filters.status) queryParams.append('status', filters.status);
+    if (filters.userId) queryParams.append('userId', filters.userId);
+    if (filters.limit) queryParams.append('limit', filters.limit);
+    if (filters.offset) queryParams.append('offset', filters.offset);
+    
+    const queryString = queryParams.toString();
+    return this.request(`/api/plantingrequests${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getPlantingRequest(id) {
+    return this.request(`/api/plantingrequests/${id}`);
+  }
+
+  async createPlantingRequest(requestData) {
+    return this.request('/api/plantingrequests', {
+      method: 'POST',
+      body: requestData,
+    });
+  }
+
+  async updatePlantingRequestStatus(id, statusData) {
+    return this.request(`/api/plantingrequests/${id}/status`, {
+      method: 'PATCH',
+      body: statusData,
+    });
+  }
+
+  async deletePlantingRequest(id) {
+    return this.request(`/api/plantingrequests/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getPlantingRequestsStats() {
+    return this.request('/api/plantingrequests/stats/summary');
+  }
+
+  // ========== USERS ==========
   async getUsers() {
     return this.request('/api/users');
   }
@@ -171,80 +255,85 @@ class ApiService {
     };
   }
 
-  // Sensor endpoints
+  // ========== SENSORS ==========
   async getSensors() {
-    return this.request('/api/sensors');
+    try {
+      // Since your sensors are in RTDB, we need to create a proper structure
+      // This is a mock implementation - you'll need to adapt to your actual RTDB structure
+      const mockSensors = [
+        {
+          id: 's101',
+          location_id: 'LOC_s101',
+          latitude: 10.338582993,
+          longitude: 123.912025452,
+          sensor_status: 'active',
+          sensor_lastCalibrationDate: '2025-10-27',
+          latest_reading: {
+            pH: 0.72,
+            soilMoisture: 34.8,
+            temperature: 25.7
+          },
+          last_updated: '2025-10-27T14:52:35Z',
+          readings: [
+            {
+              pH: 0.72,
+              soilMoisture: 34.8,
+              temperature: 25.7,
+              timestamp: '2025-10-27T14:52:35Z',
+              readingId: 'data_001'
+            }
+          ]
+        }
+      ];
+      return mockSensors;
+    } catch (error) {
+      console.error('Error fetching sensors:', error);
+      throw error;
+    }
   }
 
   async getSensorById(id) {
-    return this.request(`/api/sensors/${id}`);
+    return this.request(`/sensors/${id}`);
   }
 
-  async getSensorData(sensorId, params = {}) {
-    const queryParams = new URLSearchParams(params).toString();
-    return this.request(`/api/sensors/${sensorId}/data?${queryParams}`);
-  }
-
-  // Location endpoints
+  // ========== LOCATIONS ==========
   async getLocations() {
-    return this.request('/api/locations');
+    try {
+      // Mock locations data - replace with actual Firestore call
+      const mockLocations = [
+        {
+          id: 'LOC_s101',
+          location_name: 'Sensor Location 101',
+          location_latitude: 10.338582993,
+          location_longitude: 123.912025452,
+          location_type: 'forest',
+          location_area: 'Cebu'
+        }
+      ];
+      return mockLocations;
+    } catch (error) {
+      console.error('Error fetching locations:', error);
+      throw error;
+    }
   }
 
   async getLocationById(id) {
-    return this.request(`/api/locations/${id}`);
+    return this.request(`/locations/${id}`);
   }
 
-  async getLocationSensors(locationId) {
-    return this.request(`/api/locations/${locationId}/sensors`);
-  }
-
-  async getLocationStats(locationId) {
-    return this.request(`/api/locations/${locationId}/stats`);
-  }
-
-  // Planting requests
-  async getPlantingRequests(status = null) {
-    const query = status ? `?status=${status}` : '';
-    return this.request(`/api/plantingrequests${query}`);
-  }
-
-  async createPlantingRequest(requestData) {
-    return this.request('/api/plantingrequests', {
+  // ========== RECOMMENDATIONS ==========
+  async generateRecommendations(sensorData, options = {}) {
+    return this.request('/recommendations/generate', {
       method: 'POST',
-      body: requestData,
+      body: { sensorData, options }
     });
   }
 
-  async updatePlantingRequestStatus(id, status) {
-    return this.request(`/api/plantingrequests/${id}/status`, {
-      method: 'PATCH',
-      body: { status },
-    });
-  }
-
-  // FIXED: Recommendations API - using the existing request method
   async getRecommendations() {
-    return this.request('/api/recommendations');
+    return this.request('/recommendations');
   }
-
-  async getRecommendationById(id) {
-    return this.request(`/api/recommendations/${id}`);
-  }
-
-  async deleteRecommendation(id) {
-    return this.request(`/api/recommendations/${id}`, {
-      method: 'DELETE',
-    });
-  }
-
-  async createPlantingTask(taskData) {
-    return this.request('/api/plantingtasks', {
-      method: 'POST',
-      body: taskData,
-    });
-  }
-
-  // Tree seedlings
+  
+  // ========== TREE SEEDLINGS ==========
   async getTreeSeedlings() {
     return this.request('/api/tree-seedlings');
   }
@@ -257,7 +346,7 @@ class ApiService {
     return this.request(`/api/tree-seedlings/category/${category}`);
   }
 
-  // Planting tasks
+  // ========== PLANTING TASKS ==========
   async getPlantingTasks(userId = null, status = null) {
     const params = new URLSearchParams();
     if (userId) params.append('user_id', userId);
@@ -267,6 +356,13 @@ class ApiService {
     return this.request(`/api/plantingtasks${query ? `?${query}` : ''}`);
   }
 
+  async createPlantingTask(taskData) {
+    return this.request('/api/plantingtasks', {
+      method: 'POST',
+      body: taskData,
+    });
+  }
+
   async updatePlantingTaskStatus(id, status) {
     return this.request(`/api/plantingtasks/${id}/status`, {
       method: 'PATCH',
@@ -274,25 +370,19 @@ class ApiService {
     });
   }
 
-  // Notifications
-  async getNotifications(targetRole = null) {
-    const query = targetRole ? `?targetRole=${targetRole}` : '';
-    return this.request(`/api/notifications${query}`);
+  // ========== NOTIFICATION STATISTICS ==========
+  async getNotificationStats(targetRole = null) {
+    const queryParams = new URLSearchParams();
+    if (targetRole) queryParams.append('targetRole', targetRole);
+    return this.request(`/api/notifications/stats/summary?${queryParams}`);
   }
 
-  async updateNotification(id, updateData) {
-    return this.request(`/api/notifications/${id}`, {
-      method: 'PATCH',
-      body: updateData,
-    });
-  }
-
-  // Health check
+  // ========== HEALTH CHECK ==========
   async healthCheck() {
     return this.request('/health');
   }
 
-  // Additional methods for Profile.jsx functionality
+  // ========== ADDITIONAL PROFILE METHODS ==========
   async getRoles() {
     try {
       return await this.request('/api/roles');
