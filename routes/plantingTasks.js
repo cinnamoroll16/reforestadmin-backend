@@ -1,97 +1,132 @@
-// routes/notifications.js - WITH DEBUG ROUTE
+// routes/plantingTasks.js
 const express = require('express');
 const { db } = require('../config/firebaseAdmin');
 const router = express.Router();
 
-// Debug route to check notification structure
-router.get('/debug/structure', async (req, res) => {
+// POST /api/plantingtasks - Create a new planting task
+router.post('/', async (req, res) => {
   try {
-    const snapshot = await db.collection('notifications').limit(5).get();
-    const notifications = [];
+    const taskData = req.body;
     
+    console.log('📝 Creating planting task with data:', taskData);
+    
+    // Validate required fields
+    if (!taskData.location_id || !taskData.user_id) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: location_id and user_id are required' 
+      });
+    }
+
+    // Create planting task with generated ID
+    const taskId = `task_${Date.now()}`;
+    const plantingTask = {
+      id: taskId,
+      task_id: taskId,
+      user_id: taskData.user_id,
+      reco_id: taskData.reco_id || null,
+      location_id: taskData.location_id,
+      task_status: taskData.task_status || 'assigned',
+      task_date: taskData.task_date || new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      recommendation_data: taskData.recommendation_data || {},
+      assigned_to: taskData.assigned_to || taskData.user_id,
+      priority: taskData.priority || 'medium',
+      estimated_duration: taskData.estimated_duration || 120,
+      seedlings_required: taskData.recommendation_data?.seedlingCount || 0,
+      completed_at: null,
+      notes: taskData.notes || ''
+    };
+
+    // Save to Firestore
+    await db.collection('plantingtasks').doc(taskId).set(plantingTask);
+    
+    console.log('✅ Planting task created successfully:', taskId);
+    
+    res.status(201).json({
+      success: true,
+      taskId: taskId,
+      message: 'Planting task created successfully',
+      task: plantingTask
+    });
+    
+  } catch (error) {
+    console.error('❌ Error creating planting task:', error);
+    res.status(500).json({ 
+      error: 'Failed to create planting task: ' + error.message 
+    });
+  }
+});
+
+// GET /api/plantingtasks - Get all planting tasks
+router.get('/', async (req, res) => {
+  try {
+    const { user_id, status, limit = 50 } = req.query;
+    
+    let query = db.collection('plantingtasks');
+    
+    if (user_id) {
+      query = query.where('user_id', '==', user_id);
+    }
+    
+    if (status) {
+      query = query.where('task_status', '==', status);
+    }
+    
+    const snapshot = await query.orderBy('created_at', 'desc').limit(parseInt(limit)).get();
+    
+    const tasks = [];
     snapshot.forEach(doc => {
-      const data = doc.data();
-      notifications.push({
+      tasks.push({
         id: doc.id,
-        fields: Object.keys(data),
-        hasCreatedAt: !!data.createdAt,
-        hasNotifTimestamp: !!data.notif_timestamp,
-        data: data
+        ...doc.data()
       });
     });
 
-    console.log('📊 Notification structure analysis:', notifications);
-    res.json(notifications);
+    res.json(tasks);
   } catch (error) {
-    console.error('Debug error:', error);
+    console.error('Error fetching planting tasks:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Get notifications - FLEXIBLE VERSION
-router.get('/', async (req, res) => {
+// GET /api/plantingtasks/:id - Get specific planting task
+router.get('/:id', async (req, res) => {
   try {
-    const { targetRole, read, limit = 50 } = req.query;
+    const taskId = req.params.id;
+    const doc = await db.collection('plantingtasks').doc(taskId).get();
     
-    console.log('🔔 Fetching notifications...');
-    
-    let query = db.collection('notifications');
-    
-    // Apply targetRole filter if provided
-    if (targetRole) {
-      query = query.where('targetRole', '==', targetRole);
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Planting task not found' });
     }
     
-    // Apply read filter if provided
-    if (read !== undefined) {
-      query = query.where('read', '==', read === 'true');
-    }
-    
-    // Try to use createdAt first, fallback to notif_timestamp
-    let snapshot;
-    try {
-      // First try with createdAt (uses existing index)
-      query = query.orderBy('createdAt', 'desc').limit(parseInt(limit));
-      snapshot = await query.get();
-      console.log('✓ Successfully used createdAt for ordering');
-    } catch (indexError) {
-      console.log('⚠️ createdAt ordering failed, trying notif_timestamp...');
-      
-      // If createdAt fails, try notif_timestamp without targetRole filter
-      query = db.collection('notifications')
-               .orderBy('notif_timestamp', 'desc')
-               .limit(parseInt(limit));
-      
-      if (targetRole) {
-        // We'll filter manually after query
-        console.log('⚠️ Cannot use targetRole filter with notif_timestamp ordering');
-      }
-      
-      snapshot = await query.get();
-      console.log('✓ Successfully used notif_timestamp for ordering');
-    }
-
-    const notifications = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      notifications.push({
-        id: doc.id,
-        ...data
-      });
+    res.json({
+      id: doc.id,
+      ...doc.data()
     });
-
-    // Manual filtering if we couldn't use targetRole in query
-    let filteredNotifications = notifications;
-    if (targetRole && !query._queryOptions.fieldFilters?.some(f => f.field.path === 'targetRole')) {
-      filteredNotifications = notifications.filter(n => n.targetRole === targetRole);
-      console.log(`✓ Manually filtered to ${filteredNotifications.length} notifications for targetRole: ${targetRole}`);
-    }
-
-    console.log(`✓ Found ${filteredNotifications.length} notifications total`);
-    res.json(filteredNotifications);
-    
   } catch (error) {
-    console.error('❌ Get notifications error:', error);
+    console.error('Error fetching planting task:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/plantingtasks/:id - Update planting task
+router.put('/:id', async (req, res) => {
+  try {
+    const taskId = req.params.id;
+    const updateData = {
+      ...req.body,
+      updated_at: new Date().toISOString()
+    };
+
+    await db.collection('plantingtasks').doc(taskId).update(updateData);
+    
+    res.json({
+      success: true,
+      message: 'Planting task updated successfully'
+    });
+  } catch (error) {
+    console.error('Error updating planting task:', error);
     res.status(500).json({ error: error.message });
   }
 });

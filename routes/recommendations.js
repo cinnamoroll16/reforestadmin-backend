@@ -6,18 +6,20 @@ const { db } = require('../config/firebaseAdmin');
 router.get('/', async (req, res) => {
   try {
     const snapshot = await db.collection('recommendations')
-      .where('deleted', '!=', true)
       .orderBy('reco_generatedAt', 'desc')
       .get();
     
     const recommendations = [];
     snapshot.forEach(doc => {
       const data = doc.data();
-      recommendations.push({
-        id: doc.id,
-        sensorConditions: data.sensorConditions || {}, // Ensure sensorConditions is included
-        ...data
-      });
+      // Filter out deleted items in code instead of query
+      if (data.deleted !== true) {
+        recommendations.push({
+          id: doc.id,
+          sensorConditions: data.sensorConditions || {},
+          ...data
+        });
+      }
     });
     
     res.json(recommendations);
@@ -26,7 +28,6 @@ router.get('/', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch recommendations' });
   }
 });
-
 // GET single recommendation
 router.get('/:id', async (req, res) => {
   try {
