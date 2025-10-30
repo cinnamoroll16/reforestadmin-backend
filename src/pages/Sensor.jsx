@@ -1,4 +1,4 @@
-// src/pages/Sensors.js - BACKEND ONLY (NO DIRECT FIREBASE)
+// src/pages/Sensors.js - UPDATED FOR BACKEND ML INTEGRATION
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { apiService } from '../services/api';
 import {
@@ -45,7 +45,8 @@ import {
   Science as pHIcon,
   Refresh as RefreshIcon,
   Info as InfoIcon,
-  History as HistoryIcon
+  History as HistoryIcon,
+  CloudUpload as UploadIcon
 } from '@mui/icons-material';
 import ReForestAppBar from './AppBar.jsx';
 import Navigation from './Navigation.jsx';
@@ -60,8 +61,11 @@ const drawerWidth = 240;
 const BACKEND_CONFIG = {
   BASE_URL: process.env.REACT_APP_API_URL || 'http://localhost:5000',
   ENDPOINTS: {
-    RECOMMENDATIONS: '/api/recommendations/generate',
-    RECOMMENDATIONS_SAVE: '/api/recommendations',
+    ML_RECOMMENDATIONS: '/api/ml/generate-recommendations',
+    ML_UPLOAD_DATASET: '/api/ml/upload-dataset',
+    ML_STATUS: '/api/ml/status',
+    ML_DATASET: '/api/ml/dataset',
+    RECOMMENDATIONS: '/api/recommendations',
     SENSORS: '/api/sensors',
     SENSOR_DATA: (sensorId) => `/api/sensors/${sensorId}/data`,
     LOCATIONS: '/api/locations',
@@ -133,56 +137,87 @@ const validateSensorData = (sensorData) => {
   };
 };
 
-// Backend API service
-const backendService = {
-  // Generate recommendations via backend
-  async generateRecommendations(sensorData, options = {}) {
+// Backend ML API service
+const backendMLService = {
+  // Generate ML recommendations via backend
+  async generateRecommendations(sensorId, sensorData, location, coordinates) {
     try {
-      console.log('Sending to backend:', { sensorData, options });
-      const response = await fetch(`${BACKEND_CONFIG.BASE_URL}${BACKEND_CONFIG.ENDPOINTS.RECOMMENDATIONS}`, {
+      console.log('🤖 Sending ML request to backend:', { sensorId, sensorData, location, coordinates });
+      
+      const response = await fetch(`${BACKEND_CONFIG.BASE_URL}${BACKEND_CONFIG.ENDPOINTS.ML_RECOMMENDATIONS}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ sensorData, options })
+        body: JSON.stringify({ 
+          sensorId, 
+          sensorData, 
+          location, 
+          coordinates 
+        })
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || `HTTP error! status: ${response.status}`);
+        const errorData = await response.json();
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
       }
 
       const result = await response.json();
-      console.log('Backend response:', result);
+      console.log('✅ Backend ML response:', result);
       return result;
       
     } catch (error) {
-      console.error('Backend API Error:', error);
-      throw new Error(`Backend service unavailable: ${error.message}`);
+      console.error('❌ Backend ML API Error:', error);
+      throw new Error(`ML service unavailable: ${error.message}`);
     }
   },
 
-  // Save recommendations to backend
-  async saveRecommendation(recommendationData) {
+  // Upload dataset to backend
+  async uploadDataset(file) {
     try {
-      const response = await fetch(`${BACKEND_CONFIG.BASE_URL}${BACKEND_CONFIG.ENDPOINTS.RECOMMENDATIONS_SAVE}`, {
+      const formData = new FormData();
+      formData.append('dataset', file);
+
+      const response = await fetch(`${BACKEND_CONFIG.BASE_URL}${BACKEND_CONFIG.ENDPOINTS.ML_UPLOAD_DATASET}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(recommendationData)
+        body: formData,
+        // Don't set Content-Type header - browser will set it with boundary
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || `HTTP error! status: ${response.status}`);
+        const errorData = await response.json();
+        throw new Error(errorData.message || `Upload failed with status: ${response.status}`);
       }
 
       const result = await response.json();
       return result;
     } catch (error) {
-      console.error('Save recommendation error:', error);
+      console.error('❌ Dataset upload error:', error);
       throw error;
+    }
+  },
+
+  // Get ML service status
+  async getMLStatus() {
+    try {
+      const response = await fetch(`${BACKEND_CONFIG.BASE_URL}${BACKEND_CONFIG.ENDPOINTS.ML_STATUS}`);
+      if (!response.ok) throw new Error('ML status check failed');
+      return await response.json();
+    } catch (error) {
+      console.warn('ML status check failed:', error.message);
+      return { mlService: 'Inactive', datasetLoaded: false };
+    }
+  },
+
+  // Get dataset info
+  async getDatasetInfo() {
+    try {
+      const response = await fetch(`${BACKEND_CONFIG.BASE_URL}${BACKEND_CONFIG.ENDPOINTS.ML_DATASET}`);
+      if (!response.ok) throw new Error('Failed to get dataset info');
+      return await response.json();
+    } catch (error) {
+      console.warn('Dataset info fetch failed:', error.message);
+      return null;
     }
   },
 
@@ -353,6 +388,88 @@ const SensorHistoryGrid = ({ readings }) => {
 };
 
 // ============================================================================
+// DATASET UPLOAD COMPONENT
+// ============================================================================
+const DatasetUpload = ({ onUploadComplete }) => {
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState(null);
+  const [uploadError, setUploadError] = useState(null);
+
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+      setUploadError('Please select an Excel file (.xlsx or .xls)');
+      return;
+    }
+
+    setUploading(true);
+    setUploadError(null);
+    setUploadResult(null);
+
+    try {
+      const result = await backendMLService.uploadDataset(file);
+      setUploadResult(result);
+      if (onUploadComplete) onUploadComplete(result);
+    } catch (error) {
+      setUploadError(error.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Box sx={{ mb: 3 }}>
+      <Card variant="outlined">
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            Tree Dataset Management
+          </Typography>
+          
+          <input
+            accept=".xlsx,.xls"
+            style={{ display: 'none' }}
+            id="dataset-upload"
+            type="file"
+            onChange={handleFileUpload}
+            disabled={uploading}
+          />
+          <label htmlFor="dataset-upload">
+            <Button
+              variant="outlined"
+              component="span"
+              disabled={uploading}
+              startIcon={uploading ? <CircularProgress size={16} /> : <UploadIcon />}
+              sx={{ mb: 2 }}
+            >
+              {uploading ? 'Uploading...' : 'Upload Tree Dataset'}
+            </Button>
+          </label>
+
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Upload Tree_Seedling_Dataset.xlsx to enable ML recommendations
+          </Typography>
+
+          {uploadResult && (
+            <Alert severity="success" sx={{ mt: 1 }}>
+              Dataset uploaded successfully! {uploadResult.speciesCount} species loaded.
+            </Alert>
+          )}
+
+          {uploadError && (
+            <Alert severity="error" sx={{ mt: 1 }}>
+              {uploadError}
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+    </Box>
+  );
+};
+
+// ============================================================================
 // TAB PANEL COMPONENT FOR DIALOG
 // ============================================================================
 function TabPanel(props) {
@@ -406,6 +523,7 @@ function Sensors() {
   
   // Backend State
   const [backendStatus, setBackendStatus] = useState('checking');
+  const [mlServiceStatus, setMlServiceStatus] = useState({ mlService: 'Unknown', datasetLoaded: false });
   
   // Error/Notification State
   const [error, setError] = useState(null);
@@ -423,37 +541,45 @@ function Sensors() {
   };
 
   // ============================================================================
-  // BACKEND HEALTH CHECK
+  // BACKEND & ML SERVICE HEALTH CHECK
   // ============================================================================
   useEffect(() => {
-    const checkBackendHealth = async () => {
+    const checkServices = async () => {
       try {
-        const isHealthy = await backendService.healthCheck();
-        setBackendStatus(isHealthy ? 'healthy' : 'unavailable');
+        const [isBackendHealthy, mlStatus] = await Promise.all([
+          backendMLService.healthCheck(),
+          backendMLService.getMLStatus()
+        ]);
         
-        if (!isHealthy) {
+        setBackendStatus(isBackendHealthy ? 'healthy' : 'unavailable');
+        setMlServiceStatus(mlStatus);
+        
+        if (!isBackendHealthy) {
           console.warn('⚠️ Backend server is unavailable.');
           showNotification('Backend server unavailable. ML recommendations will not work.', 'warning');
+        } else if (!mlStatus.datasetLoaded) {
+          console.warn('⚠️ Backend ML service ready but no dataset loaded.');
+          showNotification('ML service ready. Please upload tree dataset to enable recommendations.', 'info');
         } else {
-          console.log('✅ Backend server is healthy');
+          console.log('✅ Backend and ML service are ready');
         }
       } catch (error) {
         setBackendStatus('unavailable');
-        console.error('Backend health check failed:', error);
+        setMlServiceStatus({ mlService: 'Unknown', datasetLoaded: false });
+        console.error('Service health check failed:', error);
       }
     };
 
-    checkBackendHealth();
+    checkServices();
   }, [showNotification]);
 
   // ============================================================================
-  // FETCH SENSORS FROM BACKEND (Backend fetches from RTDB)
+  // FETCH SENSORS FROM BACKEND
   // ============================================================================
   const fetchSensorsFromBackend = useCallback(async () => {
     try {
       console.log('📡 Fetching sensors from backend API...');
       
-      // Backend handles RTDB connection
       const sensorsData = await apiService.getSensors();
       
       if (!Array.isArray(sensorsData) || sensorsData.length === 0) {
@@ -483,7 +609,7 @@ function Sensors() {
           soilMoisture: latestReading.soilMoisture !== undefined ? parseFloat(latestReading.soilMoisture) : "N/A",
           temperature: latestReading.temperature !== undefined ? parseFloat(latestReading.temperature) : "N/A",
           timestamp: latestReading.timestamp || null,
-          // Historical data placeholder (will be loaded on demand)
+          // Historical data placeholder
           readings: [],
           readingsLoaded: false
         };
@@ -499,7 +625,7 @@ function Sensors() {
   }, []);
 
   // ============================================================================
-  // FETCH SENSOR HISTORY (on-demand when viewing details)
+  // FETCH SENSOR HISTORY
   // ============================================================================
   const fetchSensorHistory = async (sensorId) => {
     try {
@@ -587,6 +713,10 @@ function Sensors() {
     setError(null);
     
     try {
+      // Refresh ML service status
+      const mlStatus = await backendMLService.getMLStatus();
+      setMlServiceStatus(mlStatus);
+      
       const [sensorsData, locationsData] = await Promise.all([
         fetchSensorsFromBackend(),
         fetchLocations()
@@ -650,50 +780,28 @@ function Sensors() {
       const sensorData = {
         ph: parseFloat(pH),
         soilMoisture: parseFloat(soilMoisture),
-        temperature: parseFloat(temperature),
-        location: sensor.location
+        temperature: parseFloat(temperature)
       };
       
-      const options = {
-        algorithm: 'hybrid',
-        useHistoricalLearning: true,
-        season: getCurrentSeason(),
-        coordinates: sensor.coordinates,
-        location: sensor.locationRef
-      };
-      
-      // ========== STEP 3: CALL BACKEND API ==========
+      // ========== STEP 3: CALL BACKEND ML API ==========
       setMlProgress({ step: 'Sending to ML backend...', percent: 50 });
       
-      console.log('Calling backend with:', { sensorData, options });
-      const result = await backendService.generateRecommendations(sensorData, options);
+      console.log('🤖 Calling ML backend with:', { sensorId, sensorData, location: sensor.location, coordinates: sensor.coordinates });
+      
+      const result = await backendMLService.generateRecommendations(
+        sensorId,
+        sensorData,
+        sensor.location,
+        sensor.coordinates
+      );
       
       if (!result.success) {
-        throw new Error(result.error || 'Backend processing failed');
+        throw new Error(result.error || 'Backend ML processing failed');
       }
       
-      console.log('✅ Backend recommendations received:', result.recommendations);
+      console.log('✅ Backend ML recommendations received:', result.recommendations);
       
-      // ========== STEP 4: SAVE TO BACKEND (Backend saves to Firestore) ==========
-      setMlProgress({ step: 'Saving recommendations...', percent: 80 });
-      
-      const recommendationData = {
-        sensorId: sensorId,
-        locationId: sensor.location_id,
-        sensorData: sensorData,
-        recommendations: result.recommendations,
-        algorithm: result.algorithm,
-        confidenceScore: result.recommendations[0]?.confidenceScore || 0,
-        season: getCurrentSeason(),
-        backendProcessed: true
-      };
-
-      // Backend handles saving to Firestore
-      const savedRecommendation = await backendService.saveRecommendation(recommendationData);
-      
-      console.log(`💾 Recommendation saved via backend:`, savedRecommendation);
-
-      // ========== STEP 5: COMPLETE ==========
+      // ========== STEP 4: COMPLETE ==========
       setMlProgress({ step: 'Complete!', percent: 100 });
 
       const topTree = result.recommendations[0];
@@ -702,7 +810,7 @@ function Sensors() {
         'success'
       );
 
-      // Navigate after delay
+      // Navigate to recommendations page after delay
       setTimeout(() => {
         navigate('/recommendations');
       }, 2000);
@@ -714,8 +822,10 @@ function Sensors() {
       
       if (error.message.includes('Invalid sensor data')) {
         errorMessage += error.message;
-      } else if (error.message.includes('Backend service unavailable')) {
-        errorMessage += 'Backend server is unavailable. Please ensure the backend is running.';
+      } else if (error.message.includes('ML service unavailable')) {
+        errorMessage += 'ML service is unavailable. Please ensure the backend is running and dataset is uploaded.';
+      } else if (error.message.includes('No tree dataset loaded')) {
+        errorMessage += 'No tree dataset loaded. Please upload dataset first.';
       } else {
         errorMessage += error.message || 'Unknown error occurred.';
       }
@@ -726,6 +836,15 @@ function Sensors() {
       setProcessingMLSensor(null);
       setMlProgress({ step: '', percent: 0 });
     }
+  };
+
+  // ============================================================================
+  // DATASET UPLOAD HANDLER
+  // ============================================================================
+  const handleDatasetUploadComplete = (result) => {
+    showNotification(`Dataset uploaded successfully! ${result.speciesCount} species loaded.`, 'success');
+    // Refresh ML service status
+    backendMLService.getMLStatus().then(setMlServiceStatus);
   };
 
   // ============================================================================
@@ -781,7 +900,19 @@ function Sensors() {
     }
   };
 
+  // ML service status indicator
+  const getMLStatusInfo = () => {
+    if (!mlServiceStatus.datasetLoaded) {
+      return { color: 'warning', text: 'Dataset Required', icon: <WarningIcon /> };
+    }
+    return { color: 'success', text: 'ML Ready', icon: <CheckCircleIcon /> };
+  };
+
   const backendStatusInfo = getBackendStatusInfo();
+  const mlStatusInfo = getMLStatusInfo();
+
+  // Check if ML can be generated
+  const canGenerateML = backendStatus === 'healthy' && mlServiceStatus.datasetLoaded;
 
   // ============================================================================
   // RENDER
@@ -822,6 +953,13 @@ function Sensors() {
               size="small"
               variant={backendStatus === 'healthy' ? 'filled' : 'outlined'}
             />
+            <Chip
+              label={mlStatusInfo.text}
+              color={mlStatusInfo.color}
+              icon={mlStatusInfo.icon}
+              size="small"
+              variant={mlServiceStatus.datasetLoaded ? 'filled' : 'outlined'}
+            />
             <Tooltip title="Refresh all data">
               <Button 
                 variant="outlined" 
@@ -835,6 +973,11 @@ function Sensors() {
           </Box>
         </Box>
 
+        {/* ========== DATASET UPLOAD ========== */}
+        {backendStatus === 'healthy' && !mlServiceStatus.datasetLoaded && (
+          <DatasetUpload onUploadComplete={handleDatasetUploadComplete} />
+        )}
+
         {/* ========== LOADING BAR ========== */}
         {(isRefreshing || loading) && <LinearProgress sx={{ mb: 2 }} />}
         
@@ -845,10 +988,16 @@ function Sensors() {
           </Alert>
         )}
 
-        {/* Backend Status Warning */}
+        {/* Service Status Warnings */}
         {backendStatus === 'unavailable' && (
           <Alert severity="warning" sx={{ mb: 2 }}>
             Backend server is unavailable. ML recommendations will not work. Please ensure the backend is running on {BACKEND_CONFIG.BASE_URL}.
+          </Alert>
+        )}
+
+        {backendStatus === 'healthy' && !mlServiceStatus.datasetLoaded && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            Backend connected. Please upload tree dataset to enable ML recommendations.
           </Alert>
         )}
 
@@ -857,7 +1006,7 @@ function Sensors() {
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 300 }}>
             <CircularProgress sx={{ mb: 2 }} />
             <Typography variant="body1" color="textSecondary">
-              Loading sensors from backend (RTDB via API)...
+              Loading sensors from backend...
             </Typography>
           </Box>
         ) : sensors.length === 0 ? (
@@ -897,7 +1046,7 @@ function Sensors() {
                       temperature: sensor.temperature
                     });
 
-                    const canGenerateML = validation.isValid && backendStatus === 'healthy';
+                    const canGenerateThisSensor = validation.isValid && canGenerateML;
 
                     return (
                       <TableRow 
@@ -982,9 +1131,9 @@ function Sensors() {
                         </TableCell>
                         <TableCell align="center" onClick={(e) => e.stopPropagation()}>
                           <Tooltip title={
-                            !canGenerateML 
-                              ? backendStatus !== 'healthy' 
-                                ? 'Backend server unavailable' 
+                            !canGenerateThisSensor 
+                              ? !canGenerateML
+                                ? 'ML service not ready. Check backend and dataset.'
                                 : `Cannot generate: ${validation.errors.join(', ')}`
                               : "Generate ML recommendations with backend processing"
                           }>
@@ -996,7 +1145,7 @@ function Sensors() {
                                 disabled={
                                   processingMLSensor === sensor.id ||
                                   loading || 
-                                  !canGenerateML
+                                  !canGenerateThisSensor
                                 }
                                 sx={{ 
                                   minWidth: 100,
@@ -1159,7 +1308,7 @@ function Sensors() {
               pH: selectedSensor.pH,
               soilMoisture: selectedSensor.soilMoisture,
               temperature: selectedSensor.temperature
-            }).isValid && backendStatus === 'healthy' && (
+            }).isValid && canGenerateML && (
               <Button 
                 variant="contained" 
                 onClick={() => {
@@ -1195,7 +1344,7 @@ function Sensors() {
             </Typography>
             {backendStatus === 'healthy' && (
               <Typography variant="caption" color="primary" sx={{ mt: 1, display: 'block' }}>
-                Using backend ML processing (RTDB via API)
+                Using backend ML processing
               </Typography>
             )}
           </DialogContent>
