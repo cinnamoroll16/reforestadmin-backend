@@ -1,4 +1,4 @@
-// src/services/api.js - DEBUGGED AND UPDATED VERSION
+// src/services/api.js - UPDATED WITH BETTER ERROR HANDLING
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 class ApiService {
@@ -7,40 +7,41 @@ class ApiService {
   }
 
   async request(endpoint, options = {}) {
-    try {
-      // Get Firebase token
-      let token;
-      
-      // Try to get Firebase auth current user token
-      if (typeof window !== 'undefined' && window.firebase) {
-        try {
-          const currentUser = window.firebase.auth().currentUser;
-          if (currentUser) {
-            token = await currentUser.getIdToken();
-          }
-        } catch (error) {
-          console.warn('Firebase token not available:', error);
+    // Get Firebase token
+    let token;
+    
+    // Try to get Firebase auth current user token
+    if (typeof window !== 'undefined' && window.firebase) {
+      try {
+        const currentUser = window.firebase.auth().currentUser;
+        if (currentUser) {
+          token = await currentUser.getIdToken();
         }
+      } catch (error) {
+        console.warn('Firebase token not available:', error);
       }
-      
-      // Fallback to localStorage token
-      if (!token) {
-        token = localStorage.getItem('firebaseToken') || localStorage.getItem('token');
-      }
+    }
+    
+    // Fallback to localStorage token
+    if (!token) {
+      token = localStorage.getItem('firebaseToken') || localStorage.getItem('token');
+    }
 
-      const config = {
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token && { 'Authorization': `Bearer ${token}` }),
-          ...options.headers,
-        },
-        ...options,
-      };
+    const config = {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token && { 'Authorization': `Bearer ${token}` }),
+        ...options.headers,
+      },
+      ...options,
+    };
 
-      if (config.body && typeof config.body === 'object') {
-        config.body = JSON.stringify(config.body);
-      }
+    if (config.body && typeof config.body === 'object') {
+      config.body = JSON.stringify(config.body);
+    }
 
+    try {
+      console.log(`🌐 API Request: ${options.method || 'GET'} ${endpoint}`);
       const response = await fetch(`${this.baseURL}${endpoint}`, config);
       
       // Handle cases where response might not be JSON
@@ -50,27 +51,196 @@ class ApiService {
       if (contentType && contentType.includes('application/json')) {
         data = await response.json();
       } else {
-        data = await response.text();
+        const text = await response.text();
+        console.warn('Non-JSON response:', text);
+        data = text;
       }
 
       if (!response.ok) {
-        throw new Error(data.error || data.message || `HTTP error! status: ${response.status}`);
+        const errorMessage = data.error || data.message || `HTTP error! status: ${response.status}`;
+        console.error(`❌ API Error: ${errorMessage}`);
+        throw new Error(errorMessage);
       }
 
+      console.log(`✅ API Success: ${endpoint}`);
       return data;
     } catch (error) {
-      console.error('API Request failed:', error);
+      console.error('❌ API Request failed:', error);
       throw error;
     }
   }
-
-  // ========== RECOMMENDATIONS ==========
-  async getRecommendation(id) {
-    return this.getRecommendationById(id);
+  // ========== PLANTING REQUESTS ==========
+  async getPlantingRequests() {
+    return this.request('/api/plantingrequests');
   }
 
+  async updatePlantingRequest(id, requestData) {
+    return this.request(`/api/plantingrequests/${id}`, {
+      method: 'PUT',
+      body: requestData,
+    });
+  }
+
+  // ========== PLANTING RECORDS ==========
+  async getPlantingRecords() {
+    return this.request('/api/plantingrecords');
+  }
+  async createPlantingRecord(recordData) {
+    return this.request('/api/plantingrecords', {
+      method: 'POST',
+      body: recordData,
+    });
+  }
+
+  async updatePlantingRecord(id, recordData) {
+    return this.request(`/api/plantingrecords/${id}`, {
+      method: 'PUT',
+      body: recordData,
+    });
+  }
+
+  // ========== PLANTING TASKS ==========
+  async getPlantingTasks() {
+    try {
+      const response = await this.request('/api/plantingtasks');
+      return Array.isArray(response) ? response : [];
+    } catch (error) {
+      console.error('❌ Failed to fetch planting tasks:', error);
+      return [];
+    }
+  }
+  async createPlantingTask(taskData) {
+    return this.request('/api/plantingtasks', {
+      method: 'POST',
+      body: taskData,
+    });
+  }
+  async updatePlantingTask(id, taskData) {
+    return this.request(`/api/plantingtasks/${id}`, {
+      method: 'PUT',
+      body: taskData,
+    });
+  }
+    // ========== SENSOR DATA ==========
+  async getSensorData(sensorId, params = {}) {
+    try {
+      const queryParams = new URLSearchParams(params).toString();
+      return await this.request(`/api/sensors/${sensorId}/data?${queryParams}`);
+    } catch (error) {
+      console.warn(`Sensor data for ${sensorId} not available:`, error.message);
+      return null;
+    }
+  }
+  // ========== NOTIFICATIONS ==========
+  async getNotifications() {
+    try {
+      const response = await this.request('/api/notifications');
+      
+      // Ensure we always return an array
+      if (Array.isArray(response)) {
+        return response;
+      } else if (response && typeof response === 'object') {
+        // If it's wrapped in an object with a notifications property
+        if (Array.isArray(response.notifications)) {
+          return response.notifications;
+        }
+        // If it's a single notification, wrap in array
+        return [response];
+      }
+      
+      console.warn('Unexpected response format from getNotifications:', response);
+      return [];
+    } catch (error) {
+      console.error('❌ Failed to fetch notifications:', error);
+      // Return empty array on error instead of throwing
+      return [];
+    }
+  }
+
+  async getNotificationById(id) {
+    return this.request(`/api/notifications/${id}`);
+  }
+
+  async updateNotification(id, notificationData) {
+    return this.request(`/api/notifications/${id}`, {
+      method: 'PUT',
+      body: notificationData,
+    });
+  }
+
+  async deleteNotification(id) {
+    return this.request(`/api/notifications/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async markAllNotificationsAsRead() {
+    return this.request('/api/notifications/mark-all-read', {
+      method: 'PUT',
+    });
+  }
+
+  async createNotification(notificationData) {
+    return this.request('/api/notifications', {
+      method: 'POST',
+      body: notificationData,
+    });
+  }
+
+  async updatePlantingTask(id, taskData) {
+    return this.request(`/api/plantingtasks/${id}`, {
+      method: 'PUT',
+      body: taskData,
+    });
+  }
+
+  // ========== LOCATIONS ==========
+  async getLocations() {
+    try {
+      const response = await this.request('/api/locations');
+      return Array.isArray(response) ? response : [];
+    } catch (error) {
+      console.error('❌ Failed to fetch locations:', error);
+      return [];
+    }
+  }
+
+  async getLocationById(id) {
+    try {
+      return await this.request(`/api/locations/${id}`);
+    } catch (error) {
+      console.warn(`Location ${id} not found:`, error.message);
+      return null;
+    }
+  }
+  // ========== RECOMMENDATIONS ==========
   async getRecommendations() {
-    return this.request('/api/recommendations');
+    try {
+      const response = await this.request('/api/recommendations');
+      
+      // Ensure we always return an array
+      if (Array.isArray(response)) {
+        return response;
+      } else if (response && typeof response === 'object') {
+        // If it's wrapped in an object with a recommendations property
+        if (Array.isArray(response.recommendations)) {
+          return response.recommendations;
+        }
+        // If it's a single recommendation, wrap in array
+        return [response];
+      }
+      
+      console.warn('Unexpected response format from getRecommendations:', response);
+      return [];
+    } catch (error) {
+      console.error('❌ Failed to fetch recommendations:', error);
+      // Return empty array on error instead of throwing
+      return [];
+    }
+  }
+
+  async getRecommendation(id) {
+    return this.getRecommendationById(id);
   }
 
   async getRecommendationById(id) {
@@ -83,126 +253,33 @@ class ApiService {
     });
   }
 
-  // ========== PLANTING RECORDS ==========
-  async getPlantingRecords() {
-    return this.request('/api/plantingrecords');
-  }
-
-  async createPlantingRecord(recordData) {
-    return this.request('/api/plantingrecords', {
+  async createRecommendation(recommendationData) {
+    return this.request('/api/recommendations', {
       method: 'POST',
-      body: recordData,
+      body: recommendationData,
     });
   }
 
-  // ========== NOTIFICATIONS ==========
-  async getNotifications(filters = {}) {
-    const queryParams = new URLSearchParams();
-    if (filters.targetRole) queryParams.append('targetRole', filters.targetRole);
-    if (filters.read !== undefined) queryParams.append('read', filters.read);
-    if (filters.resolved !== undefined) queryParams.append('resolved', filters.resolved);
-    if (filters.limit) queryParams.append('limit', filters.limit);
-    if (filters.offset) queryParams.append('offset', filters.offset);
-    
-    return this.request(`/api/notifications?${queryParams}`);
-  }
-
-  async getUnreadCount(targetRole = null) {
-    const queryParams = new URLSearchParams();
-    if (targetRole) queryParams.append('targetRole', targetRole);
-    return this.request(`/api/notifications/count/unread?${queryParams}`);
-  }
-
-  async markNotificationAsRead(notificationId) {
-    return this.request(`/api/notifications/${notificationId}/read`, {
-      method: 'PATCH',
+  async updateRecommendation(id, recommendationData) {
+    return this.request(`/api/recommendations/${id}`, {
+      method: 'PUT',
+      body: recommendationData,
     });
   }
 
-  async markMultipleNotificationsAsRead(notificationIds) {
-    return this.request('/api/notifications/batch/read', {
-      method: 'PATCH',
-      body: { ids: notificationIds },
-    });
-  }
-
-  async deleteNotification(notificationId) {
-    return this.request(`/api/notifications/${notificationId}`, {
-      method: 'DELETE',
-    });
-  }
-
-  async createNotification(notificationData) {
-    return this.request('/api/notifications', {
-      method: 'POST',
-      body: notificationData,
-    });
-  }
-
-  async updateNotification(id, updateData) {
-    return this.request(`/api/notifications/${id}`, {
-      method: 'PATCH',
-      body: updateData,
-    });
-  }
-
-  // ========== PLANTING REQUESTS ==========
-  async getPlantingRequests(filters = {}) {
-    const queryParams = new URLSearchParams();
-    if (filters.status) queryParams.append('status', filters.status);
-    if (filters.userId) queryParams.append('userId', filters.userId);
-    if (filters.limit) queryParams.append('limit', filters.limit);
-    if (filters.offset) queryParams.append('offset', filters.offset);
-    
-    const queryString = queryParams.toString();
-    return this.request(`/api/plantingrequests${queryString ? `?${queryString}` : ''}`);
-  }
-
-  async getPlantingRequest(id) {
-    return this.request(`/api/plantingrequests/${id}`);
-  }
-
-  async createPlantingRequest(requestData) {
-    return this.request('/api/plantingrequests', {
-      method: 'POST',
-      body: requestData,
-    });
-  }
-
-  async updatePlantingRequestStatus(id, statusData) {
-    return this.request(`/api/plantingrequests/${id}/status`, {
-      method: 'PATCH',
-      body: statusData,
-    });
-  }
-
-  async deletePlantingRequest(id) {
-    return this.request(`/api/plantingrequests/${id}`, {
-      method: 'DELETE',
-    });
-  }
-
-  async getPlantingRequestsStats() {
-    return this.request('/api/plantingrequests/stats/summary');
-  }
-
-  // ========== USERS ==========
   async getUsers() {
     return this.request('/api/users');
   }
 
   async getUser(userId = null) {
     try {
-      // If no userId provided, get current user
       if (!userId) {
         return await this.request('/api/users/me');
       }
-      // Otherwise get specific user
       return await this.request(`/api/users/${userId}`);
     } catch (error) {
       console.warn('Failed to fetch user:', error.message);
       
-      // Fallback to mock data for development
       if (process.env.NODE_ENV === 'development') {
         return this.getMockUserData();
       }
@@ -229,7 +306,6 @@ class ApiService {
     });
   }
 
-  // Mock user data for development
   getMockUserData() {
     console.log('Using mock user data for development');
     return {
@@ -257,82 +333,18 @@ class ApiService {
 
   // ========== SENSORS ==========
   async getSensors() {
-    try {
-      // Since your sensors are in RTDB, we need to create a proper structure
-      // This is a mock implementation - you'll need to adapt to your actual RTDB structure
-      const mockSensors = [
-        {
-          id: 's101',
-          location_id: 'LOC_s101',
-          latitude: 10.338582993,
-          longitude: 123.912025452,
-          sensor_status: 'active',
-          sensor_lastCalibrationDate: '2025-10-27',
-          latest_reading: {
-            pH: 0.72,
-            soilMoisture: 34.8,
-            temperature: 25.7
-          },
-          last_updated: '2025-10-27T14:52:35Z',
-          readings: [
-            {
-              pH: 0.72,
-              soilMoisture: 34.8,
-              temperature: 25.7,
-              timestamp: '2025-10-27T14:52:35Z',
-              readingId: 'data_001'
-            }
-          ]
-        }
-      ];
-      return mockSensors;
-    } catch (error) {
-      console.error('Error fetching sensors:', error);
-      throw error;
-    }
+    return this.request('/api/sensors');
   }
 
   async getSensorById(id) {
-    return this.request(`/sensors/${id}`);
+    return this.request(`/api/sensors/${id}`);
   }
 
-  // ========== LOCATIONS ==========
-  async getLocations() {
-    try {
-      // Mock locations data - replace with actual Firestore call
-      const mockLocations = [
-        {
-          id: 'LOC_s101',
-          location_name: 'Sensor Location 101',
-          location_latitude: 10.338582993,
-          location_longitude: 123.912025452,
-          location_type: 'forest',
-          location_area: 'Cebu'
-        }
-      ];
-      return mockLocations;
-    } catch (error) {
-      console.error('Error fetching locations:', error);
-      throw error;
-    }
+  async getSensorData(sensorId, params = {}) {
+    const queryParams = new URLSearchParams(params).toString();
+    return this.request(`/api/sensors/${sensorId}/data?${queryParams}`);
   }
 
-  async getLocationById(id) {
-    return this.request(`/locations/${id}`);
-  }
-
-  // ========== RECOMMENDATIONS ==========
-  async generateRecommendations(sensorData, options = {}) {
-    return this.request('/recommendations/generate', {
-      method: 'POST',
-      body: { sensorData, options }
-    });
-  }
-
-  async getRecommendations() {
-    return this.request('/recommendations');
-  }
-  
   // ========== TREE SEEDLINGS ==========
   async getTreeSeedlings() {
     return this.request('/api/tree-seedlings');
@@ -346,37 +358,6 @@ class ApiService {
     return this.request(`/api/tree-seedlings/category/${category}`);
   }
 
-  // ========== PLANTING TASKS ==========
-  async getPlantingTasks(userId = null, status = null) {
-    const params = new URLSearchParams();
-    if (userId) params.append('user_id', userId);
-    if (status) params.append('task_status', status);
-    
-    const query = params.toString();
-    return this.request(`/api/plantingtasks${query ? `?${query}` : ''}`);
-  }
-
-  async createPlantingTask(taskData) {
-    return this.request('/api/plantingtasks', {
-      method: 'POST',
-      body: taskData,
-    });
-  }
-
-  async updatePlantingTaskStatus(id, status) {
-    return this.request(`/api/plantingtasks/${id}/status`, {
-      method: 'PATCH',
-      body: { task_status: status },
-    });
-  }
-
-  // ========== NOTIFICATION STATISTICS ==========
-  async getNotificationStats(targetRole = null) {
-    const queryParams = new URLSearchParams();
-    if (targetRole) queryParams.append('targetRole', targetRole);
-    return this.request(`/api/notifications/stats/summary?${queryParams}`);
-  }
-
   // ========== HEALTH CHECK ==========
   async healthCheck() {
     return this.request('/health');
@@ -388,7 +369,6 @@ class ApiService {
       return await this.request('/api/roles');
     } catch (error) {
       console.warn('Roles endpoint not available:', error.message);
-      // Return mock roles for development
       return [
         { id: 'admin', role_name: 'Administrator' },
         { id: 'user', role_name: 'User' },
@@ -402,16 +382,13 @@ class ApiService {
       return await this.request(`/api/users/${userId}/login-history`);
     } catch (error) {
       console.warn('Login history not available:', error.message);
-      // Return mock login history
-      return [
-        {
-          id: '1',
-          timestamp: new Date().toISOString(),
-          ip: '192.168.1.1',
-          device: 'Chrome on Windows',
-          success: true
-        }
-      ];
+      return [{
+        id: '1',
+        timestamp: new Date().toISOString(),
+        ip: '192.168.1.1',
+        device: 'Chrome on Windows',
+        success: true
+      }];
     }
   }
 
@@ -420,16 +397,13 @@ class ApiService {
       return await this.request(`/api/users/${userId}/audit-logs`);
     } catch (error) {
       console.warn('Audit logs not available:', error.message);
-      // Return mock audit logs
-      return [
-        {
-          id: '1',
-          timestamp: new Date().toISOString(),
-          action: 'Profile updated',
-          details: 'User updated their profile information',
-          ip: '192.168.1.1'
-        }
-      ];
+      return [{
+        id: '1',
+        timestamp: new Date().toISOString(),
+        action: 'Profile updated',
+        details: 'User updated their profile information',
+        ip: '192.168.1.1'
+      }];
     }
   }
 
@@ -441,7 +415,6 @@ class ApiService {
       });
     } catch (error) {
       console.warn('Audit log creation failed:', error.message);
-      // Silently fail in development
       return { success: true };
     }
   }
@@ -458,16 +431,13 @@ class ApiService {
       return await this.request(`/api/users/${userId}/active-sessions`);
     } catch (error) {
       console.warn('Active sessions not available:', error.message);
-      // Return mock active sessions
-      return [
-        {
-          id: '1',
-          browser: 'Chrome',
-          os: 'Windows',
-          ip: '192.168.1.1',
-          lastActive: new Date().toISOString()
-        }
-      ];
+      return [{
+        id: '1',
+        browser: 'Chrome',
+        os: 'Windows',
+        ip: '192.168.1.1',
+        lastActive: new Date().toISOString()
+      }];
     }
   }
 
@@ -487,7 +457,6 @@ class ApiService {
       return await this.request(`/api/users/${userId}/export-audit-logs`);
     } catch (error) {
       console.warn('Export audit logs failed:', error.message);
-      // Return mock data for export
       return { logs: [] };
     }
   }

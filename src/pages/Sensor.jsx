@@ -1,17 +1,6 @@
-// src/pages/Sensors.js - DEBUGGED AND UPDATED
+// src/pages/Sensors.js - BACKEND ONLY (NO DIRECT FIREBASE)
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { ref, onValue, get } from 'firebase/database';
-import { rtdb, auth, firestore } from '../firebase.js';
 import { apiService } from '../services/api';
-import {
-  collection,
-  doc,
-  setDoc,
-  addDoc,
-  getDocs,
-  serverTimestamp,
-  updateDoc
-} from "firebase/firestore";
 import {
   Box,
   Paper,
@@ -39,13 +28,9 @@ import {
   Alert,
   Snackbar,
   Tooltip,
-  Divider,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
   Tab,
-  Tabs
+  Tabs,
+  useMediaQuery
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { 
@@ -55,21 +40,17 @@ import {
   Science as ScienceIcon,
   Close as CloseIcon,
   LocationOn as LocationIcon,
-  CalendarToday as CalendarIcon,
   Thermostat as ThermostatIcon,
   WaterDrop as WaterDropIcon,
   Science as pHIcon,
   Refresh as RefreshIcon,
-  TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
-  Timeline as TimelineIcon,
-  Eco as EcoIcon,
   Info as InfoIcon,
   History as HistoryIcon
 } from '@mui/icons-material';
 import ReForestAppBar from './AppBar.jsx';
 import Navigation from './Navigation.jsx';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 const drawerWidth = 240;
 
@@ -77,12 +58,13 @@ const drawerWidth = 240;
 // BACKEND API CONFIGURATION
 // ============================================================================
 const BACKEND_CONFIG = {
-  BASE_URL: process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000/api',
+  BASE_URL: process.env.REACT_APP_API_URL || 'http://localhost:5000',
   ENDPOINTS: {
-    RECOMMENDATIONS: '/recommendations/generate',
-    SENSORS: '/sensors',
-    DATASET_STATS: '/recommendations/dataset/stats',
-    DATASET: '/dataset',
+    RECOMMENDATIONS: '/api/recommendations/generate',
+    RECOMMENDATIONS_SAVE: '/api/recommendations',
+    SENSORS: '/api/sensors',
+    SENSOR_DATA: (sensorId) => `/api/sensors/${sensorId}/data`,
+    LOCATIONS: '/api/locations',
     HEALTH: '/health'
   }
 };
@@ -91,7 +73,7 @@ const BACKEND_CONFIG = {
 // VALIDATION SCHEMA
 // ============================================================================
 const SensorDataSchema = {
-  ph: { min: 0, max: 14, required: true, optimal: [6.0, 8.0] },
+  pH: { min: 0, max: 14, required: true, optimal: [6.0, 8.0] },
   soilMoisture: { min: 0, max: 100, required: true, optimal: [30, 70] },
   temperature: { min: -10, max: 60, required: true, optimal: [20, 35] }
 };
@@ -108,12 +90,12 @@ const getCurrentSeason = () => {
 
 // Enhanced validation with warnings
 const validateSensorData = (sensorData) => {
-  const { ph, soilMoisture, temperature } = sensorData;
+  const { pH, soilMoisture, temperature } = sensorData;
   const errors = [];
   const warnings = [];
   
   // Handle "N/A" values
-  if (ph === "N/A" || soilMoisture === "N/A" || temperature === "N/A") {
+  if (pH === "N/A" || soilMoisture === "N/A" || temperature === "N/A") {
     errors.push('Sensor data contains N/A values');
     return { isValid: false, errors, warnings, hasWarnings: false };
   }
@@ -177,6 +159,30 @@ const backendService = {
     } catch (error) {
       console.error('Backend API Error:', error);
       throw new Error(`Backend service unavailable: ${error.message}`);
+    }
+  },
+
+  // Save recommendations to backend
+  async saveRecommendation(recommendationData) {
+    try {
+      const response = await fetch(`${BACKEND_CONFIG.BASE_URL}${BACKEND_CONFIG.ENDPOINTS.RECOMMENDATIONS_SAVE}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(recommendationData)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      console.error('Save recommendation error:', error);
+      throw error;
     }
   },
 
@@ -299,7 +305,7 @@ const SensorHistoryGrid = ({ readings }) => {
               </TableHead>
               <TableBody>
                 {paginatedReadings.map((reading, index) => (
-                  <TableRow key={reading.readingId || index}>
+                  <TableRow key={reading.id || index}>
                     <TableCell>
                       <Typography variant="body2">
                         {formatTimestamp(reading.timestamp)}
@@ -322,7 +328,7 @@ const SensorHistoryGrid = ({ readings }) => {
                     </TableCell>
                     <TableCell>
                       <Typography variant="caption" color="text.secondary" fontFamily="monospace">
-                        {reading.readingId || `reading_${index}`}
+                        {reading.id || `reading_${index}`}
                       </Typography>
                     </TableCell>
                   </TableRow>
@@ -375,7 +381,8 @@ function TabPanel(props) {
 function Sensors() {
   const theme = useTheme();
   const navigate = useNavigate();
-  const user = auth.currentUser;
+  const { user, logout } = useAuth();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
   // UI State
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -429,7 +436,6 @@ function Sensors() {
           showNotification('Backend server unavailable. ML recommendations will not work.', 'warning');
         } else {
           console.log('✅ Backend server is healthy');
-          showNotification('Backend server connected successfully', 'success');
         }
       } catch (error) {
         setBackendStatus('unavailable');
@@ -441,91 +447,89 @@ function Sensors() {
   }, [showNotification]);
 
   // ============================================================================
-  // FETCH SENSORS FROM RTDB
+  // FETCH SENSORS FROM BACKEND (Backend fetches from RTDB)
   // ============================================================================
-  const fetchSensorsFromRTDB = useCallback(async () => {
+  const fetchSensorsFromBackend = useCallback(async () => {
     try {
-      console.log('📡 Fetching sensors from RTDB...');
-      const sensorsRef = ref(rtdb, 'sensors');
-      const snapshot = await get(sensorsRef);
+      console.log('📡 Fetching sensors from backend API...');
       
-      if (!snapshot.exists()) {
-        console.warn('No sensors found in RTDB');
+      // Backend handles RTDB connection
+      const sensorsData = await apiService.getSensors();
+      
+      if (!Array.isArray(sensorsData) || sensorsData.length === 0) {
+        console.warn('No sensors found');
         return [];
       }
       
-      const sensorsData = snapshot.val();
-      const sensorsArray = [];
-      
-      // Convert RTDB object to array
-      Object.keys(sensorsData).forEach(sensorId => {
-        const sensor = sensorsData[sensorId];
-        const sensordata = sensor.sensordata || {};
+      // Process sensor data from backend response
+      const processedSensors = sensorsData.map(sensor => {
+        const latestReading = sensor.latest_reading || {};
         
-        // Get all readings
-        const readings = [];
-        Object.keys(sensordata).forEach(readingId => {
-          const reading = sensordata[readingId];
-          readings.push({
-            ...reading,
-            readingId,
-            timestamp: reading.timestamp || new Date().toISOString()
-          });
-        });
-        
-        // Get latest reading
-        const latestReading = readings.length > 0 ? readings[0] : null;
-        
-        sensorsArray.push({
-          id: sensorId,
+        return {
+          id: sensor.id,
           location_id: sensor.location_id,
           latitude: sensor.latitude,
           longitude: sensor.longitude,
           sensor_status: sensor.sensor_status || 'active',
           sensor_lastCalibrationDate: sensor.sensor_lastCalibrationDate,
+          sensor_location: sensor.sensor_location,
+          sensor_type: sensor.sensor_type,
           coordinates: {
             latitude: sensor.latitude,
             longitude: sensor.longitude
           },
-          // Current readings
-          ph: latestReading?.pH !== undefined ? parseFloat(latestReading.pH) : "N/A",
-          soilMoisture: latestReading?.soilMoisture !== undefined ? parseFloat(latestReading.soilMoisture) : "N/A",
-          temperature: latestReading?.temperature !== undefined ? parseFloat(latestReading.temperature) : "N/A",
-          // Historical data
-          readings: readings,
-          timestamp: latestReading?.timestamp || null,
-          latestReadingId: latestReading?.readingId || null
-        });
+          // Current readings from latest_reading
+          pH: latestReading.pH !== undefined ? parseFloat(latestReading.pH) : "N/A",
+          soilMoisture: latestReading.soilMoisture !== undefined ? parseFloat(latestReading.soilMoisture) : "N/A",
+          temperature: latestReading.temperature !== undefined ? parseFloat(latestReading.temperature) : "N/A",
+          timestamp: latestReading.timestamp || null,
+          // Historical data placeholder (will be loaded on demand)
+          readings: [],
+          readingsLoaded: false
+        };
       });
       
-      console.log(`✅ Loaded ${sensorsArray.length} sensors from RTDB`);
-      return sensorsArray;
+      console.log(`✅ Loaded ${processedSensors.length} sensors from backend`);
+      return processedSensors;
       
     } catch (error) {
-      console.error('❌ Error fetching sensors from RTDB:', error);
+      console.error('❌ Error fetching sensors from backend:', error);
       throw error;
     }
   }, []);
 
   // ============================================================================
-  // FETCH LOCATIONS FROM FIRESTORE
+  // FETCH SENSOR HISTORY (on-demand when viewing details)
+  // ============================================================================
+  const fetchSensorHistory = async (sensorId) => {
+    try {
+      console.log(`📊 Fetching history for sensor ${sensorId}...`);
+      const historyData = await apiService.getSensorData(sensorId, { limit: 100 });
+      
+      console.log(`✅ Loaded ${historyData.length} readings for sensor ${sensorId}`);
+      return historyData;
+    } catch (error) {
+      console.error('❌ Error fetching sensor history:', error);
+      showNotification('Failed to load sensor history', 'warning');
+      return [];
+    }
+  };
+
+  // ============================================================================
+  // FETCH LOCATIONS FROM BACKEND
   // ============================================================================
   const fetchLocations = useCallback(async () => {
     try {
-      console.log('📍 Fetching locations from Firestore...');
-      const locationsCollection = collection(firestore, 'locations');
-      const locationsSnapshot = await getDocs(locationsCollection);
-      const locationsData = {};
+      console.log('📍 Fetching locations from backend...');
+      const locationsData = await apiService.getLocations();
       
-      locationsSnapshot.forEach((doc) => {
-        locationsData[doc.id] = {
-          id: doc.id,
-          ...doc.data()
-        };
+      const locationsMap = {};
+      locationsData.forEach((location) => {
+        locationsMap[location.id] = location;
       });
       
-      console.log(`✅ Loaded ${Object.keys(locationsData).length} locations`);
-      return locationsData;
+      console.log(`✅ Loaded ${Object.keys(locationsMap).length} locations`);
+      return locationsMap;
     } catch (error) {
       console.error('❌ Error fetching locations:', error);
       showNotification('Failed to load location data', 'warning');
@@ -541,7 +545,7 @@ function Sensors() {
       setLoading(true);
       try {
         const [sensorsData, locationsData] = await Promise.all([
-          fetchSensorsFromRTDB(),
+          fetchSensorsFromBackend(),
           fetchLocations()
         ]);
 
@@ -551,7 +555,7 @@ function Sensors() {
           
           return {
             ...sensor,
-            location: locationInfo?.location_name || `Location ${sensor.location_id}`,
+            location: locationInfo?.location_name || sensor.sensor_location || `Location ${sensor.location_id}`,
             locationRef: sensor.location_id ? `/locations/${sensor.location_id}` : null,
             status: sensor.sensor_status || "Unknown",
             statusDescription: `Sensor is currently ${sensor.sensor_status || 'Unknown'}`,
@@ -573,7 +577,7 @@ function Sensors() {
     };
 
     fetchData();
-  }, [fetchSensorsFromRTDB, fetchLocations, showNotification]);
+  }, [fetchSensorsFromBackend, fetchLocations, showNotification]);
 
   // ============================================================================
   // REFRESH HANDLER
@@ -583,8 +587,26 @@ function Sensors() {
     setError(null);
     
     try {
-      await fetchSensorsFromRTDB();
-      await fetchLocations();
+      const [sensorsData, locationsData] = await Promise.all([
+        fetchSensorsFromBackend(),
+        fetchLocations()
+      ]);
+
+      const processedSensors = sensorsData.map(sensor => {
+        const locationInfo = locationsData[sensor.location_id];
+        
+        return {
+          ...sensor,
+          location: locationInfo?.location_name || sensor.sensor_location || `Location ${sensor.location_id}`,
+          locationRef: sensor.location_id ? `/locations/${sensor.location_id}` : null,
+          status: sensor.sensor_status || "Unknown",
+          statusDescription: `Sensor is currently ${sensor.sensor_status || 'Unknown'}`,
+          lastCalibration: sensor.sensor_lastCalibrationDate || null,
+        };
+      });
+
+      setSensors(processedSensors);
+      setLocations(locationsData);
       showNotification('Data refreshed successfully', 'success');
     } catch (error) {
       console.error('❌ Refresh failed:', error);
@@ -604,12 +626,12 @@ function Sensors() {
       setProcessingMLSensor(sensorId);
       setMlProgress({ step: 'Initializing...', percent: 10 });
       
-      const { ph, soilMoisture, temperature } = sensor;
+      const { pH, soilMoisture, temperature } = sensor;
       
       // ========== STEP 1: VALIDATION ==========
       setMlProgress({ step: 'Validating sensor data...', percent: 20 });
       
-      const validation = validateSensorData({ ph, soilMoisture, temperature });
+      const validation = validateSensorData({ pH, soilMoisture, temperature });
       
       if (!validation.isValid) {
         throw new Error(`Invalid sensor data: ${validation.errors.join(', ')}`);
@@ -626,7 +648,7 @@ function Sensors() {
       setMlProgress({ step: 'Preparing data for ML processing...', percent: 30 });
       
       const sensorData = {
-        ph: parseFloat(ph),
+        ph: parseFloat(pH),
         soilMoisture: parseFloat(soilMoisture),
         temperature: parseFloat(temperature),
         location: sensor.location
@@ -652,7 +674,7 @@ function Sensors() {
       
       console.log('✅ Backend recommendations received:', result.recommendations);
       
-      // ========== STEP 4: SAVE TO FIRESTORE ==========
+      // ========== STEP 4: SAVE TO BACKEND (Backend saves to Firestore) ==========
       setMlProgress({ step: 'Saving recommendations...', percent: 80 });
       
       const recommendationData = {
@@ -662,15 +684,14 @@ function Sensors() {
         recommendations: result.recommendations,
         algorithm: result.algorithm,
         confidenceScore: result.recommendations[0]?.confidenceScore || 0,
-        generatedAt: serverTimestamp(),
         season: getCurrentSeason(),
         backendProcessed: true
       };
 
-      const recommendationsRef = collection(firestore, "recommendations");
-      const recoDocRef = await addDoc(recommendationsRef, recommendationData);
+      // Backend handles saving to Firestore
+      const savedRecommendation = await backendService.saveRecommendation(recommendationData);
       
-      console.log(`💾 Recommendation saved: ${recoDocRef.id}`);
+      console.log(`💾 Recommendation saved via backend:`, savedRecommendation);
 
       // ========== STEP 5: COMPLETE ==========
       setMlProgress({ step: 'Complete!', percent: 100 });
@@ -711,14 +732,21 @@ function Sensors() {
   // EVENT HANDLERS
   // ============================================================================
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
-  const handleLogout = () => auth.signOut();
+  const handleLogout = () => logout();
   const handleChangePage = (event, newPage) => setPage(newPage);
   const handleChangeRowsPerPage = (event) => {
     setRowsPerPage(parseInt(event.target.value, 10));
     setPage(0);
   };
 
-  const handleSensorClick = (sensor) => {
+  const handleSensorClick = async (sensor) => {
+    // Load sensor history if not already loaded
+    if (!sensor.readingsLoaded) {
+      const history = await fetchSensorHistory(sensor.id);
+      sensor.readings = history;
+      sensor.readingsLoaded = true;
+    }
+    
     setSelectedSensor(sensor);
     setSensorDetailOpen(true);
     setDialogTab(0);
@@ -768,14 +796,15 @@ function Sensors() {
       <Navigation 
         mobileOpen={mobileOpen} 
         handleDrawerToggle={handleDrawerToggle} 
-        isMobile={false} 
+        isMobile={isMobile}
+        user={user}
       />
 
       <Box component="main" sx={{ flexGrow: 1, p: 3, width: { md: `calc(100% - ${drawerWidth}px)` } }}>
         <Toolbar />
 
         {/* ========== HEADER ========== */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
           <Box>
             <Typography variant="h4" sx={{ color: '#2e7d32', fontWeight: 600, mb: 1 }}>
               ReForest Sensors
@@ -785,7 +814,7 @@ function Sensors() {
               {Object.keys(locations).length > 0 && ` • ${Object.keys(locations).length} locations`}
             </Typography>
           </Box>
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
             <Chip
               label={backendStatusInfo.text}
               color={backendStatusInfo.color}
@@ -828,7 +857,7 @@ function Sensors() {
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 300 }}>
             <CircularProgress sx={{ mb: 2 }} />
             <Typography variant="body1" color="textSecondary">
-              Loading sensors and locations...
+              Loading sensors from backend (RTDB via API)...
             </Typography>
           </Box>
         ) : sensors.length === 0 ? (
@@ -838,7 +867,7 @@ function Sensors() {
               No sensors found
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Ensure sensors are configured in the database.
+              Ensure sensors are configured in the Realtime Database and the backend is running.
             </Typography>
             <Button variant="outlined" onClick={handleRefresh} startIcon={<RefreshIcon />}>
               Retry
@@ -863,7 +892,7 @@ function Sensors() {
                 <TableBody>
                   {displayedSensors.map((sensor) => {
                     const validation = validateSensorData({
-                      ph: sensor.ph,
+                      pH: sensor.pH,
                       soilMoisture: sensor.soilMoisture,
                       temperature: sensor.temperature
                     });
@@ -902,13 +931,13 @@ function Sensors() {
                           <Typography 
                             variant="body2" 
                             sx={{ 
-                              color: sensor.ph !== "N/A" && sensor.ph >= SensorDataSchema.ph.optimal[0] && sensor.ph <= SensorDataSchema.ph.optimal[1] 
+                              color: sensor.pH !== "N/A" && sensor.pH >= SensorDataSchema.pH.optimal[0] && sensor.pH <= SensorDataSchema.pH.optimal[1] 
                                 ? 'success.main' 
-                                : sensor.ph !== "N/A" ? 'warning.main' : 'text.secondary',
-                              fontWeight: sensor.ph !== "N/A" ? 'medium' : 'normal'
+                                : sensor.pH !== "N/A" ? 'warning.main' : 'text.secondary',
+                              fontWeight: sensor.pH !== "N/A" ? 'medium' : 'normal'
                             }}
                           >
-                            {formatValue(sensor.ph)}
+                            {formatValue(sensor.pH)}
                           </Typography>
                         </TableCell>
                         <TableCell>
@@ -1056,9 +1085,9 @@ function Sensors() {
                             <pHIcon sx={{ fontSize: 16, verticalAlign: 'middle', mr: 0.5 }} />
                             pH Level
                           </Typography>
-                          <Typography variant="h4">{formatValue(selectedSensor.ph)}</Typography>
+                          <Typography variant="h4">{formatValue(selectedSensor.pH)}</Typography>
                           <Typography variant="caption" color="text.secondary">
-                            Optimal: {SensorDataSchema.ph.optimal.join(' - ')}
+                            Optimal: {SensorDataSchema.pH.optimal.join(' - ')}
                           </Typography>
                         </CardContent>
                       </Card>
@@ -1127,7 +1156,7 @@ function Sensors() {
           <DialogActions>
             <Button onClick={handleCloseSensorDetail}>Close</Button>
             {selectedSensor && validateSensorData({
-              ph: selectedSensor.ph,
+              pH: selectedSensor.pH,
               soilMoisture: selectedSensor.soilMoisture,
               temperature: selectedSensor.temperature
             }).isValid && backendStatus === 'healthy' && (
@@ -1166,7 +1195,7 @@ function Sensors() {
             </Typography>
             {backendStatus === 'healthy' && (
               <Typography variant="caption" color="primary" sx={{ mt: 1, display: 'block' }}>
-                Using backend ML processing
+                Using backend ML processing (RTDB via API)
               </Typography>
             )}
           </DialogContent>
