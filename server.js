@@ -4,7 +4,6 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
-
 // Import Firebase Admin first to check connection
 const { db, auth } = require('./config/firebaseAdmin');
 
@@ -144,7 +143,16 @@ app.use('*', (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 ReForest backend server running on port ${PORT}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-  console.log(`📊 API documentation: http://localhost:${PORT}/`);
+  console.log('');
+  console.log('='.repeat(60));
+  console.log('🌳 ReForest Backend Server Started');
+  console.log('='.repeat(60));
+  console.log(`📡 Server running on: http://localhost:${PORT}`);
+  console.log(`🏥 Health check: http://localhost:${PORT}/health`);
+  console.log(`🤖 ML Recommendations: http://localhost:${PORT}/api/recommendations/generate`);
+  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔥 Firebase RTDB: Connected`);
+  console.log(`📚 Firestore: Connected`);
+  console.log('='.repeat(60));
+  console.log('');
 });

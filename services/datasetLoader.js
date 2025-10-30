@@ -1,17 +1,6 @@
-// src/utils/datasetLoader.js - Complete Production-Ready Version with Random Forest
+// services/datasetLoader.js - Complete Production-Ready Version with Random Forest-backend
 import * as XLSX from 'xlsx';
-import { 
-  collection, 
-  doc, 
-  setDoc, 
-  getDocs, 
-  query, 
-  where, 
-  orderBy, 
-  limit,
-  serverTimestamp 
-} from 'firebase/firestore';
-import { firestore } from '../firebase.js';
+
 
 // ============================================================================
 // CONFIGURATION

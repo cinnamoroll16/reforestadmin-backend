@@ -1,21 +1,29 @@
 // routes/plantingrecords.js
 const express = require('express');
-const { db, admin } = require('../config/firebaseAdmin');
+const { db } = require('../config/firebaseAdmin');
 const router = express.Router();
 
-// Get all planting records
+// Get planting records (completed tasks)
 router.get('/', async (req, res) => {
   try {
-    const recordsSnapshot = await db.collection('plantingrecords').get();
+    let query = db.collection('plantingrecords');
+    
+    // You can add filters here if needed
+    const snapshot = await query.get();
     const records = [];
     
-    recordsSnapshot.forEach(doc => {
+    snapshot.forEach(doc => {
+      const data = doc.data();
       records.push({
         id: doc.id,
-        ...doc.data()
+        ...data,
+        record_date: data.record_date || data.createdAt?.toDate?.() || new Date(),
+        // Convert timestamps to ISO strings for frontend
+        createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString()
       });
     });
 
+    console.log(`✅ Found ${records.length} planting records`);
     res.json(records);
   } catch (error) {
     console.error('Get planting records error:', error);
@@ -23,22 +31,25 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Create planting record
-router.post('/', async (req, res) => {
+// Get planting record by ID
+router.get('/:id', async (req, res) => {
   try {
-    const recordData = {
-      ...req.body,
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
-    };
-
-    const docRef = await db.collection('plantingrecords').add(recordData);
+    const { id } = req.params;
+    const doc = await db.collection('plantingrecords').doc(id).get();
     
-    res.status(201).json({
-      message: 'Planting record created successfully',
-      id: docRef.id
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Planting record not found' });
+    }
+
+    const data = doc.data();
+    res.json({
+      id: doc.id,
+      ...data,
+      record_date: data.record_date || data.createdAt?.toDate?.() || new Date(),
+      createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString()
     });
   } catch (error) {
-    console.error('Create planting record error:', error);
+    console.error('Get planting record error:', error);
     res.status(500).json({ error: error.message });
   }
 });
