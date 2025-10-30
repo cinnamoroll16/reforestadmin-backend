@@ -1,16 +1,11 @@
-// src/pages/Notification.js - DEBUGGED VERSION
+// src/pages/Notification.js - UPDATED WITH TWO TABS
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Button, Chip, Dialog, DialogTitle, DialogContent,
   DialogActions, Grid, Alert, IconButton,
   Badge, useMediaQuery, useTheme, Avatar, LinearProgress, alpha,
-  Tabs, Tab
+  Tabs, Tab, Snackbar, CircularProgress, Toolbar
 } from '@mui/material';
-import { 
-  collection, getDocs, doc, updateDoc, addDoc,
-  query, where, onSnapshot, serverTimestamp, getDoc
-} from 'firebase/firestore';
-import { firestore } from "../firebase.js";
 import ReForestAppBar from './AppBar.jsx';
 import Navigation from './Navigation.jsx';
 import { useAuth } from '../context/AuthContext.js';
@@ -24,13 +19,13 @@ import NewReleasesIcon from '@mui/icons-material/NewReleases';
 import DeleteIcon from '@mui/icons-material/Delete';
 import MarkAsReadIcon from '@mui/icons-material/DoneAll';
 import AssignmentIcon from '@mui/icons-material/Assignment';
-import NatureIcon from '@mui/icons-material/Nature'; // Changed from Eco to Nature
+import ForestIcon from '@mui/icons-material/Forest';
 import HistoryIcon from '@mui/icons-material/History';
 
 const drawerWidth = 240;
 
 // =============================================================================
-// NOTIFICATION HELPER FUNCTIONS
+// NOTIFICATION HELPER FUNCTIONS (Updated for API integration)
 // =============================================================================
 
 export const createPlantRequestNotification = async (plantRequestData, plantRequestId) => {
@@ -48,20 +43,20 @@ export const createPlantRequestNotification = async (plantRequestData, plantRequ
         createdBy: plantRequestData.createdBy,
         requestStatus: 'pending'
       },
-      targetRole: 'admin',
+      targetRole: 'admin', // Changed to 'admin'
       read: false,
       resolved: false,
       hidden: false,
       priority: 'medium',
-      notif_timestamp: serverTimestamp(),
-      updatedAt: serverTimestamp()
+      notif_timestamp: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
 
-    const docRef = await addDoc(collection(firestore, 'notifications'), notificationData);
-    console.log('✓ Notification created:', docRef.id);
-    return docRef.id;
+    const result = await apiService.createNotification(notificationData);
+    console.log('✓ Notification created via API:', result.id);
+    return result.id;
   } catch (error) {
-    console.error('Error creating notification:', error);
+    console.error('Error creating notification via API:', error);
     throw error;
   }
 };
@@ -85,106 +80,85 @@ export const createPlantingRecordNotification = async (plantingRecordData, plant
         plantingDate: plantingRecordData.plantingDate,
         status: 'completed'
       },
-      targetRole: 'admin',
+      targetRole: 'admin', // Changed to 'admin'
       read: false,
       resolved: false,
       hidden: false,
       priority: 'low',
-      notif_timestamp: serverTimestamp(),
-      updatedAt: serverTimestamp()
+      notif_timestamp: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
 
-    const docRef = await addDoc(collection(firestore, 'notifications'), notificationData);
-    console.log('✓ Planting record notification created:', docRef.id);
-    return docRef.id;
+    const result = await apiService.createNotification(notificationData);
+    console.log('✓ Planting record notification created via API:', result.id);
+    return result.id;
   } catch (error) {
-    console.error('Error creating planting record notification:', error);
+    console.error('Error creating planting record notification via API:', error);
     throw error;
   }
 };
 
 export const markNotificationAsRead = async (notificationId) => {
   try {
-    const notificationRef = doc(firestore, 'notifications', notificationId);
-    await updateDoc(notificationRef, {
+    await apiService.updateNotification(notificationId, {
       read: true,
-      updatedAt: serverTimestamp()
+      updatedAt: new Date().toISOString()
     });
   } catch (error) {
-    console.error('Error marking notification as read:', error);
+    console.error('Error marking notification as read via API:', error);
     throw error;
   }
 };
 
 export const hideNotification = async (notificationId) => {
   try {
-    const notificationRef = doc(firestore, 'notifications', notificationId);
-    await updateDoc(notificationRef, {
+    await apiService.updateNotification(notificationId, {
       hidden: true,
-      hiddenAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
+      hiddenAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     });
   } catch (error) {
-    console.error('Error hiding notification:', error);
+    console.error('Error hiding notification via API:', error);
     throw error;
   }
 };
 
-// Helper function to resolve location reference
+// Helper function to resolve location reference using API
 const resolveLocationRef = async (locationRef) => {
   if (!locationRef) return 'Unknown Location';
   
   try {
-    // If it's a string path like "/locations/abc123"
-    if (typeof locationRef === 'string') {
-      const locationId = locationRef.split('/').pop();
-      const locationDoc = await getDoc(doc(firestore, 'locations', locationId));
-      if (locationDoc.exists()) {
-        return locationDoc.data().location_name || 'Unknown Location';
-      }
-    }
-    // If it's a reference object
-    else if (locationRef.path) {
-      const locationId = locationRef.path.split('/').pop();
-      const locationDoc = await getDoc(doc(firestore, 'locations', locationId));
-      if (locationDoc.exists()) {
-        return locationDoc.data().location_name || 'Unknown Location';
-      }
+    // Extract location ID from reference
+    const locationId = typeof locationRef === 'string' 
+      ? locationRef.split('/').pop() 
+      : locationRef.path?.split('/').pop();
+    
+    if (locationId) {
+      const locationData = await apiService.getLocationById(locationId);
+      return locationData?.location_name || locationData?.name || 'Unknown Location';
     }
   } catch (error) {
-    console.error('Error resolving location:', error);
+    console.error('Error resolving location via API:', error);
   }
   
   return 'Unknown Location';
 };
 
-// Helper function to resolve user reference
+// Helper function to resolve user reference using API
 const resolveUserRef = async (userRef) => {
   if (!userRef) return { name: 'Unknown User', email: 'N/A' };
   
   try {
-    // If it's a string path like "/users/abc123"
-    if (typeof userRef === 'string') {
-      const userId = userRef.split('/').pop();
-      const userDoc = await getDoc(doc(firestore, 'users', userId));
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
+    // Extract user ID from reference
+    const userId = typeof userRef === 'string' 
+      ? userRef.split('/').pop() 
+      : userRef.path?.split('/').pop();
+    
+    if (userId) {
+      const userData = await apiService.getUser(userId);
+      if (userData) {
         return {
-          name: `${userData.user_Firstname || ''} ${userData.user_Lastname || ''}`.trim() || 
-                `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 
-                'Unknown User',
-          email: userData.user_email || userData.email || 'N/A'
-        };
-      }
-    }
-    // If it's a reference object
-    else if (userRef.path) {
-      const userId = userRef.path.split('/').pop();
-      const userDoc = await getDoc(doc(firestore, 'users', userId));
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        return {
-          name: `${userData.user_Firstname || ''} ${userData.user_Lastname || ''}`.trim() || 
+          name: `${userData.user_firstname || userData.user_Firstname || ''} ${userData.user_lastname || userData.user_Lastname || ''}`.trim() || 
                 `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 
                 'Unknown User',
           email: userData.user_email || userData.email || 'N/A'
@@ -192,14 +166,14 @@ const resolveUserRef = async (userRef) => {
       }
     }
   } catch (error) {
-    console.error('Error resolving user:', error);
+    console.error('Error resolving user via API:', error);
   }
   
   return { name: 'Unknown User', email: 'N/A' };
 };
 
 // =============================================================================
-// DATA FETCHING FUNCTIONS
+// DATA FETCHING FUNCTIONS (Updated for API integration)
 // =============================================================================
 
 // Fetch planting requests from API
@@ -210,8 +184,8 @@ const fetchPlantingRequests = async () => {
     console.log('✅ Planting requests loaded via API:', response.length);
     return response;
   } catch (error) {
-    console.warn('⚠ API fetch failed, falling back to Firestore:', error.message);
-    return fetchPlantingRequestsFromFirestore();
+    console.error('❌ API fetch failed:', error.message);
+    return [];
   }
 };
 
@@ -223,88 +197,20 @@ const fetchPlantingRecords = async () => {
     console.log('✅ Planting records loaded via API:', response.length);
     return response;
   } catch (error) {
-    console.warn('⚠ API fetch failed, falling back to Firestore:', error.message);
-    return fetchPlantingRecordsFromFirestore();
-  }
-};
-
-// Fallback function to fetch planting requests directly from Firestore
-const fetchPlantingRequestsFromFirestore = async () => {
-  try {
-    console.log('🔄 Fetching planting requests from Firestore...');
-    const querySnapshot = await getDocs(collection(firestore, 'plantingrequests'));
-    const requests = [];
-    
-    for (const docSnap of querySnapshot.docs) {
-      const requestData = docSnap.data();
-      let locationName = 'Unknown Location';
-      let fullName = 'Unknown User';
-      
-      // Resolve location name
-      if (requestData.locationRef) {
-        locationName = await resolveLocationRef(requestData.locationRef);
-      }
-      
-      // Resolve user name
-      if (requestData.userRef) {
-        const userInfo = await resolveUserRef(requestData.userRef);
-        fullName = userInfo.name;
-      }
-      
-      requests.push({
-        id: docSnap.id,
-        ...requestData,
-        locationName,
-        fullName
-      });
-    }
-    
-    console.log('✅ Planting requests loaded from Firestore:', requests.length);
-    return requests;
-  } catch (error) {
-    console.error('❌ Error fetching planting requests from Firestore:', error);
+    console.error('❌ API fetch failed:', error.message);
     return [];
   }
 };
 
-// Fallback function to fetch planting records directly from Firestore
-const fetchPlantingRecordsFromFirestore = async () => {
+// Fetch notifications from API
+const fetchNotifications = async () => {
   try {
-    console.log('🔄 Fetching planting records from Firestore...');
-    const querySnapshot = await getDocs(collection(firestore, 'plantingrecords'));
-    const records = [];
-    
-    for (const docSnap of querySnapshot.docs) {
-      const recordData = docSnap.data();
-      let locationName = 'Unknown Location';
-      let fullName = 'Unknown User';
-      let userEmail = 'N/A';
-      
-      // Resolve location name
-      if (recordData.locationRef) {
-        locationName = await resolveLocationRef(recordData.locationRef);
-      }
-      
-      // Resolve user information
-      if (recordData.userRef) {
-        const userInfo = await resolveUserRef(recordData.userRef);
-        fullName = userInfo.name;
-        userEmail = userInfo.email;
-      }
-      
-      records.push({
-        id: docSnap.id,
-        ...recordData,
-        locationName,
-        fullName,
-        userEmail
-      });
-    }
-    
-    console.log('✅ Planting records loaded from Firestore:', records.length);
-    return records;
+    console.log('🔔 Fetching notifications via API...');
+    const response = await apiService.getNotifications();
+    console.log('✅ Notifications loaded via API:', response.length);
+    return response;
   } catch (error) {
-    console.error('❌ Error fetching planting records from Firestore:', error);
+    console.error('❌ API fetch failed:', error.message);
     return [];
   }
 };
@@ -328,6 +234,7 @@ const NotificationPanel = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
   const [alert, setAlert] = useState({ open: false, message: '', severity: 'info' });
+  const [saving, setSaving] = useState(false);
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -340,112 +247,11 @@ const NotificationPanel = () => {
     setActiveTab(newValue);
   };
 
-  const convertTimestamp = (timestamp) => {
-    if (!timestamp) return null;
-    if (timestamp.toDate && typeof timestamp.toDate === 'function') {
-      return timestamp.toDate();
-    }
-    if (timestamp.seconds !== undefined) {
-      return new Date(timestamp.seconds * 1000);
-    }
-    if (timestamp instanceof Date) {
-      return timestamp;
-    }
-    if (typeof timestamp === 'string') {
-      return new Date(timestamp);
-    }
-    return null;
-  };
-
-  // Fetch combined notifications
-  const fetchNotifications = async () => {
-    try {
-      console.log('🔔 Fetching combined notifications via API...');
-      
-      const [requestsData, recordsData] = await Promise.all([
-        fetchPlantingRequests(),
-        fetchPlantingRecords()
-      ]);
-
-      // Create notification objects from planting requests
-      const requestNotifications = requestsData.map(request => {
-        const timestamp = convertTimestamp(request.request_date) || new Date();
-        
-        return {
-          id: `request-${request.id}`,
-          type: 'plant_request',
-          notification_type: 'pending',
-          title: 'New Planting Request',
-          message: `User ${request.fullName} has submitted a planting request for ${request.locationName}`,
-          notif_message: `User ${request.fullName} has submitted a planting request for ${request.locationName}`,
-          data: {
-            plantRequestId: request.id,
-            userRef: request.userRef,
-            locationRef: request.locationRef,
-            preferredDate: request.preferred_date,
-            requestStatus: request.requestStatus || request.request_status || 'pending'
-          },
-          targetRole: 'admin',
-          read: false,
-          resolved: false,
-          hidden: false,
-          priority: 'medium',
-          timestamp: timestamp,
-          notif_timestamp: timestamp,
-          createdAt: timestamp,
-          updatedAt: timestamp
-        };
-      });
-
-      // Create notification objects from planting records
-      const recordNotifications = recordsData.map(record => {
-        const timestamp = convertTimestamp(record.plantingDate) || new Date();
-        
-        return {
-          id: `record-${record.id}`,
-          type: 'planting_record',
-          notification_type: 'completed',
-          title: 'Planting Activity Completed',
-          message: `User ${record.fullName} has planted ${record.treeSeedlingName || 'a tree'} in ${record.locationName}`,
-          notif_message: `User ${record.fullName} has planted ${record.treeSeedlingName || 'a tree'} in ${record.locationName}`,
-          data: {
-            plantingRecordId: record.id,
-            userRef: record.userRef,
-            locationRef: record.locationRef,
-            treeSeedlingName: record.treeSeedlingName,
-            plantingDate: record.plantingDate,
-            status: 'completed'
-          },
-          targetRole: 'admin',
-          read: false,
-          resolved: false,
-          hidden: false,
-          priority: 'low',
-          timestamp: timestamp,
-          notif_timestamp: timestamp,
-          createdAt: timestamp,
-          updatedAt: timestamp
-        };
-      });
-
-      const combinedNotifications = [...requestNotifications, ...recordNotifications];
-      const sortedNotifications = combinedNotifications.sort((a, b) => 
-        new Date(b.timestamp) - new Date(a.timestamp)
-      );
-      
-      console.log(`✅ Loaded ${sortedNotifications.length} combined notifications`);
-      return sortedNotifications;
-      
-    } catch (error) {
-      console.warn('⚠ Combined notifications fetch failed:', error.message);
-      return [];
-    }
-  };
-
+  // Load all data using API service
   const loadData = async () => {
     try {
       setLoading(true);
-      console.log('🔄 Loading notification data...');
+      console.log('🔄 Loading notification data via API...');
 
       const [notificationsData, requestsData, recordsData] = await Promise.all([
         fetchNotifications(),
@@ -457,7 +263,7 @@ const NotificationPanel = () => {
       setPlantingRequests(requestsData);
       setPlantingRecords(recordsData);
 
-      console.log('✅ Notification data loaded successfully');
+      console.log('✅ Notification data loaded successfully via API');
       setLoading(false);
 
     } catch (error) {
@@ -471,65 +277,18 @@ const NotificationPanel = () => {
     }
   };
 
-  const setupRealTimeListeners = () => {
-    let unsubscribeRequests = null;
-    let unsubscribeRecords = null;
-
-    try {
-      const requestsQuery = collection(firestore, 'plantingrequests');
-      unsubscribeRequests = onSnapshot(requestsQuery, 
-        async () => {
-          console.log('🔄 Real-time update: Planting requests changed');
-          const [notificationsData, requestsData] = await Promise.all([
-            fetchNotifications(),
-            fetchPlantingRequests()
-          ]);
-          setNotifications(notificationsData);
-          setPlantingRequests(requestsData);
-        },
-        (error) => {
-          console.error('❌ Real-time requests listener error:', error);
-        }
-      );
-
-      const recordsQuery = collection(firestore, 'plantingrecords');
-      unsubscribeRecords = onSnapshot(recordsQuery, 
-        async () => {
-          console.log('🔄 Real-time update: Planting records changed');
-          const [notificationsData, recordsData] = await Promise.all([
-            fetchNotifications(),
-            fetchPlantingRecords()
-          ]);
-          setNotifications(notificationsData);
-          setPlantingRecords(recordsData);
-        },
-        (error) => {
-          console.error('❌ Real-time records listener error:', error);
-        }
-      );
-
-    } catch (error) {
-      console.warn('⚠ Real-time listeners setup failed:', error.message);
-    }
-
-    return () => {
-      if (unsubscribeRequests) unsubscribeRequests();
-      if (unsubscribeRecords) unsubscribeRecords();
-    };
-  };
-
+  // Setup polling for real-time updates
   useEffect(() => {
     loadData();
-    const cleanup = setupRealTimeListeners();
+
+    // Set up polling for real-time updates
     const pollInterval = setInterval(() => {
       loadData();
-    }, 30000);
+    }, 30000); // Poll every 30 seconds
 
     return () => {
-      cleanup();
       clearInterval(pollInterval);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleViewDetails = (request) => {
@@ -548,13 +307,7 @@ const NotificationPanel = () => {
     
     if (!notification.read) {
       try {
-        try {
-          await apiService.updateNotification(notification.id, { read: true });
-          console.log('✅ Notification marked as read via API');
-        } catch (apiError) {
-          console.warn('⚠ API mark as read failed:', apiError.message);
-          await markNotificationAsRead(notification.id);
-        }
+        await apiService.updateNotification(notification.id, { read: true });
         
         setNotifications(prev => prev.map(n => 
           n.id === notification.id ? { ...n, read: true } : n
@@ -567,42 +320,38 @@ const NotificationPanel = () => {
 
   const handleMarkAllAsRead = async () => {
     try {
+      setSaving(true);
       const unreadNotifications = notifications.filter(n => !n.read);
       
-      try {
-        await apiService.markMultipleNotificationsAsRead(unreadNotifications.map(n => n.id));
-        console.log('✅ All notifications marked as read via API');
-      } catch (apiError) {
-        console.warn('⚠ API bulk mark as read failed:', apiError.message);
-        const updatePromises = unreadNotifications.map(notification => 
-          markNotificationAsRead(notification.id)
-        );
-        await Promise.all(updatePromises);
-      }
+      // Mark each unread notification as read
+      const updatePromises = unreadNotifications.map(notification => 
+        apiService.updateNotification(notification.id, { read: true })
+      );
+      
+      await Promise.all(updatePromises);
       
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
       setAlert({ open: true, message: 'All notifications marked as read', severity: 'success' });
     } catch (error) {
       console.error('Error marking all notifications as read:', error);
       setAlert({ open: true, message: 'Error marking notifications as read', severity: 'error' });
+    } finally {
+      setSaving(false);
     }
   };
 
   const handleRemoveNotification = async (notificationId) => {
     try {
-      try {
-        await apiService.deleteNotification(notificationId);
-        console.log('✅ Notification removed via API');
-      } catch (apiError) {
-        console.warn('⚠ API delete failed:', apiError.message);
-        await hideNotification(notificationId);
-      }
+      setSaving(true);
+      await apiService.deleteNotification(notificationId);
       
       setNotifications(prev => prev.filter(n => n.id !== notificationId));
       setAlert({ open: true, message: 'Notification removed', severity: 'success' });
     } catch (error) {
       console.error('Error removing notification:', error);
       setAlert({ open: true, message: 'Error removing notification', severity: 'error' });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -622,7 +371,7 @@ const NotificationPanel = () => {
       case 'plant_request': return <NewReleasesIcon />;
       case 'request_approved': return <CheckCircleIcon />;
       case 'request_rejected': return <CancelIcon />;
-      case 'planting_record': return <EcoIcon />;
+      case 'planting_record': return <ForestIcon />;
       default: return <NotificationsIcon />;
     }
   };
@@ -637,14 +386,6 @@ const NotificationPanel = () => {
           return parsed.toLocaleDateString();
         }
         return date;
-      }
-      
-      if (date && typeof date === 'object' && 'seconds' in date) {
-        return new Date(date.seconds * 1000).toLocaleDateString();
-      }
-      
-      if (date && typeof date.toDate === 'function') {
-        return date.toDate().toLocaleDateString();
       }
       
       if (date instanceof Date) {
@@ -673,10 +414,6 @@ const NotificationPanel = () => {
       
       if (typeof date === 'string') {
         dateObj = new Date(date);
-      } else if (date && typeof date === 'object' && 'seconds' in date) {
-        dateObj = new Date(date.seconds * 1000);
-      } else if (date && typeof date.toDate === 'function') {
-        dateObj = date.toDate();
       } else if (date instanceof Date) {
         dateObj = date;
       }
@@ -698,11 +435,69 @@ const NotificationPanel = () => {
     }
   };
 
-  const unreadCount = notifications.filter(n => !n.read).length;
-  const pendingCount = plantingRequests.length;
-  const recordsCount = plantingRecords.length;
+  // Combine all notifications: API notifications + planting requests + planting records
+  const allNotifications = [
+    ...notifications,
+    ...plantingRequests.map(request => ({
+      id: `request-${request.id}`,
+      type: 'plant_request',
+      notification_type: 'pending',
+      title: 'New Planting Request',
+      message: `User ${request.fullName} has submitted a planting request for ${request.locationName}`,
+      notif_message: `User ${request.fullName} has submitted a planting request for ${request.locationName}`,
+      data: {
+        plantRequestId: request.id,
+        userRef: request.userRef,
+        locationRef: request.locationRef,
+        preferredDate: request.preferred_date,
+        requestStatus: request.requestStatus || request.request_status || 'pending'
+      },
+      targetRole: 'admin',
+      read: false,
+      resolved: false,
+      hidden: false,
+      priority: 'medium',
+      timestamp: request.request_date || new Date().toISOString(),
+      notif_timestamp: request.request_date || new Date().toISOString(),
+      createdAt: request.request_date || new Date().toISOString(),
+      updatedAt: request.request_date || new Date().toISOString()
+    })),
+    ...plantingRecords.map(record => ({
+      id: `record-${record.id}`,
+      type: 'planting_record',
+      notification_type: 'completed',
+      title: 'Planting Activity Completed',
+      message: `User ${record.fullName} has planted ${record.treeSeedlingName || 'a tree'} in ${record.locationName}`,
+      notif_message: `User ${record.fullName} has planted ${record.treeSeedlingName || 'a tree'} in ${record.locationName}`,
+      data: {
+        plantingRecordId: record.id,
+        userRef: record.userRef,
+        locationRef: record.locationRef,
+        treeSeedlingName: record.treeSeedlingName,
+        plantingDate: record.plantingDate,
+        status: 'completed'
+      },
+      targetRole: 'admin',
+      read: false,
+      resolved: false,
+      hidden: false,
+      priority: 'low',
+      timestamp: record.plantingDate || new Date().toISOString(),
+      notif_timestamp: record.plantingDate || new Date().toISOString(),
+      createdAt: record.plantingDate || new Date().toISOString(),
+      updatedAt: record.plantingDate || new Date().toISOString()
+    }))
+  ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-  // NotificationRow component - FIXED SYNTAX ERROR
+  // Filter notifications for each tab
+  const plantingRequestNotifications = allNotifications.filter(
+    notification => notification.type === 'plant_request'
+  );
+
+  const unreadCount = allNotifications.filter(n => !n.read).length;
+  const plantingRequestUnreadCount = plantingRequestNotifications.filter(n => !n.read).length;
+
+  // NotificationRow component
   const NotificationRow = ({ notification }) => (
     <Paper 
       sx={{ 
@@ -803,7 +598,7 @@ const NotificationPanel = () => {
           
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
             <Typography variant="caption" color="text.secondary">
-              {formatDateTime(notification.timestamp)}
+              {formatDateTime(notification.notif_timestamp || notification.timestamp)}
             </Typography>
             <Typography variant="caption" color="text.secondary">
               • {formatType(notification.type)}
@@ -821,126 +616,12 @@ const NotificationPanel = () => {
             size="small" 
             onClick={() => handleRemoveNotification(notification.id)}
             color="error"
+            disabled={saving}
             sx={{ opacity: 0.7, '&:hover': { opacity: 1 } }}
             title="Remove notification"
           >
-            <DeleteIcon />
+            {saving ? <CircularProgress size={20} /> : <DeleteIcon />}
           </IconButton>
-        </Box>
-      </Box>
-    </Paper>
-  );
-
-  const RequestRow = ({ request }) => (
-    <Paper 
-      sx={{ 
-        p: 2, 
-        mb: 1,
-        borderRadius: 2,
-        cursor: 'pointer',
-        transition: 'all 0.2s ease-in-out',
-        '&:hover': { 
-          transform: 'translateY(-1px)',
-          boxShadow: 2
-        }
-      }}
-      onClick={() => handleViewDetails(request)}
-    >
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Avatar sx={{ bgcolor: '#2e7d32', width: 40, height: 40 }}>
-            {(request.fullName || 'U').charAt(0)}
-          </Avatar>
-          
-          <Box>
-            <Typography variant="subtitle1" fontWeight="bold">
-              {request.fullName || 'Unknown User'}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {request.createdBy || 'N/A'}
-            </Typography>
-          </Box>
-        </Box>
-        
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <LocationOnIcon fontSize="small" color="action" />
-            <Typography variant="body2">
-              {request.locationName || 'Unknown Location'}
-            </Typography>
-          </Box>
-          
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <CalendarTodayIcon fontSize="small" color="action" />
-            <Typography variant="body2">
-              {typeof request.preferred_date === 'string' 
-                ? request.preferred_date 
-                : formatDate(request.preferred_date)}
-            </Typography>
-          </Box>
-          
-          <Chip 
-            label={request.requestStatus || request.request_status || 'pending'} 
-            color={getStatusColor(request.requestStatus || request.request_status || 'pending')}
-            size="small"
-          />
-        </Box>
-      </Box>
-    </Paper>
-  );
-
-  const RecordRow = ({ record }) => (
-    <Paper 
-      sx={{ 
-        p: 2, 
-        mb: 1,
-        borderRadius: 2,
-        cursor: 'pointer',
-        transition: 'all 0.2s ease-in-out',
-        '&:hover': { 
-          transform: 'translateY(-1px)',
-          boxShadow: 2
-        }
-      }}
-      onClick={() => handleViewRecord(record)}
-    >
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Avatar sx={{ bgcolor: '#4caf50', width: 40, height: 40 }}>
-            <EcoIcon />
-          </Avatar>
-          
-          <Box>
-            <Typography variant="subtitle1" fontWeight="bold">
-              {record.fullName || 'Unknown User'}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {record.userEmail || 'N/A'}
-            </Typography>
-          </Box>
-        </Box>
-        
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <LocationOnIcon fontSize="small" color="action" />
-            <Typography variant="body2">
-              {record.locationName || 'Unknown Location'}
-            </Typography>
-          </Box>
-          
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <EcoIcon fontSize="small" color="action" />
-            <Typography variant="body2">
-              {record.treeSeedlingName || 'Unknown Tree'}
-            </Typography>
-          </Box>
-          
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <CalendarTodayIcon fontSize="small" color="action" />
-            <Typography variant="body2">
-              {formatDate(record.plantingDate)}
-            </Typography>
-          </Box>
         </Box>
       </Box>
     </Paper>
@@ -957,6 +638,20 @@ const NotificationPanel = () => {
       </Typography>
     </Paper>
   );
+
+  // Get current notifications based on active tab
+  const getCurrentNotifications = () => {
+    switch (activeTab) {
+      case 0: // All Notifications
+        return allNotifications;
+      case 1: // Planting Requests Only
+        return plantingRequestNotifications;
+      default:
+        return allNotifications;
+    }
+  };
+
+  const currentNotifications = getCurrentNotifications();
 
   if (loading) {
     return (
@@ -1016,14 +711,15 @@ const NotificationPanel = () => {
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-              {activeTab === 0 && unreadCount > 0 && (
+              {unreadCount > 0 && (
                 <Button
-                  startIcon={<MarkAsReadIcon />}
+                  startIcon={saving ? <CircularProgress size={20} /> : <MarkAsReadIcon />}
                   onClick={handleMarkAllAsRead}
                   variant="outlined"
                   color="primary"
+                  disabled={saving}
                 >
-                  Mark All as Read
+                  {saving ? 'Marking...' : 'Mark All as Read'}
                 </Button>
               )}
               <Button
@@ -1038,13 +734,11 @@ const NotificationPanel = () => {
           </Box>
         </Box>
 
-        {/* Enhanced Tab Design */}
+        {/* Two Tabs: All Notifications and Planting Requests */}
         <Paper sx={{ mb: 3, borderRadius: 2, boxShadow: 2 }}>
           <Tabs 
-            value={activeTab} 
+            value={activeTab}
             onChange={handleTabChange}
-            variant={isMobile ? "scrollable" : "fullWidth"}
-            scrollButtons={isMobile ? "auto" : false}
             sx={{
               '& .MuiTab-root': { 
                 fontWeight: 600,
@@ -1085,7 +779,7 @@ const NotificationPanel = () => {
                     All Notifications
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {notifications.length} total
+                    {allNotifications.length} total • {plantingRequests.length} requests • {plantingRecords.length} records
                   </Typography>
                 </Box>
               }
@@ -1094,8 +788,8 @@ const NotificationPanel = () => {
             <Tab 
               icon={
                 <Badge 
-                  badgeContent={pendingCount} 
-                  color="warning"
+                  badgeContent={plantingRequestUnreadCount} 
+                  color="error"
                   sx={{ 
                     '& .MuiBadge-badge': { 
                       right: -3, 
@@ -1115,37 +809,7 @@ const NotificationPanel = () => {
                     Planting Requests
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {pendingCount} pending
-                  </Typography>
-                </Box>
-              }
-              iconPosition="start"
-            />
-            <Tab 
-              icon={
-                <Badge 
-                  badgeContent={recordsCount} 
-                  color="success"
-                  sx={{ 
-                    '& .MuiBadge-badge': { 
-                      right: -3, 
-                      top: 3,
-                      fontSize: '0.7rem',
-                      minWidth: 18,
-                      height: 18
-                    } 
-                  }}
-                >
-                  <HistoryIcon />
-                </Badge>
-              }
-              label={
-                <Box>
-                  <Typography variant="body2" fontWeight="600">
-                    Planting Records
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {recordsCount} completed
+                    {plantingRequestNotifications.length} requests pending review
                   </Typography>
                 </Box>
               }
@@ -1154,13 +818,14 @@ const NotificationPanel = () => {
           </Tabs>
         </Paper>
 
+        {/* Tab Content */}
         {activeTab === 0 && (
           <>
             <Typography variant="h6" sx={{ color: '#2e7d32', fontWeight: 600, mb: 2 }}>
               All Notifications
             </Typography>
             
-            {notifications.length === 0 ? (
+            {allNotifications.length === 0 ? (
               <EmptyState 
                 icon={NotificationsIcon}
                 title="No notifications available"
@@ -1168,7 +833,7 @@ const NotificationPanel = () => {
               />
             ) : (
               <Box>
-                {notifications.map((notification) => (
+                {allNotifications.map((notification) => (
                   <NotificationRow key={notification.id} notification={notification} />
                 ))}
               </Box>
@@ -1181,39 +846,17 @@ const NotificationPanel = () => {
             <Typography variant="h6" sx={{ color: '#2e7d32', fontWeight: 600, mb: 2 }}>
               Planting Requests
             </Typography>
-
-            {plantingRequests.length === 0 ? (
+            
+            {plantingRequestNotifications.length === 0 ? (
               <EmptyState 
-                icon={CalendarTodayIcon}
-                title="No pending planting requests"
-                description="New planting requests will appear here for review"
+                icon={AssignmentIcon}
+                title="No planting requests"
+                description="New planting requests will appear here when submitted"
               />
             ) : (
               <Box>
-                {plantingRequests.map((request) => (
-                  <RequestRow key={request.id} request={request} />
-                ))}
-              </Box>
-            )}
-          </>
-        )}
-
-        {activeTab === 2 && (
-          <>
-            <Typography variant="h6" sx={{ color: '#2e7d32', fontWeight: 600, mb: 2 }}>
-              Planting Records
-            </Typography>
-
-            {plantingRecords.length === 0 ? (
-              <EmptyState 
-                icon={EcoIcon}
-                title="No planting records available"
-                description="Completed planting activities will appear here"
-              />
-            ) : (
-              <Box>
-                {plantingRecords.map((record) => (
-                  <RecordRow key={record.id} record={record} />
+                {plantingRequestNotifications.map((notification) => (
+                  <NotificationRow key={notification.id} notification={notification} />
                 ))}
               </Box>
             )}
@@ -1243,14 +886,10 @@ const NotificationPanel = () => {
                   <Typography variant="subtitle2" color="text.secondary">Request Details</Typography>
                   <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
                     <Typography>
-                      <strong>Preferred Date:</strong>{' '}
-                      {typeof selectedRequest.preferred_date === 'string' 
-                        ? selectedRequest.preferred_date 
-                        : formatDate(selectedRequest.preferred_date) || 'N/A'}
+                      <strong>Preferred Date:</strong> {formatDate(selectedRequest.preferred_date) || 'N/A'}
                     </Typography>
                     <Typography>
-                      <strong>Submitted At:</strong>{' '}
-                      {formatDateTime(selectedRequest.request_date) || 'N/A'}
+                      <strong>Submitted At:</strong> {formatDateTime(selectedRequest.request_date) || 'N/A'}
                     </Typography>
                     <Typography>
                       <strong>Status:</strong> 
@@ -1357,7 +996,7 @@ const NotificationPanel = () => {
                   </Grid>
                   <Grid item xs={6}>
                     <Typography variant="subtitle2" color="text.secondary">Created</Typography>
-                    <Typography variant="body2">{formatDateTime(selectedNotification.timestamp)}</Typography>
+                    <Typography variant="body2">{formatDateTime(selectedNotification.notif_timestamp || selectedNotification.timestamp)}</Typography>
                   </Grid>
                   <Grid item xs={6}>
                     <Typography variant="subtitle2" color="text.secondary">Status</Typography>
@@ -1373,6 +1012,23 @@ const NotificationPanel = () => {
             <Button onClick={() => setNotificationDialogOpen(false)}>Close</Button>
           </DialogActions>
         </Dialog>
+
+        {/* Success Snackbar */}
+        <Snackbar
+          open={!!alert.open && alert.severity === 'success'}
+          autoHideDuration={4000}
+          onClose={() => setAlert({ ...alert, open: false })}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        >
+          <Alert 
+            severity="success" 
+            onClose={() => setAlert({ ...alert, open: false })} 
+            sx={{ width: '100%', borderRadius: 2 }}
+            icon={<CheckCircleIcon />}
+          >
+            {alert.message}
+          </Alert>
+        </Snackbar>
       </Box>
     </Box>
   );

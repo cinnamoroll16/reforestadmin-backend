@@ -74,8 +74,36 @@ function Recommendations() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
+   const getDefaultSensorData = () => {
+    console.log("⚠️ Using default sensor data");
+    return {
+      sensorId: 'N/A',
+      soilMoisture: 0,
+      temperature: 0,
+      pH: 0,
+      timestamp: new Date().toISOString()
+    };
+  };
 
-  // Generate status based on confidence score
+  const extractSensorId = (sensorDataRef) => {
+    if (!sensorDataRef || sensorDataRef === 'N/A') {
+      return 'N/A';
+    }
+    
+    try {
+      const parts = sensorDataRef.split('/').filter(Boolean);
+      if (parts.length >= 2) {
+        return parts[1];
+      } else if (parts.length === 1) {
+        return parts[0];
+      }
+      return 'N/A';
+    } catch (error) {
+      console.error('Error extracting sensor ID:', error);
+      return 'N/A';
+    }
+  };
+
   const generateStatus = (confidenceScore) => {
     const score = typeof confidenceScore === 'string' ? parseFloat(confidenceScore) : confidenceScore;
     const scorePercent = score > 1 ? score : score * 100;
@@ -159,16 +187,26 @@ function Recommendations() {
     }
   };
 
-  // Fetch location data using API service
+  // Improved fetchLocationData with better error handling and logging
   const fetchLocationData = async (locationRef) => {
     try {
+      console.log("📍 fetchLocationData called with:", locationRef);
+      
       if (!locationRef || locationRef === 'N/A') {
         console.log("❌ No location reference provided");
-        return null;
+        // Return a default location instead of null
+        return {
+          locationId: 'unknown',
+          location_name: 'Unknown Location',
+          location_latitude: 'N/A',
+          location_longitude: 'N/A'
+        };
       }
       
       // Parse path: "/locations/locA" or just "locA"
       const parts = locationRef.split('/').filter(Boolean);
+      console.log("📋 Location ref parts:", parts);
+      
       let locationId;
       
       if (parts.length >= 2) {
@@ -179,36 +217,64 @@ function Recommendations() {
         locationId = parts[0];
       } else {
         console.log("❌ Unsupported location reference format");
-        return null;
+        return {
+          locationId: 'unknown',
+          location_name: 'Unknown Location',
+          location_latitude: 'N/A',
+          location_longitude: 'N/A'
+        };
       }
       
-      console.log(`📍 Fetching location data for: ${locationId}`);
+      console.log(`📍 Fetching location data for ID: ${locationId}`);
       
       try {
         const locationData = await apiService.getLocationById(locationId);
+        console.log("✅ Location data received:", locationData);
         
         if (!locationData) {
-          console.log(`❌ Location ${locationId} not found`);
-          return null;
+          console.log(`❌ Location ${locationId} not found in database`);
+          return {
+            locationId: locationId,
+            location_name: `Location ${locationId}`,
+            location_latitude: 'N/A',
+            location_longitude: 'N/A'
+          };
         }
         
-        return {
+        // Ensure we have all required fields
+        const processedLocationData = {
           locationId: locationId,
-          location_name: locationData.location_name || locationData.name || 'Unknown Location',
+          location_name: locationData.location_name || locationData.name || `Location ${locationId}`,
           location_latitude: locationData.location_latitude || locationData.latitude || 'N/A',
           location_longitude: locationData.location_longitude || locationData.longitude || 'N/A',
           ...locationData
         };
+        
+        console.log("✅ Processed location data:", processedLocationData);
+        return processedLocationData;
+        
       } catch (apiError) {
-        console.error(`API location fetch failed for ${locationId}:`, apiError);
-        return null;
+        console.error(`❌ API location fetch failed for ${locationId}:`, apiError);
+        // Return fallback data instead of null
+        return {
+          locationId: locationId,
+          location_name: `Location ${locationId}`,
+          location_latitude: 'N/A',
+          location_longitude: 'N/A'
+        };
       }
     } catch (error) {
-      console.error("Error fetching location data:", error);
-      return null;
+      console.error("❌ Error in fetchLocationData:", error);
+      // Return fallback data instead of null
+      return {
+        locationId: 'unknown',
+        location_name: 'Unknown Location',
+        location_latitude: 'N/A',
+        location_longitude: 'N/A'
+      };
     }
   };
-
+  
   // Fetch seedlings for one recommendation using API service
   const fetchSeedlingsForRecommendation = async (seedlingRefs) => {
     try {
@@ -248,19 +314,37 @@ function Recommendations() {
       return [];
     }
   };
-
-  // Handle implementing recommendation (creating planting task) using API service
+  
+  // Improved handleImplementRecommendation with better validation
   const handleImplementRecommendation = async (reco) => {
     try {
       setSaving(true);
       setError(null);
       
-      console.log("🔄 Implementing recommendation:", reco.reco_id);
+      console.log("🔄 Implementing recommendation:", reco);
+      console.log("📍 Location data:", reco.locationData);
+      console.log("📍 Location ID:", reco.locationData?.locationId);
       
-      // Validate required data
-      if (!reco.locationData?.locationId) {
-        throw new Error('Location data is required to implement recommendation');
+      // Better validation with more informative error messages
+      if (!reco.locationData) {
+        console.error("❌ locationData is undefined or null");
+        throw new Error('Location data is missing. The recommendation may be corrupted.');
       }
+      
+      if (!reco.locationData.locationId || reco.locationData.locationId === 'unknown') {
+        console.error("❌ locationId is invalid:", reco.locationData.locationId);
+        throw new Error('Location ID is missing or invalid. Cannot create planting task.');
+      }
+      
+      // Log all recommendation data for debugging
+      console.log("📊 Full recommendation data:", {
+        reco_id: reco.reco_id,
+        sensorDataRef: reco.sensorDataRef,
+        locationRef: reco.locationRef,
+        locationData: reco.locationData,
+        sensorData: reco.sensorData,
+        seedlings: reco.recommendedSeedlings?.length || 0
+      });
       
       // Create a new planting task document using API service
       const taskData = {
@@ -308,15 +392,18 @@ function Recommendations() {
 
     } catch (error) {
       console.error('❌ Error creating planting task:', error);
+      console.error('❌ Error stack:', error.stack);
       
       // More specific error messages
       let errorMessage = 'Failed to create planting task. ';
       if (error.message.includes('Network Error')) {
         errorMessage += 'Please check your internet connection and try again.';
-      } else if (error.message.includes('Location data')) {
-        errorMessage += 'Location data is missing. Please check the recommendation details.';
+      } else if (error.message.includes('Location')) {
+        errorMessage += error.message;
+      } else if (error.message.includes('corrupted')) {
+        errorMessage += 'The recommendation data is incomplete. Please try generating a new recommendation.';
       } else {
-        errorMessage += 'Please try again.';
+        errorMessage += error.message || 'Please try again.';
       }
       
       setError(errorMessage);
@@ -337,7 +424,7 @@ function Recommendations() {
     setRecoToDelete(reco);
     setDeleteDialogOpen(true);
   };
-
+  
   const confirmDelete = async () => {
     try {
       if (!recoToDelete) return;
@@ -378,9 +465,8 @@ function Recommendations() {
     setDeleteDialogOpen(false);
     setRecoToDelete(null);
   };
-
-  // Load recommendations using API service
-  // Update the loadRecommendations function to include sensorConditions
+  
+  // Updated loadRecommendations function with better error handling
   const loadRecommendations = async () => {
     setLoading(true);
     setError(null);
@@ -388,46 +474,91 @@ function Recommendations() {
     try {
       console.log('========== LOADING RECOMMENDATIONS ==========');
       
+      // Fetch recommendations from API
       const recommendationsData = await apiService.getRecommendations();
       console.log('✓ Raw recommendations data:', recommendationsData);
+      console.log('✓ Number of recommendations:', recommendationsData?.length);
 
-      if (!recommendationsData || recommendationsData.length === 0) {
-        console.log('No recommendations found');
+      // Check if data exists
+      if (!recommendationsData) {
+        console.error('❌ recommendationsData is null or undefined');
         setRecommendations([]);
         setLoading(false);
         return;
       }
 
+      if (!Array.isArray(recommendationsData)) {
+        console.error('❌ recommendationsData is not an array:', typeof recommendationsData);
+        setRecommendations([]);
+        setLoading(false);
+        return;
+      }
+
+      if (recommendationsData.length === 0) {
+        console.log('⚠️ No recommendations found in database');
+        setRecommendations([]);
+        setLoading(false);
+        return;
+      }
+
+      console.log(`📊 Processing ${recommendationsData.length} recommendations...`);
+
       // Process recommendations data with better error handling
       const processedRecommendations = await Promise.all(
-        recommendationsData.map(async (reco) => {
+        recommendationsData.map(async (reco, index) => {
           try {
+            console.log(`\n--- Processing recommendation ${index + 1}/${recommendationsData.length} ---`);
+            console.log('Recommendation data:', reco);
+
             // Skip deleted recommendations
-            if (reco.deleted) {
+            if (reco.deleted === true) {
+              console.log(`⏭️ Skipping deleted recommendation: ${reco.id}`);
+              return null;
+            }
+
+            // Validate required fields
+            if (!reco.id && !reco.reco_id) {
+              console.warn('⚠️ Recommendation missing ID:', reco);
               return null;
             }
 
             // 🔹 Fetch sensor data - pass sensorConditions from the recommendation
-            const sensorData = await fetchSensorData(reco.sensorDataRef, reco.sensorConditions);
+            console.log('🔍 Fetching sensor data...');
+            const sensorData = await fetchSensorData(
+              reco.sensorDataRef, 
+              reco.sensorConditions
+            );
+            console.log('✅ Sensor data:', sensorData);
             
             // 🔹 Fetch location data from reference
+            console.log('📍 Fetching location data...');
             const locationData = await fetchLocationData(reco.locationRef);
+            console.log('✅ Location data:', locationData);
 
             // 🔹 Resolve each treeseedling ref in seedlingOptions
             let seedlings = [];
             if (Array.isArray(reco.seedlingOptions) && reco.seedlingOptions.length > 0) {
+              console.log('🌱 Fetching seedlings...');
               seedlings = await fetchSeedlingsForRecommendation(reco.seedlingOptions);
+              console.log(`✅ Found ${seedlings.length} seedlings`);
             } else {
-              console.warn(`No seedling options for recommendation ${reco.id}`);
+              console.warn(`⚠️ No seedling options for recommendation ${reco.id}`);
             }
 
             // Confidence parsing with fallbacks
-            const confidenceScore = typeof reco.reco_confidenceScore === 'string'
-              ? parseFloat(reco.reco_confidenceScore)
-              : reco.reco_confidenceScore || 0.85;
+            let confidenceScore;
+            if (typeof reco.reco_confidenceScore === 'string') {
+              confidenceScore = parseFloat(reco.reco_confidenceScore);
+            } else if (typeof reco.reco_confidenceScore === 'number') {
+              confidenceScore = reco.reco_confidenceScore;
+            } else {
+              console.warn('⚠️ No confidence score found, using default 0.85');
+              confidenceScore = 0.85;
+            }
 
+            // Convert to percentage if needed
             const confidencePercentage = confidenceScore > 1
-              ? Math.min(confidenceScore, 100) // Ensure it doesn't exceed 100%
+              ? Math.min(Math.round(confidenceScore), 100)
               : Math.round(confidenceScore * 100);
 
             const status = generateStatus(confidenceScore);
@@ -435,13 +566,26 @@ function Recommendations() {
             // Date parsing with fallbacks
             let generatedDate;
             try {
-              generatedDate = reco.reco_generatedAt || reco.createdAt || new Date().toISOString();
+              if (reco.reco_generatedAt) {
+                // Handle Firestore Timestamp
+                if (reco.reco_generatedAt.toDate) {
+                  generatedDate = reco.reco_generatedAt.toDate().toISOString();
+                } else if (reco.reco_generatedAt._seconds) {
+                  generatedDate = new Date(reco.reco_generatedAt._seconds * 1000).toISOString();
+                } else {
+                  generatedDate = reco.reco_generatedAt;
+                }
+              } else if (reco.createdAt) {
+                generatedDate = reco.createdAt;
+              } else {
+                generatedDate = new Date().toISOString();
+              }
             } catch (dateError) {
-              console.warn('Invalid date, using current date:', dateError);
+              console.warn('⚠️ Invalid date, using current date:', dateError);
               generatedDate = new Date().toISOString();
             }
 
-            return {
+            const processedReco = {
               id: reco.id || reco.reco_id,
               reco_id: reco.id || reco.reco_id,
               sensorDataRef: reco.sensorDataRef || 'N/A',
@@ -454,26 +598,41 @@ function Recommendations() {
               recommendedSeedlings: seedlings,
               seedlingCount: seedlings.length,
               deleted: reco.deleted || false,
-              season: reco.season || 'unknown'
+              season: reco.season || 'unknown',
+              sensorConditions: reco.sensorConditions || {} // Keep original sensor conditions
             };
+
+            console.log('✅ Processed recommendation:', processedReco.reco_id);
+            return processedReco;
+
           } catch (recoError) {
-            console.error(`Error processing recommendation ${reco.id}:`, recoError);
+            console.error(`❌ Error processing recommendation ${reco?.id}:`, recoError);
+            console.error('Error stack:', recoError.stack);
             return null; // Skip this recommendation if there's an error
           }
         })
       );
-
       // Filter out null values (deleted recommendations or processing errors)
       const validRecommendations = processedRecommendations.filter(reco => reco !== null);
-      console.log('✅ Processed recommendations:', validRecommendations);
+      
+      console.log('\n========== PROCESSING COMPLETE ==========');
+      console.log(`✅ Successfully processed ${validRecommendations.length}/${recommendationsData.length} recommendations`);
+      console.log('Valid recommendations:', validRecommendations);
+      
       setRecommendations(validRecommendations);
       
+      if (validRecommendations.length === 0) {
+        console.warn('⚠️ No valid recommendations after processing');
+      }
+      
     } catch (error) {
-      console.error("❌ Error loading recommendations:", error);
+      console.error("❌ CRITICAL ERROR loading recommendations:", error);
+      console.error('Error stack:', error.stack);
       setError("Failed to load recommendations: " + error.message);
       setRecommendations([]);
     } finally {
       setLoading(false);
+      console.log('========== LOADING FINISHED ==========\n');
     }
   };
 

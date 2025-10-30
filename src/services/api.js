@@ -135,30 +135,18 @@ class ApiService {
   async getNotifications() {
     try {
       const response = await this.request('/api/notifications');
-      
-      // Ensure we always return an array
-      if (Array.isArray(response)) {
-        return response;
-      } else if (response && typeof response === 'object') {
-        // If it's wrapped in an object with a notifications property
-        if (Array.isArray(response.notifications)) {
-          return response.notifications;
-        }
-        // If it's a single notification, wrap in array
-        return [response];
-      }
-      
-      console.warn('Unexpected response format from getNotifications:', response);
-      return [];
+      return Array.isArray(response) ? response : [];
     } catch (error) {
       console.error('❌ Failed to fetch notifications:', error);
-      // Return empty array on error instead of throwing
       return [];
     }
   }
 
-  async getNotificationById(id) {
-    return this.request(`/api/notifications/${id}`);
+  async createNotification(notificationData) {
+    return this.request('/api/notifications', {
+      method: 'POST',
+      body: notificationData,
+    });
   }
 
   async updateNotification(id, notificationData) {
@@ -171,26 +159,6 @@ class ApiService {
   async deleteNotification(id) {
     return this.request(`/api/notifications/${id}`, {
       method: 'DELETE',
-    });
-  }
-
-  async markAllNotificationsAsRead() {
-    return this.request('/api/notifications/mark-all-read', {
-      method: 'PUT',
-    });
-  }
-
-  async createNotification(notificationData) {
-    return this.request('/api/notifications', {
-      method: 'POST',
-      body: notificationData,
-    });
-  }
-
-  async updatePlantingTask(id, taskData) {
-    return this.request(`/api/plantingtasks/${id}`, {
-      method: 'PUT',
-      body: taskData,
     });
   }
 
