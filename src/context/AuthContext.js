@@ -1,6 +1,6 @@
 // src/context/AuthContext.js
 import { useState, createContext, useContext, useEffect } from 'react';
-
+import { apiService } from '../services/api';
 const AuthContext = createContext();
 
 // Helper functions
@@ -141,42 +141,38 @@ export const AuthProvider = ({ children }) => {
     setError('');
   };
 
+  // In your AuthContext.js forgotPassword function, update the return statement:
   const forgotPassword = async (email) => {
     try {
-      setError("");
-      setLoading(true);
-
-      if (!validateEmailFormat(email)) {
-        throw new Error('Please enter a valid email address');
-      }
-
-      const response = await fetch(`${API_URL}/api/auth/forgot-password`, {
+      console.log('🔐 Forgot password request for:', email);
+      
+      const response = await apiService.request('/api/auth/forgot-password', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email: email.toLowerCase().trim() }),
+        body: { email }
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || data.message || 'Failed to send reset email');
+      if (response.success) {
+        console.log('✅ Password reset email sent successfully');
+        return { 
+          success: true, 
+          message: response.message,
+          resetLink: response.resetLink // Include reset link if provided
+        };
+      } else {
+        throw new Error(response.message || 'Failed to send reset email');
       }
-
-      return { 
-        success: true, 
-        message: data.message || 'Password reset email sent successfully'
-      };
     } catch (error) {
-      const errorMessage = getErrorMessage(error);
-      setError(errorMessage);
-      return { 
-        success: false, 
-        error: errorMessage 
-      };
-    } finally {
-      setLoading(false);
+      console.error('❌ Forgot password error:', error);
+      
+      let errorMessage = 'Failed to send reset email. Please try again.';
+      
+      if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+        errorMessage = 'Cannot connect to server. Please check your connection.';
+      } else if (error.message.includes('Invalid email')) {
+        errorMessage = 'Please enter a valid email address.';
+      }
+      
+      return { success: false, error: errorMessage };
     }
   };
 

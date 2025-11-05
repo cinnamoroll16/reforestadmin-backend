@@ -1,4 +1,4 @@
-// src/pages/ForgotPassword.jsx - Updated to use Backend API
+// src/pages/ForgotPassword.jsx - Updated to handle development mode
 import React, { useState } from 'react';
 import {
   Paper,
@@ -13,8 +13,14 @@ import {
   CircularProgress,
   Fade,
   alpha,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
-import { Email, CheckCircle, ArrowBack } from '@mui/icons-material';
+import { Email, CheckCircle, ArrowBack, ErrorOutline, ContentCopy, Close } from '@mui/icons-material';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -27,6 +33,8 @@ const ForgotPassword = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [fieldError, setFieldError] = useState('');
+  const [resetLink, setResetLink] = useState('');
+  const [showResetLink, setShowResetLink] = useState(false);
 
   // Email validation function
   const validateEmailFormat = (email) => {
@@ -65,6 +73,7 @@ const ForgotPassword = () => {
     // Clear previous errors
     setError('');
     setFieldError('');
+    setResetLink('');
     
     // Validate form
     if (!validateForm()) {
@@ -76,18 +85,27 @@ const ForgotPassword = () => {
       console.log('📧 Sending password reset email to:', formData.email);
       
       // Call API using the auth context
-      const result = await forgotPassword(formData.email);
+      const result = await forgotPassword(formData.email.trim());
       
       if (result.success) {
         console.log('✅ Password reset email sent successfully');
+        
+        // Check if we got a reset link (development mode)
+        if (result.resetLink) {
+          setResetLink(result.resetLink);
+          setShowResetLink(true);
+        }
+        
         setSuccess(true);
         
-        // Auto redirect after 8 seconds
-        setTimeout(() => {
-          navigate('/login');
-        }, 8000);
+        // Auto redirect after 8 seconds (only if no reset link shown)
+        if (!result.resetLink) {
+          setTimeout(() => {
+            navigate('/login');
+          }, 8000);
+        }
       } else {
-        throw new Error(result.error);
+        throw new Error(result.error || 'Failed to send reset email');
       }
     } catch (err) {
       console.error('❌ Forgot password error:', err);
@@ -126,13 +144,20 @@ const ForgotPassword = () => {
       setLoading(true);
       console.log('🔄 Resending password reset email to:', formData.email);
       
-      const result = await forgotPassword(formData.email);
+      const result = await forgotPassword(formData.email.trim());
       
       if (result.success) {
         console.log('✅ Password reset email resent successfully');
+        
+        // Update reset link if provided
+        if (result.resetLink) {
+          setResetLink(result.resetLink);
+          setShowResetLink(true);
+        }
+        
         setError(''); // Clear any errors
       } else {
-        throw new Error(result.error);
+        throw new Error(result.error || 'Failed to resend email');
       }
     } catch (err) {
       console.error('❌ Resend error:', err);
@@ -150,6 +175,20 @@ const ForgotPassword = () => {
       setError(errorMessage);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCopyResetLink = () => {
+    if (resetLink) {
+      navigator.clipboard.writeText(resetLink);
+      setError('Reset link copied to clipboard!');
+      setTimeout(() => setError(''), 3000);
+    }
+  };
+
+  const handleOpenResetLink = () => {
+    if (resetLink) {
+      window.open(resetLink, '_blank');
     }
   };
 
@@ -215,7 +254,7 @@ const ForgotPassword = () => {
                   gutterBottom
                   sx={{ color: '#1a1a1a', mb: 2 }}
                 >
-                  Check Your Email
+                  {resetLink ? 'Reset Link Generated' : 'Check Your Email'}
                 </Typography>
 
                 <Typography
@@ -224,25 +263,47 @@ const ForgotPassword = () => {
                   color="text.secondary"
                   sx={{ mb: 3, lineHeight: 1.6 }}
                 >
-                  We've sent password reset instructions to{' '}
-                  <strong>{formData.email}</strong>
+                  {resetLink 
+                    ? 'Your password reset link has been generated successfully.'
+                    : `We've sent password reset instructions to ${formData.email}`
+                  }
                 </Typography>
 
-                <Alert 
-                  severity="info" 
-                  sx={{ 
-                    mb: 3, 
-                    width: '100%',
-                    borderRadius: 2,
-                  }}
-                >
-                  If you don't see the email, check your spam folder.
-                </Alert>
+                {!resetLink && (
+                  <Alert 
+                    severity="info" 
+                    sx={{ 
+                      mb: 3, 
+                      width: '100%',
+                      borderRadius: 2,
+                    }}
+                  >
+                    If you don't see the email, check your spam folder.
+                  </Alert>
+                )}
 
-                {/* Error Alert for Resend */}
+                {resetLink && (
+                  <Alert 
+                    severity="warning" 
+                    sx={{ 
+                      mb: 3, 
+                      width: '100%',
+                      borderRadius: 2,
+                    }}
+                  >
+                    <Typography variant="body2" fontWeight={600} gutterBottom>
+                      Development Mode Active
+                    </Typography>
+                    <Typography variant="body2">
+                      Since this is development mode, the reset link is shown below instead of being emailed.
+                    </Typography>
+                  </Alert>
+                )}
+
+                {/* Error/Success Alert for Resend */}
                 {error && (
                   <Alert 
-                    severity="error" 
+                    severity={error.includes('copied') ? "success" : "error"}
                     sx={{ 
                       mb: 3, 
                       width: '100%',
@@ -251,6 +312,31 @@ const ForgotPassword = () => {
                   >
                     {error}
                   </Alert>
+                )}
+
+                {/* Show Reset Link Button (Development) */}
+                {resetLink && (
+                  <Button
+                    fullWidth
+                    variant="outlined"
+                    onClick={() => setShowResetLink(true)}
+                    sx={{
+                      py: 1.5,
+                      mb: 2,
+                      borderRadius: 1.5,
+                      textTransform: 'none',
+                      fontSize: '16px',
+                      fontWeight: 600,
+                      borderColor: '#ff9800',
+                      color: '#ff9800',
+                      '&:hover': {
+                        borderColor: '#f57c00',
+                        bgcolor: alpha('#ff9800', 0.04),
+                      },
+                    }}
+                  >
+                    Show Reset Link
+                  </Button>
                 )}
 
                 {/* Resend Email Button */}
@@ -306,14 +392,16 @@ const ForgotPassword = () => {
                   Back to Sign In
                 </Button>
 
-                <Typography 
-                  variant="caption" 
-                  color="text.secondary" 
-                  align="center"
-                  sx={{ mt: 2 }}
-                >
-                  Redirecting to login in 8 seconds...
-                </Typography>
+                {!resetLink && (
+                  <Typography 
+                    variant="caption" 
+                    color="text.secondary" 
+                    align="center"
+                    sx={{ mt: 2 }}
+                  >
+                    Redirecting to login in 8 seconds...
+                  </Typography>
+                )}
               </Paper>
             </Fade>
           </Grid>
@@ -384,17 +472,90 @@ const ForgotPassword = () => {
                   fontWeight: 400,
                   maxWidth: 400,
                   mx: 'auto'
+                }}
+              >
+                Join us in restoring our planet, one tree at a time
+              </Typography>
+            </Box>
+          </Grid>
+        </Grid>
+
+        {/* Reset Link Dialog */}
+        <Dialog
+          open={showResetLink}
+          onClose={() => setShowResetLink(false)}
+          maxWidth="md"
+          fullWidth
+        >
+          <DialogTitle>
+            <Box display="flex" alignItems="center" justifyContent="space-between">
+              <Typography variant="h6" fontWeight={600}>
+                Password Reset Link
+              </Typography>
+              <IconButton onClick={() => setShowResetLink(false)}>
+                <Close />
+              </IconButton>
+            </Box>
+          </DialogTitle>
+          <DialogContent>
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <Typography variant="body2">
+                This reset link is shown because you're in development mode. 
+                In production, this would be sent via email.
+              </Typography>
+            </Alert>
+            
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Copy this link and open it in your browser to reset your password:
+            </Typography>
+            
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2,
+                mt: 1,
+                mb: 2,
+                backgroundColor: '#f5f5f5',
+                wordBreak: 'break-all',
+                fontFamily: 'monospace',
+                fontSize: '0.8rem',
               }}
             >
-              Join us in restoring our planet, one tree at a time
+              {resetLink}
+            </Paper>
+            
+            <Typography variant="caption" color="text.secondary">
+              This link will expire in 1 hour.
             </Typography>
-          </Box>
-        </Grid>
-      </Grid>
-    </Box>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShowResetLink(false)}>
+              Close
+            </Button>
+            <Tooltip title="Copy reset link">
+              <Button 
+                startIcon={<ContentCopy />}
+                onClick={handleCopyResetLink}
+                variant="outlined"
+              >
+                Copy Link
+              </Button>
+            </Tooltip>
+            <Button 
+              onClick={handleOpenResetLink}
+              variant="contained"
+              sx={{
+                backgroundColor: '#2e7d32',
+                '&:hover': { backgroundColor: '#1b5e20' }
+              }}
+            >
+              Open Reset Link
+            </Button>
+          </DialogActions>
+        </Dialog>
+      </Box>
     );
   }
-
   // Form state
   return (
     <Box
@@ -433,6 +594,21 @@ const ForgotPassword = () => {
               bgcolor: '#ffffff',
             }}
           >
+            <Box
+              sx={{
+                width: 60,
+                height: 60,
+                borderRadius: '50%',
+                bgcolor: '#e3f2fd',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                mb: 3,
+              }}
+            >
+              <Email sx={{ fontSize: 30, color: '#2e7d32' }} />
+            </Box>
+
             <Typography 
               variant="h4" 
               fontWeight="600" 
@@ -455,6 +631,7 @@ const ForgotPassword = () => {
             {error && (
               <Alert 
                 severity="error" 
+                icon={<ErrorOutline />}
                 sx={{ 
                   mb: 3, 
                   width: '100%',
@@ -468,6 +645,7 @@ const ForgotPassword = () => {
             {fieldError && (
               <Alert 
                 severity="error" 
+                icon={<ErrorOutline />}
                 sx={{ 
                   mb: 3, 
                   width: '100%',
@@ -495,7 +673,8 @@ const ForgotPassword = () => {
                 value={formData.email}
                 onChange={handleChange}
                 disabled={loading}
-                error={!!fieldError || !!error}
+                error={!!fieldError}
+                helperText={fieldError}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">

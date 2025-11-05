@@ -75,8 +75,8 @@ class ApiService {
   }
 
   async updatePlantingRequest(id, requestData) {
-    return this.request(`/api/plantingrequests/${id}`, {
-      method: 'PUT',
+    return this.request(`/api/plantingrequests/${id}/status`, {
+      method: 'PATCH',
       body: requestData,
     });
   }

@@ -38,9 +38,6 @@ import {
   Sensors,
   Nature
 } from '@mui/icons-material';
-import { collection, getDocs, getDoc, updateDoc, doc, Timestamp } from 'firebase/firestore';
-import { ref, get } from 'firebase/database';
-import { firestore, rtdb } from '../firebase.js';
 import ReForestAppBar from "../pages/AppBar.jsx";
 import Navigation from "./Navigation.jsx";
 import { useAuth } from '../context/AuthContext.js';
@@ -145,124 +142,79 @@ function AdminDashboard() {
   // Fetch sensor locations using API service
   const fetchSensorLocations = async () => {
     try {
-      console.log('🔍 Fetching sensors via API...');
       const sensors = await apiService.getSensors();
       
       const sensorsWithLocations = await Promise.all(
         sensors.map(async (sensor) => {
-          try {
-            // Fetch location data if available
-            let locationData = null;
-            if (sensor.locationId) {
-              try {
-                // You might need to add a getLocationById method to your API service
-                const locationDocRef = doc(firestore, 'locations', sensor.locationId);
-                const locationDocSnap = await getDoc(locationDocRef);
-                
-                if (locationDocSnap.exists()) {
-                  locationData = locationDocSnap.data();
-                }
-              } catch (err) {
-                console.error(`Error fetching location for sensor ${sensor.id}:`, err.message);
-              }
-            }
-
-            // Fetch latest sensor reading from RTDB (keep existing RTDB logic)
-            let latestReading = null;
+          // Fetch location data if available
+          let locationData = null;
+          
+          if (sensor.locationId) {
             try {
-              const rtdbPath = `sensors/${sensor.id}/sensordata`;
-              const sensorDataRef = ref(rtdb, rtdbPath);
-              const snapshot = await get(sensorDataRef);
-              
-              if (snapshot.exists()) {
-                const allReadings = snapshot.val();
-                const readingKeys = Object.keys(allReadings).sort();
-                const latestKey = readingKeys[readingKeys.length - 1];
-                
-                latestReading = {
-                  id: latestKey,
-                  ...allReadings[latestKey]
-                };
-              }
+              const locations = await apiService.getLocations();
+              locationData = locations.find(loc => loc.id === sensor.locationId);
             } catch (err) {
-              console.error(`RTDB error for sensor ${sensor.id}:`, err.message);
+              console.error(`Error fetching location for sensor ${sensor.id}:`, err.message);
             }
-
-            // Build sensor object
-            const enhancedSensor = {
-              id: sensor.id,
-              name: locationData?.location_name || sensor.name || `Sensor ${sensor.id?.slice(0, 8)}`,
-              lat: locationData ? parseFloat(locationData.location_latitude) : (sensor.latitude || sensor.lat || null),
-              lng: locationData ? parseFloat(locationData.location_longitude) : (sensor.longitude || sensor.lng || null),
-              sensorType: sensor.sensorType || 'Multi-parameter',
-              status: sensor.status || sensor.sensor_status || 'offline',
-              lastCalibration: sensor.lastCalibration || sensor.sensor_lastCalibrationDate,
-              latestReading: latestReading ? {
-                temperature: latestReading.temperature || 'N/A',
-                soilMoisture: latestReading.soilMoisture || 'N/A',
-                pH: latestReading.pH || 'N/A',
-                timestamp: latestReading.timestamp || null
-              } : null,
-              locationId: sensor.locationId,
-              locationPath: sensor.locationPath
-            };
-            
-            return enhancedSensor;
-          } catch (error) {
-            console.error(`Error processing sensor ${sensor.id}:`, error);
-            return null;
           }
+
+          // Fetch latest sensor reading from API
+          let latestReading = null;
+          
+          try {
+            const sensorData = await apiService.getSensorData(sensor.id, { limit: 1 });
+            if (sensorData && sensorData.length > 0) {
+              latestReading = sensorData[0];
+            }
+          } catch (err) {
+            console.error(`Sensor data error for sensor ${sensor.id}:`, err.message);
+          }
+
+          // Build sensor object
+          const sensorObj = {
+            id: sensor.id,
+            name: locationData?.location_name || sensor.name || `Sensor ${sensor.id.slice(0, 8)}`,
+            lat: locationData ? parseFloat(locationData.location_latitude) : (sensor.latitude ? parseFloat(sensor.latitude) : null),
+            lng: locationData ? parseFloat(locationData.location_longitude) : (sensor.longitude ? parseFloat(sensor.longitude) : null),
+            sensorType: sensor.sensorType || 'Multi-parameter',
+            status: sensor.status || sensor.sensor_status || 'offline',
+            lastCalibration: sensor.lastCalibration || sensor.sensor_lastCalibrationDate,
+            latestReading: latestReading ? {
+              temperature: latestReading.temperature || 'N/A',
+              soilMoisture: latestReading.soilMoisture || 'N/A',
+              pH: latestReading.pH || 'N/A',
+              timestamp: latestReading.timestamp || null
+            } : null,
+            locationId: sensor.locationId,
+            locationPath: sensor.locationPath
+          };
+          
+          return sensorObj;
         })
       );
 
       // Filter valid sensors
-      const validSensors = sensorsWithLocations.filter(sensor => 
-        sensor && sensor.lat && sensor.lng && !isNaN(sensor.lat) && !isNaN(sensor.lng)
-      );
+      const validSensors = sensorsWithLocations.filter(sensor => {
+        const hasValidCoords = sensor.lat && sensor.lng && 
+                              !isNaN(sensor.lat) && !isNaN(sensor.lng);
+        return hasValidCoords;
+      });
       
-      console.log(`✅ Loaded ${validSensors.length} valid sensors`);
       return validSensors;
 
     } catch (error) {
-      console.error('❌ Error fetching sensors via API:', error);
-      // Fallback to direct Firestore if API fails
-      try {
-        console.log('🔄 Falling back to direct Firestore sensor fetch...');
-        const sensorsSnapshot = await getDocs(collection(firestore, 'sensors'));
-        const fallbackSensors = sensorsSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        return fallbackSensors.filter(sensor => 
-          sensor.lat && sensor.lng && !isNaN(sensor.lat) && !isNaN(sensor.lng)
-        );
-      } catch (fallbackError) {
-        console.error('❌ Fallback sensor fetch also failed:', fallbackError);
-        return [];
-      }
+      console.error('Error fetching sensors:', error);
+      return [];
     }
   };
 
-  // Fetch all dashboard data using API services
+  // Fetch all dashboard data using API service
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      console.log('🔄 Loading dashboard data via API...');
       
-      // 1. Fetch Users via API
-      let usersData = [];
-      try {
-        usersData = await apiService.getUsers();
-        console.log(`✅ Loaded ${usersData.length} users via API`);
-      } catch (userError) {
-        console.warn('⚠ API users fetch failed, falling back to Firestore:', userError.message);
-        // Fallback to direct Firestore
-        const usersSnapshot = await getDocs(collection(firestore, 'users'));
-        usersData = usersSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-      }
+      // 1. Fetch Users
+      const usersData = await apiService.getUsers();
 
       // Calculate user breakdown by role
       const userBreakdown = usersData.reduce((acc, userData) => {
@@ -275,170 +227,99 @@ function AdminDashboard() {
         return acc;
       }, { total: 0, admins: 0, fieldUsers: 0, denrStaff: 0 });
 
-      // 2. Fetch Planting Requests
-      let allRequests = [];
-      try {
-        // Try to get planting requests via API
-        const requestsData = await apiService.getPlantingRequests();
-        allRequests = requestsData.map(request => ({
-          id: request.id,
-          requesterName: request.requesterName || `${request.user_Firstname || ''} ${request.user_Lastname || ''}`.trim() || 'Unknown User',
-          type: 'Planting Request',
-          site: request.locationName || request.site || 'Not specified',
-          date: request.request_date || request.createdAt,
-          preferredDate: request.preferred_date || request.preferredDate || 'Not specified',
-          remarks: request.request_remarks || request.remarks || '-',
-          status: request.request_status || request.status || 'pending',
-          ...request
-        }));
-        console.log(`✅ Loaded ${allRequests.length} planting requests via API`);
-      } catch (requestError) {
-        console.warn('⚠ API planting requests fetch failed, falling back to Firestore:', requestError.message);
-        
-        // Fallback to direct Firestore
-        const allRequestsSnapshot = await getDocs(collection(firestore, 'plantingrequests'));
-        allRequests = await Promise.all(
-          allRequestsSnapshot.docs.map(async (docSnap) => {
-            const data = docSnap.data();
-            
-            // Fetch user name
-            let requesterName = 'Unknown User';
-            if (data.userRef) {
-              try {
-                const userPath = typeof data.userRef === 'string' ? data.userRef : data.userRef.path;
-                const userId = userPath.split('/').pop();
-                
-                const userDocRef = doc(firestore, 'users', userId);
-                const userDocSnap = await getDoc(userDocRef);
-                
-                if (userDocSnap.exists()) {
-                  const userData = userDocSnap.data();
-                  requesterName = `${userData.user_Firstname || ''} ${userData.user_Lastname || ''}`.trim() || 
-                                `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 
-                                'Unknown User';
-                }
-              } catch (err) {
-                console.error('Error fetching user:', err);
-              }
+      // 2. Fetch ALL Planting Requests
+      const allRequests = await apiService.getPlantingRequests();
+
+      // Map all requests with user data
+      const requestsWithUserData = await Promise.all(
+        allRequests.map(async (request) => {
+          let requesterName = 'Unknown User';
+          
+          // Fetch user name if userRef exists
+          if (request.userId) {
+            try {
+              const userData = await apiService.getUser(request.userId);
+              requesterName = `${userData.firstName || userData.user_firstname || ''} ${userData.user_lastname || userData.lastName || ''}`.trim() || 'Unknown User';
+            } catch (err) {
+              console.error('Error fetching user:', err);
             }
+          }
 
-            // Fetch location name
-            let locationName = 'Not specified';
-            if (data.locationRef) {
-              try {
-                const locationPath = typeof data.locationRef === 'string' ? data.locationRef : data.locationRef.path;
-                const locationId = locationPath.split('/').pop();
-                
-                const locationDocRef = doc(firestore, 'locations', locationId);
-                const locationDocSnap = await getDoc(locationDocRef);
-                
-                if (locationDocSnap.exists()) {
-                  locationName = locationDocSnap.data().location_name || 'Unknown Location';
-                }
-              } catch (err) {
-                console.error('Error fetching location:', err);
-              }
+          let locationName = 'Not specified';
+          if (request.locationId) {
+            try {
+              const locations = await apiService.getLocations();
+              const location = locations.find(loc => loc.id === request.locationId);
+              locationName = location?.location_name || 'Unknown Location';
+            } catch (err) {
+              console.error('Error fetching location:', err);
             }
+          }
 
-            return {
-              id: docSnap.id,
-              requesterName,
-              type: 'Planting Request',
-              site: locationName,
-              date: data.request_date,
-              preferredDate: data.preferred_date || 'Not specified',
-              remarks: data.request_remarks || '-',
-              status: data.request_status || 'pending',
-              ...data
-            };
-          })
-        );
-      }
-
-      // Filter only pending requests
-      const pendingRequests = allRequests.filter(req => 
-        (req.request_status || req.status || '').toLowerCase() === 'pending'
+          return {
+            id: request.id,
+            requesterName,
+            type: 'Planting Request',
+            site: locationName,
+            date: request.request_date ? new Date(request.request_date) : new Date(),
+            preferredDate: request.preferred_date || 'Not specified',
+            remarks: request.request_remarks || '-',
+            status: request.request_status || 'pending',
+            ...request
+          };
+        })
       );
 
-      // 3. Fetch Planting Records and Tasks
+      // Filter only pending requests
+      const pendingRequests = requestsWithUserData.filter(req => 
+        (req.request_status || '').toLowerCase() === 'pending'
+      );
+      
+      // 3. Fetch Planting Records (completed plantings)
+      const recordsData = await apiService.getPlantingRecords();
+
+      // Count completed tasks from plantingrecords
       const plantingTasks = {
         active: 0,
-        completed: 0,
+        completed: recordsData.length,
         pending: 0,
         cancelled: 0
       };
 
+      // Fetch plantingtasks for pending/active/cancelled counts
       try {
-        // Try API first for planting records
-        const recordsData = await apiService.getPlantingRecords();
-        plantingTasks.completed = recordsData.length;
-        console.log(`✅ Loaded ${recordsData.length} planting records via API`);
-      } catch (recordsError) {
-        console.warn('⚠ API planting records fetch failed, falling back to Firestore:', recordsError.message);
-        // Fallback to Firestore
-        const recordsSnapshot = await getDocs(collection(firestore, 'plantingrecords'));
-        plantingTasks.completed = recordsSnapshot.docs.length;
-      }
-
-      try {
-        // Try API for planting tasks
         const tasksData = await apiService.getPlantingTasks();
-        tasksData.forEach(task => {
-          const status = (task.task_status || task.status || '').toLowerCase();
-          if (status === 'pending') plantingTasks.pending++;
-          else if (status === 'cancelled') plantingTasks.cancelled++;
-          else if (status === 'active') plantingTasks.active++;
-        });
-        console.log(`✅ Loaded planting tasks via API`);
-      } catch (tasksError) {
-        console.warn('⚠ API planting tasks fetch failed, falling back to Firestore:', tasksError.message);
-        // Fallback to Firestore
-        const tasksSnapshot = await getDocs(collection(firestore, 'plantingtasks'));
-        tasksSnapshot.docs.forEach(taskDoc => {
-          const taskData = taskDoc.data();
+        
+        tasksData.forEach(taskData => {
           const status = (taskData.task_status || '').toLowerCase();
+          
           if (status === 'pending') plantingTasks.pending++;
           else if (status === 'cancelled') plantingTasks.cancelled++;
           else if (status === 'active') plantingTasks.active++;
         });
+        
+      } catch (error) {
+        console.warn('plantingtasks collection not available:', error.message);
       }
 
-      // 4. Fetch Planting Sites (Locations)
-      let plantingSites = [];
-      try {
-        // Try API for locations
-        const locationsData = await apiService.getLocations();
-        plantingSites = locationsData.map(location => ({
+      // 4. Fetch Planting Sites from locations collection
+      const locationsData = await apiService.getLocations();
+      const plantingSites = locationsData.map(location => {
+        return {
           id: location.id,
-          name: location.location_name || location.name || 'Unnamed Location',
-          lat: parseFloat(location.location_latitude || location.latitude) || null,
-          lng: parseFloat(location.location_longitude || location.longitude) || null,
-          status: location.status || 'active',
+          name: location.location_name || 'Unnamed Location',
+          lat: parseFloat(location.location_latitude) || null,
+          lng: parseFloat(location.location_longitude) || null,
+          status: 'active',
           ...location
-        })).filter(site => site.lat && site.lng && !isNaN(site.lat) && !isNaN(site.lng));
-        console.log(`✅ Loaded ${plantingSites.length} planting sites via API`);
-      } catch (locationsError) {
-        console.warn('⚠ API locations fetch failed, falling back to Firestore:', locationsError.message);
-        // Fallback to Firestore
-        const locationsSnapshot = await getDocs(collection(firestore, 'locations'));
-        plantingSites = locationsSnapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            name: data.location_name || 'Unnamed Location',
-            lat: parseFloat(data.location_latitude) || null,
-            lng: parseFloat(data.location_longitude) || null,
-            status: 'active',
-            ...data
-          };
-        }).filter(site => site.lat && site.lng && !isNaN(site.lat) && !isNaN(site.lng));
-      }
+        };
+      }).filter(site => site.lat && site.lng && !isNaN(site.lat) && !isNaN(site.lng));
 
       // 5. Fetch Sensor Locations
       const sensors = await fetchSensorLocations();
 
       // 6. Generate Monthly Requests Data (last 6 months)
-      const monthlyRequestsData = generateMonthlyData(allRequests);
+      const monthlyRequestsData = generateMonthlyData(requestsWithUserData);
 
       // 7. Task distribution for pie chart
       const taskDistribution = [
@@ -458,15 +339,8 @@ function AdminDashboard() {
         taskDistribution
       });
 
-      console.log('✅ Dashboard data loaded successfully');
-      setSnackbar({
-        open: true,
-        message: 'Dashboard data refreshed successfully',
-        severity: 'success'
-      });
-
     } catch (error) {
-      console.error('❌ Error fetching dashboard data:', error);
+      console.error('Error fetching dashboard data:', error);
       setSnackbar({
         open: true,
         message: 'Error loading dashboard data: ' + error.message,
@@ -488,22 +362,11 @@ function AdminDashboard() {
       const monthName = monthNames[date.getMonth()];
       
       const count = requests.filter(request => {
-        let requestDate;
-        if (request.request_date?.toDate) {
-          requestDate = request.request_date.toDate();
-        } else if (request.request_date) {
-          requestDate = new Date(request.request_date);
-        } else if (request.date?.toDate) {
-          requestDate = request.date.toDate();
-        } else if (request.date) {
-          requestDate = new Date(request.date);
-        } else {
-          return false;
-        }
-        
-        return requestDate && 
-               requestDate.getMonth() === date.getMonth() && 
-               requestDate.getFullYear() === date.getFullYear();
+        const requestDate = request.request_date?.toDate?.() || request.date;
+        const docDate = requestDate instanceof Date ? requestDate : new Date(requestDate);
+        return docDate && 
+               docDate.getMonth() === date.getMonth() && 
+               docDate.getFullYear() === date.getFullYear();
       }).length;
 
       monthlyData.push({
@@ -515,29 +378,14 @@ function AdminDashboard() {
     return monthlyData;
   };
 
-  // Handle request approval/rejection using API
+  // Handle request approval/rejection using API service
   const handleRequestAction = async (requestId, action) => {
     try {
-      console.log(`🔄 Updating request ${requestId} to status: ${action}`);
-      
-      // Try API first
-      try {
-        await apiService.updatePlantingRequest(requestId, {
-          request_status: action,
-          reviewedBy: user?.name || user?.user_firstname || 'Admin',
-          reviewedAt: new Date().toISOString()
-        });
-        console.log(`✅ Request ${action} via API`);
-      } catch (apiError) {
-        console.warn('⚠ API request update failed, falling back to Firestore:', apiError.message);
-        // Fallback to direct Firestore update
-        const requestRef = doc(firestore, 'plantingrequests', requestId);
-        await updateDoc(requestRef, {
-          request_status: action,
-          reviewedBy: user?.name || user?.user_firstname || 'Admin',
-          reviewedAt: Timestamp.now()
-        });
-      }
+      await apiService.updatePlantingRequest(requestId, {
+        request_status: action,
+        reviewedBy: user?.name || 'Admin',
+        reviewedAt: new Date().toISOString()
+      });
       
       setSnackbar({
         open: true,
@@ -548,7 +396,7 @@ function AdminDashboard() {
       // Refresh data
       fetchDashboardData();
     } catch (error) {
-      console.error('❌ Error updating request:', error);
+      console.error('Error updating request:', error);
       setSnackbar({
         open: true,
         message: 'Error updating request: ' + error.message,
@@ -649,7 +497,7 @@ function AdminDashboard() {
                 ReForest Admin Dashboard
               </Typography>
               <Typography variant="subtitle1" color="text.secondary">
-                Welcome back, {user?.name || user?.user_firstname || 'Admin'}! Manage and monitor reforestation activities.
+                Welcome back, {user?.name || 'Admin'}! Manage and monitor reforestation activities.
               </Typography>
             </Box>
             <Button 

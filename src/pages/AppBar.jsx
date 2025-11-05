@@ -5,7 +5,6 @@ import {
   Typography,
   IconButton,
   Avatar,
-  Badge,
   Menu,
   MenuItem,
   Divider,
@@ -16,15 +15,11 @@ import {
   Person as PersonIcon,
   Logout as LogoutIcon,
 } from '@mui/icons-material';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate, useLocation } from "react-router-dom";
-
-// Backend API URL
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
   const [anchorEl, setAnchorEl] = useState(null);
-  const [notificationCount, setNotificationCount] = useState(0);
   const navigate = useNavigate();
   const location = useLocation();
   
@@ -64,57 +59,33 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
         return 'Tree Seedlings';
       case '/recommendations':
         return 'Recommendations';
-      case '/planting-tasks':
+      case '/tasks':
         return 'Planting Tasks';
       case '/notifications':
         return 'Notifications';
       case '/profile':
         return 'Profile';
+      case '/planting-requests':
+        return 'Planting Requests';
       default:
+        // Handle nested routes
+        if (path.startsWith('/task/')) {
+          return 'Assign Seedlings';
+        }
+        if (path.startsWith('/recommendation/')) {
+          return 'Recommendation Details';
+        }
         return 'ReForest Dashboard';
     }
   };
-
-  // Fetch notification count from your backend API
-  useEffect(() => {
-    const fetchNotificationCount = async () => {
-      try {
-        const token = localStorage.getItem('token'); // Assuming you store JWT token
-        if (!token) return;
-
-        const response = await fetch(`${API_URL}/api/notifications/count/unread`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setNotificationCount(data.unreadCount || 0);
-        } else {
-          console.error('Failed to fetch notification count');
-          setNotificationCount(0);
-        }
-      } catch (error) {
-        console.error('Error fetching notification count:', error);
-        setNotificationCount(0);
-      }
-    };
-
-    fetchNotificationCount();
-
-    // Optional: Set up polling for real-time updates
-    const interval = setInterval(fetchNotificationCount, 30000); // Update every 30 seconds
-
-    return () => clearInterval(interval);
-  }, []);
 
   // Helper function to get user initials from backend user data
   const getUserInitials = (user) => {
     if (user?.user_firstname && user?.user_lastname) {
       return `${user.user_firstname.charAt(0)}${user.user_lastname.charAt(0)}`.toUpperCase();
+    }
+    if (user?.firstName && user?.lastName) {
+      return `${user.firstName.charAt(0)}${user.lastName.charAt(0)}`.toUpperCase();
     }
     if (user?.displayName) {
       const names = user.displayName.trim().split(' ');
@@ -134,12 +105,15 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
     if (user?.user_firstname && user?.user_lastname) {
       return `${user.user_firstname} ${user.user_lastname}`;
     }
+    if (user?.firstName && user?.lastName) {
+      return `${user.firstName} ${user.lastName}`;
+    }
     return user?.displayName || user?.email || 'User';
   };
 
   // Helper function to get user role display name
   const getUserRole = (user) => {
-    const role = user?.roleRef?.split('/').pop();
+    const role = user?.roleRef?.split('/').pop() || user?.role;
     switch (role) {
       case 'admin':
         return 'Administrator';
@@ -147,6 +121,8 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
         return 'DENR Officer';
       case 'user':
         return 'User';
+      case 'planter':
+        return 'Planter';
       default:
         return 'User';
     }
@@ -160,6 +136,7 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
         ml: { md: `240px` },
         backgroundColor: '#2e7d32',
         boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+        zIndex: (theme) => theme.zIndex.drawer + 1,
       }}
     >
       <Toolbar>
@@ -172,11 +149,20 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
         >
           <MenuIcon />
         </IconButton>
-        <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1, fontWeight: 600 }}>
+        <Typography 
+          variant="h6" 
+          noWrap 
+          component="div" 
+          sx={{ 
+            flexGrow: 1, 
+            fontWeight: 600,
+            fontSize: { xs: '1.1rem', sm: '1.25rem' }
+          }}
+        >
           {getCurrentPageTitle()}
         </Typography>
         
-        {/* Notifications Icon */}
+        {/* Notifications Icon - Simplified without badge */}
         <IconButton 
           color="inherit" 
           onClick={handleNotificationClick}
@@ -188,24 +174,7 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
             }
           }}
         >
-          <Badge 
-            badgeContent={notificationCount} 
-            color="error"
-            max={99}
-            showZero={false}
-            sx={{
-              '& .MuiBadge-badge': {
-                backgroundColor: '#ff4444',
-                color: '#ffffff',
-                fontWeight: '600',
-                fontSize: '0.7rem',
-                minWidth: '20px',
-                height: '20px',
-              }
-            }}
-          >
-            <NotificationsIcon />
-          </Badge>
+          <NotificationsIcon />
         </IconButton>
         
         {/* User Menu */}
@@ -213,6 +182,8 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
           color="inherit" 
           onClick={handleMenuOpen}
           aria-label="user menu"
+          aria-controls="user-menu"
+          aria-haspopup="true"
           sx={{ 
             ml: 1,
             '&:hover': {
@@ -226,7 +197,8 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
               height: 36,
               bgcolor: 'rgba(255, 255, 255, 0.2)',
               fontSize: '0.9rem',
-              fontWeight: '600'
+              fontWeight: '600',
+              border: '2px solid rgba(255, 255, 255, 0.3)'
             }}
           >
             {getUserInitials(user)}
@@ -234,6 +206,7 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
         </IconButton>
         
         <Menu
+          id="user-menu"
           anchorEl={anchorEl}
           open={Boolean(anchorEl)}
           onClose={handleMenuClose}
@@ -243,11 +216,33 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
               minWidth: 220,
               borderRadius: 2,
               boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+              overflow: 'visible',
+              '&:before': {
+                content: '""',
+                display: 'block',
+                position: 'absolute',
+                top: 0,
+                right: 14,
+                width: 10,
+                height: 10,
+                bgcolor: 'background.paper',
+                transform: 'translateY(-50%) rotate(45deg)',
+                zIndex: 0,
+              }
             }
           }}
+          transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+          anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
         >
           {/* User Info Header */}
-          <MenuItem disabled sx={{ opacity: 1, py: 2 }}>
+          <MenuItem disabled sx={{ 
+            opacity: 1, 
+            py: 2,
+            cursor: 'default',
+            '&:hover': {
+              backgroundColor: 'transparent'
+            }
+          }}>
             <Avatar 
               sx={{ 
                 mr: 2, 
@@ -267,7 +262,7 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
               <Typography variant="caption" color="text.secondary" display="block">
                 {getUserRole(user)}
               </Typography>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
                 {user?.email || user?.user_email}
               </Typography>
             </div>
@@ -276,14 +271,31 @@ function ReForestAppBar({ handleDrawerToggle, user, onLogout }) {
           <Divider />
           
           {/* Menu Actions */}
-          <MenuItem onClick={handleProfile} sx={{ py: 1.5 }}>
-            <PersonIcon sx={{ mr: 2, fontSize: '1.2rem' }} />
+          <MenuItem 
+            onClick={handleProfile} 
+            sx={{ 
+              py: 1.5,
+              '&:hover': {
+                backgroundColor: 'rgba(76, 175, 80, 0.08)',
+              }
+            }}
+          >
+            <PersonIcon sx={{ mr: 2, fontSize: '1.2rem', color: 'text.secondary' }} />
             <Typography variant="body2">My Profile</Typography>
           </MenuItem>
           
           <Divider />
           
-          <MenuItem onClick={handleLogout} sx={{ py: 1.5, color: '#d32f2f' }}>
+          <MenuItem 
+            onClick={handleLogout} 
+            sx={{ 
+              py: 1.5, 
+              color: '#d32f2f',
+              '&:hover': {
+                backgroundColor: 'rgba(211, 47, 47, 0.08)',
+              }
+            }}
+          >
             <LogoutIcon sx={{ mr: 2, fontSize: '1.2rem' }} />
             <Typography variant="body2" fontWeight="600">Logout</Typography>
           </MenuItem>
