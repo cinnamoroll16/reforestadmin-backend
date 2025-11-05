@@ -1,3 +1,4 @@
+// services/MLService.js - WITH RANDOM FOREST ML + CUSTOM IDs
 const admin = require('firebase-admin');
 
 class MLService {
@@ -21,25 +22,25 @@ class MLService {
       throw new Error(`Invalid sensor data: ${validation.errors.join(', ')}`);
     }
 
-    // Get dataset
-    const dataset = this.datasetService.getDataset();
-    if (!dataset || dataset.length === 0) {
-      throw new Error('Tree dataset is empty or unavailable');
+    // Check if Random Forest model is trained
+    if (!this.datasetService.isModelTrained()) {
+      throw new Error('Machine learning model not trained. Please upload dataset first.');
     }
 
     // Get current season
     const season = this.getCurrentSeason();
     const seasonalFactors = this.SEASONAL_FACTORS[season];
 
-    // Generate recommendations
-    const recommendations = await this.calculateRecommendations(
+    console.log('🤖 Using Random Forest ML model for predictions...');
+
+    // Generate recommendations using Random Forest
+    const recommendations = await this.calculateRecommendationsWithML(
       { ph, soilMoisture, temperature },
-      dataset,
       seasonalFactors,
       location
     );
 
-    // Save to Firestore
+    // Save to Firestore with correct structure
     const savedReco = await this.saveRecommendation({
       sensorId,
       sensorData,
@@ -50,19 +51,38 @@ class MLService {
     });
 
     return {
+      success: true,
       recommendationId: savedReco.id,
       recommendations: recommendations.slice(0, 3),
       sensorData,
       season,
       generatedAt: new Date().toISOString(),
-      confidence: parseFloat((recommendations[0]?.confidenceScore * 100).toFixed(2))
+      confidence: parseFloat((recommendations[0]?.confidenceScore * 100).toFixed(2)),
+      mlModel: 'Random Forest',
+      modelInfo: this.datasetService.getModelInfo()
     };
   }
 
-  async calculateRecommendations(sensorData, dataset, seasonalFactors, location) {
+  /**
+   * Calculate recommendations using Random Forest ML model
+   */
+  async calculateRecommendationsWithML(sensorData, seasonalFactors, location) {
     const { ph, soilMoisture, temperature } = sensorData;
     
-    const scoredTrees = dataset.map(tree => {
+    console.log('🌲 Running Random Forest prediction...');
+    console.log(`📊 Input: pH=${ph}, Moisture=${soilMoisture}%, Temp=${temperature}°C`);
+
+    // Use Random Forest to predict tree suitability
+    const rfPredictions = this.datasetService.predictWithRandomForest(
+      { ph, soilMoisture, temperature },
+      seasonalFactors
+    );
+
+    console.log(`✅ Random Forest generated ${rfPredictions.length} predictions`);
+
+    // Enhance predictions with additional metrics
+    const enhancedPredictions = rfPredictions.map(tree => {
+      // Calculate individual compatibility scores for transparency
       const pHScore = this.datasetService.calculateRangeCompatibility(
         ph, tree.pHMin, tree.pHMax, seasonalFactors.ph
       );
@@ -79,29 +99,29 @@ class MLService {
       const adaptabilityFactor = tree.adaptabilityScore / 100;
       const nativeBonus = tree.isNative ? 0.1 : 0;
 
-      const baseConfidence = 
-        (pHScore * 0.25) +
-        (moistureScore * 0.30) +
-        (tempScore * 0.25) +
-        (successFactor * 0.10) +
-        (adaptabilityFactor * 0.10);
-
-      const confidenceScore = Math.min(1, baseConfidence + nativeBonus);
-      const overallScore = (confidenceScore * 0.6) + (successFactor * 0.2) + (adaptabilityFactor * 0.2);
+      // Use RF confidence score as primary, with slight adjustment
+      const finalConfidence = Math.min(1.0, tree.confidenceScore + nativeBonus);
+      
+      // Overall score combines ML prediction with tree characteristics
+      const overallScore = (tree.confidenceScore * 0.7) + (successFactor * 0.15) + (adaptabilityFactor * 0.15);
 
       return {
         ...tree,
-        confidenceScore: Math.max(0.05, confidenceScore),
+        confidenceScore: Math.max(0.05, finalConfidence),
         pHCompatibility: pHScore,
         moistureCompatibility: moistureScore,
         tempCompatibility: tempScore,
         overallScore,
         isNative: tree.isNative,
-        nativeBonus
+        nativeBonus,
+        mlPredicted: true,
+        rfScore: tree.rfScore,
+        numTreesVoted: tree.numTreesVoted
       };
     });
 
-    return scoredTrees.sort((a, b) => {
+    // Sort by overall score
+    return enhancedPredictions.sort((a, b) => {
       const scoreDiff = b.overallScore - a.overallScore;
       if (Math.abs(scoreDiff) > 0.05) return scoreDiff;
       
@@ -114,33 +134,58 @@ class MLService {
     });
   }
 
+  /**
+   * Get the next recommendation ID in sequence (reco101, reco102, etc.)
+   */
+  async getNextRecommendationId() {
+    const counterRef = this.db.collection('counters').doc('recommendations');
+    
+    try {
+      const newId = await this.db.runTransaction(async (transaction) => {
+        const counterDoc = await transaction.get(counterRef);
+        
+        let nextNumber;
+        if (!counterDoc.exists) {
+          nextNumber = 101;
+          transaction.set(counterRef, { 
+            currentId: nextNumber, 
+            lastUpdated: admin.firestore.FieldValue.serverTimestamp() 
+          });
+        } else {
+          nextNumber = (counterDoc.data().currentId || 100) + 1;
+          transaction.update(counterRef, { 
+            currentId: nextNumber,
+            lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+          });
+        }
+        
+        return `reco${nextNumber}`;
+      });
+      
+      return newId;
+    } catch (error) {
+      console.error('Error getting next recommendation ID:', error);
+      throw new Error('Failed to generate recommendation ID');
+    }
+  }
+
+  /**
+   * Save recommendation with CUSTOM ID (reco101, reco102, etc.)
+   */
   async saveRecommendation({ sensorId, sensorData, recommendations, location, coordinates, season }) {
     const topRecommendations = recommendations.slice(0, 3);
     const avgConfidence = topRecommendations.reduce((sum, tree) => 
       sum + tree.confidenceScore, 0
     ) / topRecommendations.length;
 
-    // Save recommendation document
-    const recommendationData = {
-      sensorId,
-      sensorData,
-      location,
-      coordinates,
-      season,
-      recommendations: topRecommendations,
-      confidenceScore: parseFloat((avgConfidence * 100).toFixed(2)),
-      generatedAt: new Date().toISOString(),
-      timestamp: admin.firestore.FieldValue.serverTimestamp()
-    };
-
-    const recoRef = await this.db.collection('recommendations').add(recommendationData);
-
-    // Save tree seedlings
+    const timestamp = Date.now();
+    
+    // ========== STEP 1: Create tree seedlings FIRST ==========
     const seedlingsBatch = this.db.batch();
-    const seedlingRefs = [];
+    const seedlingPaths = [];
 
     topRecommendations.forEach((tree, index) => {
-      const tsId = `ts${Date.now()}${index}`;
+      const tsId = `ts${timestamp}${String(index).padStart(2, '0')}`;
       const seedlingRef = this.db.collection('treeseedlings').doc(tsId);
       
       seedlingsBatch.set(seedlingRef, {
@@ -153,19 +198,71 @@ class MLService {
         seedling_category: tree.category,
         seedling_successRate: tree.successRate,
         seedling_adaptabilityScore: tree.adaptabilityScore,
-        sourceRecommendationId: recoRef.id,
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
+        seedling_confidenceScore: parseFloat((tree.confidenceScore * 100).toFixed(2)),
+        
+        // ML-specific fields
+        ml_predicted: true,
+        ml_rfScore: parseFloat((tree.rfScore * 100).toFixed(2)),
+        ml_numTreesVoted: tree.numTreesVoted,
+        ml_model: 'Random Forest',
+        
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        generatedBy: 'ml-backend-rf'
       });
 
-      seedlingRefs.push(seedlingRef);
+      seedlingPaths.push(`/treeseedlings/${tsId}`);
     });
 
     await seedlingsBatch.commit();
+    console.log(`✅ Created ${seedlingPaths.length} ML-predicted tree seedlings`);
 
-    // Update recommendation with seedling references
-    await recoRef.update({
-      seedlingOptions: seedlingRefs.map(ref => ref.path)
-    });
+    // ========== STEP 2: Get custom recommendation ID ==========
+    const recommendationId = await this.getNextRecommendationId();
+
+    // ========== STEP 3: Extract location ID from sensorId ==========
+    const locationId = location.startsWith('LOC_') ? location : `LOC_${sensorId}`;
+    
+    // ========== STEP 4: Create sensorDataRef path ==========
+    const sensorDataRef = `/sensors/${sensorId}/sensordata/data_001`;
+
+    // ========== STEP 5: Create recommendation document with CUSTOM ID ==========
+    const recommendationData = {
+      locationRef: `/locations/${locationId}`,
+      reco_confidenceScore: parseFloat((avgConfidence * 100).toFixed(2)),
+      reco_generatedAt: new Date().toISOString(),
+      season: season,
+      seedlingOptions: seedlingPaths,
+      sensorConditions: {
+        ph: parseFloat(sensorData.ph),
+        soilMoisture: parseFloat(sensorData.soilMoisture),
+        temperature: parseFloat(sensorData.temperature)
+      },
+      sensorDataRef: sensorDataRef,
+      
+      // ML model information
+      algorithm: 'random-forest',
+      mlModel: 'Random Forest',
+      modelInfo: this.datasetService.getModelInfo(),
+      
+      sensorId: sensorId,
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    if (coordinates && coordinates.latitude && coordinates.longitude) {
+      recommendationData.coordinates = {
+        latitude: parseFloat(coordinates.latitude),
+        longitude: parseFloat(coordinates.longitude)
+      };
+    }
+
+    // Use custom ID instead of auto-generated
+    const recoRef = this.db.collection('recommendations').doc(recommendationId);
+    await recoRef.set(recommendationData);
+    
+    console.log(`✅ ML Recommendation saved with ID: ${recommendationId}`);
+    console.log(`🤖 Model: Random Forest with ${this.datasetService.getModelInfo().numTrees} trees`);
+    console.log(`📍 Location: ${recommendationData.locationRef}`);
+    console.log(`🌱 Seedlings: ${seedlingPaths.join(', ')}`);
 
     return recoRef;
   }
@@ -221,8 +318,6 @@ class MLService {
       };
     }
 
-    // Basic trend analysis implementation
-    // You can expand this with more sophisticated analysis
     const sortedReadings = [...readings].sort((a, b) => 
       new Date(a.timestamp) - new Date(b.timestamp)
     );
