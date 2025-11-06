@@ -693,7 +693,7 @@ const SeedlingAssignmentPage = () => {
                 icon={<InfoIcon />}
                 sx={{ 
                   borderRadius: 1,
-                  bgcolor: alpha('#2e7d32', 0.05)
+                  bgcolor: alpha('#1976d2', 0.05)
                 }}
               >
                 <Typography variant="body2" fontWeight="600">

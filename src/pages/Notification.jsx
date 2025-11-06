@@ -1,4 +1,4 @@
-// src/pages/Notification.js - UPDATED WITH TWO TABS
+// src/pages/Notification.js - UPDATED LOCATION RESOLUTION
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Button, Chip, Dialog, DialogTitle, DialogContent,
@@ -25,7 +25,7 @@ import HistoryIcon from '@mui/icons-material/History';
 const drawerWidth = 240;
 
 // =============================================================================
-// NOTIFICATION HELPER FUNCTIONS (Updated for API integration)
+// NOTIFICATION HELPER FUNCTIONS
 // =============================================================================
 
 export const createPlantRequestNotification = async (plantRequestData, plantRequestId) => {
@@ -43,7 +43,7 @@ export const createPlantRequestNotification = async (plantRequestData, plantRequ
         createdBy: plantRequestData.createdBy,
         requestStatus: 'pending'
       },
-      targetRole: 'admin', // Changed to 'admin'
+      targetRole: 'admin', // Explicitly set to admin
       read: false,
       resolved: false,
       hidden: false,
@@ -53,10 +53,10 @@ export const createPlantRequestNotification = async (plantRequestData, plantRequ
     };
 
     const result = await apiService.createNotification(notificationData);
-    console.log('✓ Notification created via API:', result.id);
+    console.log('✓ Admin notification created via API:', result.id);
     return result.id;
   } catch (error) {
-    console.error('Error creating notification via API:', error);
+    console.error('Error creating admin notification via API:', error);
     throw error;
   }
 };
@@ -71,16 +71,16 @@ export const createPlantingRecordNotification = async (plantingRecordData, plant
       type: 'planting_record',
       notification_type: 'completed',
       title: 'Planting Activity Completed',
-      notif_message: `User ${userInfo.name} has planted ${plantingRecordData.treeSeedlingName || 'a tree'} in ${locationName}`,
+      notif_message: `Planter ${userInfo.name} has planted ${plantingRecordData.seedlingRef || 'a tree'} in ${locationName}`,
       data: {
         plantingRecordId: plantingRecordId,
         userRef: plantingRecordData.userRef,
         locationRef: plantingRecordData.locationRef,
-        treeSeedlingName: plantingRecordData.treeSeedlingName,
-        plantingDate: plantingRecordData.plantingDate,
+        seedlingRef: plantingRecordData.seedlingRef,
+        record_date: plantingRecordData.record_date,
         status: 'completed'
       },
-      targetRole: 'admin', // Changed to 'admin'
+      targetRole: 'admin', // Explicitly set to admin
       read: false,
       resolved: false,
       hidden: false,
@@ -90,10 +90,10 @@ export const createPlantingRecordNotification = async (plantingRecordData, plant
     };
 
     const result = await apiService.createNotification(notificationData);
-    console.log('✓ Planting record notification created via API:', result.id);
+    console.log('✓ Planting record admin notification created via API:', result.id);
     return result.id;
   } catch (error) {
-    console.error('Error creating planting record notification via API:', error);
+    console.error('Error creating planting record admin notification via API:', error);
     throw error;
   }
 };
@@ -123,25 +123,29 @@ export const hideNotification = async (notificationId) => {
   }
 };
 
-// Helper function to resolve location reference using API
+// Helper function to resolve location reference - UPDATED VERSION
 const resolveLocationRef = async (locationRef) => {
-  if (!locationRef) return 'Unknown Location';
-  
   try {
-    // Extract location ID from reference
-    const locationId = typeof locationRef === 'string' 
-      ? locationRef.split('/').pop() 
-      : locationRef.path?.split('/').pop();
+    if (!locationRef) return { name: 'Unknown Location' };
     
-    if (locationId) {
-      const locationData = await apiService.getLocationById(locationId);
-      return locationData?.location_name || locationData?.name || 'Unknown Location';
+    let locationName;
+    
+    // Handle different reference formats
+    if (locationRef.includes('/')) {
+      locationName = locationRef.split('/').pop();
+    } else if (locationRef.startsWith('locations/')) {
+      locationName = locationRef.replace('locations/', '');
+    } else {
+      locationName = locationRef;
     }
+    
+    return {
+      name: locationName || 'Unknown Location'
+    };
   } catch (error) {
-    console.error('Error resolving location via API:', error);
+    console.error('Error fetching location data:', error);
+    return { name: 'Unknown Location' };
   }
-  
-  return 'Unknown Location';
 };
 
 // Helper function to resolve user reference using API
@@ -158,9 +162,7 @@ const resolveUserRef = async (userRef) => {
       const userData = await apiService.getUser(userId);
       if (userData) {
         return {
-          name: `${userData.user_firstname || userData.user_Firstname || ''} ${userData.user_lastname || userData.user_Lastname || ''}`.trim() || 
-                `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 
-                'Unknown User',
+          name: `${userData.user_firstname || userData.user_Firstname || userData.firstName || ''} ${userData.user_lastname || userData.user_Lastname || userData.lastName || ''}`.trim() || 'Unknown User',
           email: userData.user_email || userData.email || 'N/A'
         };
       }
@@ -172,43 +174,156 @@ const resolveUserRef = async (userRef) => {
   return { name: 'Unknown User', email: 'N/A' };
 };
 
+// Helper function to resolve seedling reference using API
+const resolveSeedlingRef = async (seedlingRef) => {
+  if (!seedlingRef) return 'Unknown Tree';
+  
+  try {
+    // If seedlingRef is a code like "ts070", use it directly
+    if (typeof seedlingRef === 'string' && seedlingRef.length > 0) {
+      return seedlingRef; // Return the seedling code
+    }
+    
+    // If it's a document reference, extract the ID
+    const seedlingId = typeof seedlingRef === 'string' 
+      ? seedlingRef.split('/').pop() 
+      : seedlingRef.path?.split('/').pop();
+    
+    if (seedlingId) {
+      const seedlingData = await apiService.getTreeSeedling(seedlingId);
+      return seedlingData?.tree_name || seedlingData?.name || seedlingId;
+    }
+  } catch (error) {
+    console.error('Error resolving seedling via API:', error);
+  }
+  
+  return 'Unknown Tree';
+};
+
 // =============================================================================
-// DATA FETCHING FUNCTIONS (Updated for API integration)
+// DATA FETCHING FUNCTIONS (UPDATED - FETCH ONLY ADMIN NOTIFICATIONS)
 // =============================================================================
 
-// Fetch planting requests from API
+// Fetch planting requests from API - UPDATED WITH LOCATION RESOLUTION
 const fetchPlantingRequests = async () => {
   try {
     console.log('🌱 Fetching planting requests via API...');
     const response = await apiService.getPlantingRequests();
-    console.log('✅ Planting requests loaded via API:', response.length);
-    return response;
+    
+    console.log('🔍 Planting requests API response:', response);
+    
+    // apiService.getPlantingRequests() returns the raw response
+    const requests = Array.isArray(response) ? response : [];
+    
+    console.log('✅ Planting requests loaded via API:', requests.length);
+    
+    // Process planting requests with location resolution
+    const processedRequests = await Promise.all(
+      requests.map(async (request) => {
+        try {
+          const userInfo = await resolveUserRef(request.userRef);
+          const locationInfo = await resolveLocationRef(request.locationRef);
+          
+          return {
+            ...request,
+            fullName: userInfo.name,
+            userEmail: userInfo.email,
+            locationName: locationInfo.name
+          };
+        } catch (error) {
+          console.error('Error processing planting request:', error);
+          return {
+            ...request,
+            fullName: 'Unknown User',
+            userEmail: 'N/A',
+            locationName: 'Unknown Location'
+          };
+        }
+      })
+    );
+    
+    return processedRequests;
   } catch (error) {
     console.error('❌ API fetch failed:', error.message);
     return [];
   }
 };
 
-// Fetch planting records from API
+// Fetch planting records from API - UPDATED WITH LOCATION RESOLUTION
 const fetchPlantingRecords = async () => {
   try {
     console.log('📊 Fetching planting records via API...');
     const response = await apiService.getPlantingRecords();
-    console.log('✅ Planting records loaded via API:', response.length);
-    return response;
+    
+    console.log('🔍 Planting records API response:', response);
+    
+    // apiService.getPlantingRecords() already returns an array or empty array
+    const records = Array.isArray(response) ? response : [];
+    
+    console.log('✅ Planting records loaded via API:', records.length);
+    
+    // Process planting records to resolve references
+    const processedRecords = await Promise.all(
+      records.map(async (record) => {
+        try {
+          const userInfo = await resolveUserRef(record.userRef);
+          const locationInfo = await resolveLocationRef(record.locationRef);
+          const seedlingName = await resolveSeedlingRef(record.seedlingRef);
+          
+          return {
+            ...record,
+            fullName: userInfo.name,
+            userEmail: userInfo.email,
+            locationName: locationInfo.name,
+            treeSeedlingName: seedlingName,
+            plantingDate: record.record_date || record.createdAt
+          };
+        } catch (error) {
+          console.error('Error processing planting record:', error);
+          return {
+            ...record,
+            fullName: 'Unknown User',
+            userEmail: 'N/A',
+            locationName: 'Unknown Location',
+            treeSeedlingName: record.seedlingRef || 'Unknown Tree',
+            plantingDate: record.record_date || record.createdAt
+          };
+        }
+      })
+    );
+    
+    return processedRecords;
   } catch (error) {
     console.error('❌ API fetch failed:', error.message);
     return [];
   }
 };
 
-// Fetch notifications from API
+// Fetch notifications from API - FIXED with better error handling
 const fetchNotifications = async () => {
   try {
-    console.log('🔔 Fetching notifications via API...');
+    console.log('🔔 Fetching ADMIN notifications via API...');
+    
+    // Clear cache first to ensure fresh data
+    apiService.invalidateCache('/api/notifications');
+    
     const response = await apiService.getNotifications();
-    console.log('✅ Notifications loaded via API:', response.length);
-    return response;
+    
+    console.log('🔍 Notifications API response:', response);
+    
+    // apiService.getNotifications() already returns an array or empty array
+    const notifications = Array.isArray(response) ? response : [];
+    
+    console.log('✅ ADMIN notifications loaded via API:', notifications.length);
+    
+    // Additional client-side filtering to ensure only admin notifications
+    const adminNotifications = notifications.filter(notification => 
+      notification.targetRole === 'admin'
+    );
+    
+    console.log('✅ Filtered ADMIN notifications:', adminNotifications.length);
+    
+    return adminNotifications;
   } catch (error) {
     console.error('❌ API fetch failed:', error.message);
     return [];
@@ -251,10 +366,10 @@ const NotificationPanel = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      console.log('🔄 Loading notification data via API...');
+      console.log('🔄 Loading ADMIN notification data via API...');
 
       const [notificationsData, requestsData, recordsData] = await Promise.all([
-        fetchNotifications(),
+        fetchNotifications(), // This now fetches only admin notifications
         fetchPlantingRequests(),
         fetchPlantingRecords()
       ]);
@@ -263,11 +378,16 @@ const NotificationPanel = () => {
       setPlantingRequests(requestsData);
       setPlantingRecords(recordsData);
 
-      console.log('✅ Notification data loaded successfully via API');
+      console.log('✅ ADMIN notification data loaded successfully via API');
+      console.log('📊 Stats:', {
+        adminNotifications: notificationsData.length,
+        requests: requestsData.length,
+        records: recordsData.length
+      });
       setLoading(false);
 
     } catch (error) {
-      console.error('❌ Error loading notification data:', error);
+      console.error('❌ Error loading admin notification data:', error);
       setAlert({
         open: true,
         message: 'Error loading data: ' + error.message,
@@ -321,17 +441,13 @@ const NotificationPanel = () => {
   const handleMarkAllAsRead = async () => {
     try {
       setSaving(true);
-      const unreadNotifications = notifications.filter(n => !n.read);
       
-      // Mark each unread notification as read
-      const updatePromises = unreadNotifications.map(notification => 
-        apiService.updateNotification(notification.id, { read: true })
-      );
+      // Use the bulk mark as read endpoint
+      await apiService.markAllNotificationsAsRead();
       
-      await Promise.all(updatePromises);
-      
+      // Update local state
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-      setAlert({ open: true, message: 'All notifications marked as read', severity: 'success' });
+      setAlert({ open: true, message: 'All admin notifications marked as read', severity: 'success' });
     } catch (error) {
       console.error('Error marking all notifications as read:', error);
       setAlert({ open: true, message: 'Error marking notifications as read', severity: 'error' });
@@ -346,7 +462,7 @@ const NotificationPanel = () => {
       await apiService.deleteNotification(notificationId);
       
       setNotifications(prev => prev.filter(n => n.id !== notificationId));
-      setAlert({ open: true, message: 'Notification removed', severity: 'success' });
+      setAlert({ open: true, message: 'Admin notification removed', severity: 'success' });
     } catch (error) {
       console.error('Error removing notification:', error);
       setAlert({ open: true, message: 'Error removing notification', severity: 'error' });
@@ -435,16 +551,16 @@ const NotificationPanel = () => {
     }
   };
 
-  // Combine all notifications: API notifications + planting requests + planting records
+  // Combine all notifications: API notifications (admin-only) + planting requests + planting records
   const allNotifications = [
-    ...notifications,
+    ...notifications, // These are now filtered to only admin notifications from the backend
     ...plantingRequests.map(request => ({
       id: `request-${request.id}`,
       type: 'plant_request',
       notification_type: 'pending',
       title: 'New Planting Request',
-      message: `User ${request.fullName} has submitted a planting request for ${request.locationName}`,
-      notif_message: `User ${request.fullName} has submitted a planting request for ${request.locationName}`,
+      message: `Planter ${request.fullName} has submitted a planting request for ${request.locationName}`,
+      notif_message: `Planter ${request.fullName} has submitted a planting request for ${request.locationName}`,
       data: {
         plantRequestId: request.id,
         userRef: request.userRef,
@@ -467,14 +583,16 @@ const NotificationPanel = () => {
       type: 'planting_record',
       notification_type: 'completed',
       title: 'Planting Activity Completed',
-      message: `User ${record.fullName} has planted ${record.treeSeedlingName || 'a tree'} in ${record.locationName}`,
-      notif_message: `User ${record.fullName} has planted ${record.treeSeedlingName || 'a tree'} in ${record.locationName}`,
+      message: `Planter ${record.fullName} has planted ${record.treeSeedlingName || record.seedlingRef || 'a tree'} in ${record.locationName}`,
+      notif_message: `Planter ${record.fullName} has planted ${record.treeSeedlingName || record.seedlingRef || 'a tree'} in ${record.locationName}`,
       data: {
         plantingRecordId: record.id,
         userRef: record.userRef,
         locationRef: record.locationRef,
+        seedlingRef: record.seedlingRef,
         treeSeedlingName: record.treeSeedlingName,
         plantingDate: record.plantingDate,
+        record_date: record.record_date,
         status: 'completed'
       },
       targetRole: 'admin',
@@ -482,10 +600,10 @@ const NotificationPanel = () => {
       resolved: false,
       hidden: false,
       priority: 'low',
-      timestamp: record.plantingDate || new Date().toISOString(),
-      notif_timestamp: record.plantingDate || new Date().toISOString(),
-      createdAt: record.plantingDate || new Date().toISOString(),
-      updatedAt: record.plantingDate || new Date().toISOString()
+      timestamp: record.record_date || record.createdAt || new Date().toISOString(),
+      notif_timestamp: record.record_date || record.createdAt || new Date().toISOString(),
+      createdAt: record.record_date || record.createdAt || new Date().toISOString(),
+      updatedAt: record.record_date || record.createdAt || new Date().toISOString()
     }))
   ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
@@ -608,6 +726,11 @@ const NotificationPanel = () => {
                 • Preferred: {formatDate(notification.data.preferredDate)}
               </Typography>
             )}
+            {notification.data?.record_date && (
+              <Typography variant="caption" color="text.secondary">
+                • Planted: {formatDate(notification.data.record_date)}
+              </Typography>
+            )}
           </Box>
         </Box>
         
@@ -669,7 +792,7 @@ const NotificationPanel = () => {
         >
           <LinearProgress sx={{ mb: 2, borderRadius: 1 }} />
           <Typography variant="body2" color="text.secondary" align="center">
-            Loading notifications...
+            Loading admin notifications...
           </Typography>
         </Box>
       </Box>
@@ -704,10 +827,10 @@ const NotificationPanel = () => {
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
             <Box>
               <Typography variant="h4" sx={{ color: '#2e7d32', fontWeight: 600 }}>
-                Notifications Center
+                Admin Notifications Center
               </Typography>
               <Typography variant="body1" color="text.secondary">
-                View and manage system notifications and activities
+                View and manage admin notifications and activities
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
@@ -776,7 +899,7 @@ const NotificationPanel = () => {
               label={
                 <Box>
                   <Typography variant="body2" fontWeight="600">
-                    All Notifications
+                    All Admin Notifications
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     {allNotifications.length} total • {plantingRequests.length} requests • {plantingRecords.length} records
@@ -822,14 +945,14 @@ const NotificationPanel = () => {
         {activeTab === 0 && (
           <>
             <Typography variant="h6" sx={{ color: '#2e7d32', fontWeight: 600, mb: 2 }}>
-              All Notifications
+              All Admin Notifications
             </Typography>
             
             {allNotifications.length === 0 ? (
               <EmptyState 
                 icon={NotificationsIcon}
-                title="No notifications available"
-                description="New notifications will appear here when available"
+                title="No admin notifications available"
+                description="New admin notifications will appear here when available"
               />
             ) : (
               <Box>
@@ -863,7 +986,7 @@ const NotificationPanel = () => {
           </>
         )}
 
-        {/* Detail Dialog for Planting Requests */}
+        {/* Detail Dialog for Planting Requests - UPDATED LOCATION DISPLAY */}
         <Dialog open={detailDialogOpen} onClose={() => setDetailDialogOpen(false)} maxWidth="md" fullWidth>
           <DialogTitle>Planting Request Details</DialogTitle>
           <DialogContent>
@@ -913,7 +1036,7 @@ const NotificationPanel = () => {
           </DialogActions>
         </Dialog>
 
-        {/* Detail Dialog for Planting Records */}
+        {/* Detail Dialog for Planting Records - UPDATED LOCATION DISPLAY */}
         <Dialog open={recordDialogOpen} onClose={() => setRecordDialogOpen(false)} maxWidth="md" fullWidth>
           <DialogTitle>Planting Record Details</DialogTitle>
           <DialogContent>
@@ -936,10 +1059,13 @@ const NotificationPanel = () => {
                   <Typography variant="subtitle2" color="text.secondary">Planting Details</Typography>
                   <Box sx={{ mt: 1, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
                     <Typography>
-                      <strong>Tree Seedling:</strong> {selectedRecord.treeSeedlingName || 'Unknown Tree'}
+                      <strong>Tree Seedling:</strong> {selectedRecord.treeSeedlingName || selectedRecord.seedlingRef || 'Unknown Tree'}
                     </Typography>
                     <Typography>
-                      <strong>Planting Date:</strong> {formatDateTime(selectedRecord.plantingDate) || 'N/A'}
+                      <strong>Planting Date:</strong> {formatDateTime(selectedRecord.record_date) || formatDateTime(selectedRecord.createdAt) || 'N/A'}
+                    </Typography>
+                    <Typography>
+                      <strong>Request ID:</strong> {selectedRecord.requestId || 'N/A'}
                     </Typography>
                     <Typography>
                       <strong>Status:</strong> 

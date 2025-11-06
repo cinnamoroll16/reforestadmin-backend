@@ -1,4 +1,4 @@
-// src/pages/AdminDashboard.js
+// src/pages/AdminDashboard.js - UPDATED LOCATION RESOLUTION
 import React, { useState, useEffect } from 'react';
 import {
   LinearProgress,
@@ -109,6 +109,57 @@ let DefaultIcon = L.icon({
 L.Marker.prototype.options.icon = DefaultIcon;
 
 const COLORS = ['#4caf50', '#2196f3', '#ff9800', '#f44336', '#9c27b0'];
+
+// Helper function to resolve user reference
+const resolveUserRef = async (userRef) => {
+  if (!userRef) return { name: 'Unknown User', email: 'N/A' };
+  
+  try {
+    // Extract user ID from reference
+    const userId = typeof userRef === 'string' 
+      ? userRef.split('/').pop() 
+      : userRef.path?.split('/').pop();
+    
+    if (userId) {
+      const userData = await apiService.getUser(userId);
+      if (userData) {
+        return {
+          name: `${userData.user_firstname || userData.user_Firstname || userData.firstName || ''} ${userData.user_lastname || userData.user_Lastname || userData.lastName || ''}`.trim() || 'Unknown User',
+          email: userData.user_email || userData.email || 'N/A'
+        };
+      }
+    }
+  } catch (error) {
+    console.error('Error resolving user via API:', error);
+  }
+  
+  return { name: 'Unknown User', email: 'N/A' };
+};
+
+// Helper function to resolve location reference - UPDATED VERSION
+const resolveLocationRef = async (locationRef) => {
+  try {
+    if (!locationRef) return { name: 'Unknown Location' };
+    
+    let locationName;
+    
+    // Handle different reference formats
+    if (locationRef.includes('/')) {
+      locationName = locationRef.split('/').pop();
+    } else if (locationRef.startsWith('locations/')) {
+      locationName = locationRef.replace('locations/', '');
+    } else {
+      locationName = locationRef;
+    }
+    
+    return {
+      name: locationName || 'Unknown Location'
+    };
+  } catch (error) {
+    console.error('Error fetching location data:', error);
+    return { name: 'Unknown Location' };
+  }
+};
 
 function AdminDashboard() {
   const { user, logout } = useAuth();
@@ -230,13 +281,21 @@ function AdminDashboard() {
       // 2. Fetch ALL Planting Requests
       const allRequests = await apiService.getPlantingRequests();
 
-      // Map all requests with user data
+      // Map all requests with user data - UPDATED LOCATION RESOLUTION
       const requestsWithUserData = await Promise.all(
         allRequests.map(async (request) => {
           let requesterName = 'Unknown User';
+          let locationName = 'Not specified';
           
           // Fetch user name if userRef exists
-          if (request.userId) {
+          if (request.userRef) {
+            try {
+              const userInfo = await resolveUserRef(request.userRef);
+              requesterName = userInfo.name;
+            } catch (err) {
+              console.error('Error fetching user:', err);
+            }
+          } else if (request.userId) {
             try {
               const userData = await apiService.getUser(request.userId);
               requesterName = `${userData.firstName || userData.user_firstname || ''} ${userData.user_lastname || userData.lastName || ''}`.trim() || 'Unknown User';
@@ -245,14 +304,31 @@ function AdminDashboard() {
             }
           }
 
-          let locationName = 'Not specified';
-          if (request.locationId) {
+          // Fetch location name - UPDATED TO USE LOCATION REF PARSING
+          if (request.locationRef) {
             try {
-              const locations = await apiService.getLocations();
-              const location = locations.find(loc => loc.id === request.locationId);
-              locationName = location?.location_name || 'Unknown Location';
+              const locationInfo = await resolveLocationRef(request.locationRef);
+              locationName = locationInfo.name;
             } catch (err) {
               console.error('Error fetching location:', err);
+            }
+          } else if (request.locationId) {
+            try {
+              // If it's just a location ID, use it directly
+              locationName = request.locationId;
+            } catch (err) {
+              console.error('Error processing location ID:', err);
+            }
+          }
+
+          // Format date properly
+          let formattedDate = 'Not specified';
+          if (request.preferred_date) {
+            try {
+              const date = new Date(request.preferred_date);
+              formattedDate = date.toLocaleDateString();
+            } catch (err) {
+              formattedDate = request.preferred_date;
             }
           }
 
@@ -262,7 +338,7 @@ function AdminDashboard() {
             type: 'Planting Request',
             site: locationName,
             date: request.request_date ? new Date(request.request_date) : new Date(),
-            preferredDate: request.preferred_date || 'Not specified',
+            preferredDate: formattedDate,
             remarks: request.request_remarks || '-',
             status: request.request_status || 'pending',
             ...request
@@ -376,33 +452,6 @@ function AdminDashboard() {
     }
 
     return monthlyData;
-  };
-
-  // Handle request approval/rejection using API service
-  const handleRequestAction = async (requestId, action) => {
-    try {
-      await apiService.updatePlantingRequest(requestId, {
-        request_status: action,
-        reviewedBy: user?.name || 'Admin',
-        reviewedAt: new Date().toISOString()
-      });
-      
-      setSnackbar({
-        open: true,
-        message: `Request ${action} successfully!`,
-        severity: 'success'
-      });
-      
-      // Refresh data
-      fetchDashboardData();
-    } catch (error) {
-      console.error('Error updating request:', error);
-      setSnackbar({
-        open: true,
-        message: 'Error updating request: ' + error.message,
-        severity: 'error'
-      });
-    }
   };
 
   useEffect(() => {
@@ -753,7 +802,7 @@ function AdminDashboard() {
             </Paper>
           </Grid>
 
-          {/* Pending Requests - Side Panel */}
+          {/* Pending Requests - Side Panel - FIXED LOCATION DISPLAY */}
           <Grid item xs={12} lg={4}>
             <Paper sx={{ p: 2, height: 500 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -771,8 +820,9 @@ function AdminDashboard() {
                 <Table size="small" stickyHeader>
                   <TableHead>
                     <TableRow>
-                      <TableCell><strong>Details</strong></TableCell>
-                      <TableCell align="center"><strong>Actions</strong></TableCell>
+                      <TableCell><strong>Requester</strong></TableCell>
+                      <TableCell><strong>Location</strong></TableCell>
+                      <TableCell><strong>Preferred Date</strong></TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -782,36 +832,22 @@ function AdminDashboard() {
                           <Typography variant="body2" fontWeight="medium">
                             {request.requesterName}
                           </Typography>
-                          <Typography variant="caption" color="text.secondary" display="block">
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">
                             {request.site}
                           </Typography>
-                          <Typography variant="caption" color="text.secondary">
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">
                             {request.preferredDate}
                           </Typography>
-                        </TableCell>
-                        <TableCell align="center">
-                          <IconButton 
-                            color="success" 
-                            size="small"
-                            onClick={() => handleRequestAction(request.id, 'approved')}
-                            title="Approve"
-                          >
-                            <Check fontSize="small" />
-                          </IconButton>
-                          <IconButton 
-                            color="error" 
-                            size="small"
-                            onClick={() => handleRequestAction(request.id, 'declined')}
-                            title="Decline"
-                          >
-                            <Clear fontSize="small" />
-                          </IconButton>
                         </TableCell>
                       </TableRow>
                     ))}
                     {dashboardData.pendingRequests.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={2} align="center">
+                        <TableCell colSpan={3} align="center">
                           <Typography color="text.secondary" sx={{ py: 3 }}>
                             No pending requests
                           </Typography>

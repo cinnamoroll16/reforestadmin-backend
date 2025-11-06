@@ -1,12 +1,42 @@
-// src/services/api.js - UPDATED WITH BETTER ERROR HANDLING
+// src/services/api.js - WITH RETRY LOGIC & EXPONENTIAL BACKOFF
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 class ApiService {
   constructor() {
     this.baseURL = API_BASE_URL;
+    this.cache = new Map();
+    this.pendingRequests = new Map();
+    this.cacheTimeout = 30000; // 30 seconds cache
+    this.maxRetries = 3;
+    this.retryDelay = 1000; // 1 second initial delay
   }
 
-  async request(endpoint, options = {}) {
+  getCacheKey(endpoint, options = {}) {
+    return `${options.method || 'GET'}_${endpoint}_${JSON.stringify(options.body || {})}`;
+  }
+
+  async sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async request(endpoint, options = {}, retryCount = 0) {
+    const cacheKey = this.getCacheKey(endpoint, options);
+    
+    // Check if we have a pending request for this endpoint
+    if (this.pendingRequests.has(cacheKey)) {
+      console.log(`⏳ Waiting for pending request: ${endpoint}`);
+      return this.pendingRequests.get(cacheKey);
+    }
+
+    // Check cache for GET requests only
+    if (!options.method || options.method === 'GET') {
+      const cached = this.cache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+        console.log(`💾 Using cached data: ${endpoint}`);
+        return cached.data;
+      }
+    }
+
     // Get Firebase token
     let token;
     
@@ -40,63 +70,121 @@ class ApiService {
       config.body = JSON.stringify(config.body);
     }
 
-    try {
-      console.log(`🌐 API Request: ${options.method || 'GET'} ${endpoint}`);
-      const response = await fetch(`${this.baseURL}${endpoint}`, config);
-      
-      // Handle cases where response might not be JSON
-      const contentType = response.headers.get('content-type');
-      let data;
-      
-      if (contentType && contentType.includes('application/json')) {
-        data = await response.json();
-      } else {
-        const text = await response.text();
-        console.warn('Non-JSON response:', text);
-        data = text;
-      }
+    // Create the request promise
+    const requestPromise = (async () => {
+      try {
+        console.log(`🌐 API Request: ${options.method || 'GET'} ${endpoint}`);
+        const response = await fetch(`${this.baseURL}${endpoint}`, config);
+        
+        // Handle rate limiting with retry
+        if (response.status === 429 && retryCount < this.maxRetries) {
+          const delay = this.retryDelay * Math.pow(2, retryCount); // Exponential backoff
+          console.warn(`⚠️ Rate limited. Retrying in ${delay}ms... (Attempt ${retryCount + 1}/${this.maxRetries})`);
+          await this.sleep(delay);
+          
+          // Remove from pending requests before retry
+          this.pendingRequests.delete(cacheKey);
+          
+          // Retry the request
+          return this.request(endpoint, options, retryCount + 1);
+        }
+        
+        // Handle cases where response might not be JSON
+        const contentType = response.headers.get('content-type');
+        let data;
+        
+        if (contentType && contentType.includes('application/json')) {
+          data = await response.json();
+        } else {
+          const text = await response.text();
+          console.warn('Non-JSON response:', text);
+          data = text;
+        }
 
-      if (!response.ok) {
-        const errorMessage = data.error || data.message || `HTTP error! status: ${response.status}`;
-        console.error(`❌ API Error: ${errorMessage}`);
-        throw new Error(errorMessage);
-      }
+        if (!response.ok) {
+          const errorMessage = data.error || data.message || `HTTP error! status: ${response.status}`;
+          console.error(`❌ API Error: ${errorMessage}`);
+          throw new Error(errorMessage);
+        }
 
-      console.log(`✅ API Success: ${endpoint}`);
-      return data;
-    } catch (error) {
-      console.error('❌ API Request failed:', error);
-      throw error;
+        // Cache successful GET requests
+        if (!options.method || options.method === 'GET') {
+          this.cache.set(cacheKey, {
+            data,
+            timestamp: Date.now()
+          });
+        }
+
+        console.log(`✅ API Success: ${endpoint}`);
+        return data;
+      } catch (error) {
+        console.error('❌ API Request failed:', error);
+        throw error;
+      } finally {
+        // Remove from pending requests
+        this.pendingRequests.delete(cacheKey);
+      }
+    })();
+
+    // Store the pending request
+    this.pendingRequests.set(cacheKey, requestPromise);
+
+    return requestPromise;
+  }
+
+  // Method to clear cache
+  clearCache(pattern = null) {
+    if (pattern) {
+      for (const key of this.cache.keys()) {
+        if (key.includes(pattern)) {
+          this.cache.delete(key);
+        }
+      }
+    } else {
+      this.cache.clear();
     }
   }
+
+  // Method to clear cache for specific endpoint
+  invalidateCache(endpoint) {
+    this.clearCache(endpoint);
+  }
+
   // ========== PLANTING REQUESTS ==========
   async getPlantingRequests() {
     return this.request('/api/plantingrequests');
   }
 
   async updatePlantingRequest(id, requestData) {
-    return this.request(`/api/plantingrequests/${id}/status`, {
+    const result = await this.request(`/api/plantingrequests/${id}/status`, {
       method: 'PATCH',
       body: requestData,
     });
+    this.invalidateCache('/api/plantingrequests');
+    return result;
   }
 
   // ========== PLANTING RECORDS ==========
   async getPlantingRecords() {
     return this.request('/api/plantingrecords');
   }
+  
   async createPlantingRecord(recordData) {
-    return this.request('/api/plantingrecords', {
+    const result = await this.request('/api/plantingrecords', {
       method: 'POST',
       body: recordData,
     });
+    this.invalidateCache('/api/plantingrecords');
+    return result;
   }
 
   async updatePlantingRecord(id, recordData) {
-    return this.request(`/api/plantingrecords/${id}`, {
+    const result = await this.request(`/api/plantingrecords/${id}`, {
       method: 'PUT',
       body: recordData,
     });
+    this.invalidateCache('/api/plantingrecords');
+    return result;
   }
 
   // ========== PLANTING TASKS ==========
@@ -109,19 +197,26 @@ class ApiService {
       return [];
     }
   }
+  
   async createPlantingTask(taskData) {
-    return this.request('/api/plantingtasks', {
+    const result = await this.request('/api/plantingtasks', {
       method: 'POST',
       body: taskData,
     });
+    this.invalidateCache('/api/plantingtasks');
+    return result;
   }
+  
   async updatePlantingTask(id, taskData) {
-    return this.request(`/api/plantingtasks/${id}`, {
+    const result = await this.request(`/api/plantingtasks/${id}`, {
       method: 'PUT',
       body: taskData,
     });
+    this.invalidateCache('/api/plantingtasks');
+    return result;
   }
-    // ========== SENSOR DATA ==========
+
+  // ========== SENSOR DATA ==========
   async getSensorData(sensorId, params = {}) {
     try {
       const queryParams = new URLSearchParams(params).toString();
@@ -131,6 +226,7 @@ class ApiService {
       return null;
     }
   }
+
   // ========== NOTIFICATIONS ==========
   async getNotifications() {
     try {
@@ -143,23 +239,42 @@ class ApiService {
   }
 
   async createNotification(notificationData) {
-    return this.request('/api/notifications', {
-      method: 'POST',
-      body: notificationData,
-    });
+    try {
+      const result = await this.request('/api/notifications', {
+        method: 'POST',
+        body: notificationData,
+      });
+      this.invalidateCache('/api/notifications');
+      return result;
+    } catch (error) {
+      // If endpoint doesn't exist (404), return mock success
+      if (error.message.includes('Route not found') || error.message.includes('404')) {
+        console.warn('⚠️ Notifications endpoint not available on backend');
+        return { 
+          success: false, 
+          id: `mock-${Date.now()}`,
+          message: 'Notification endpoint not available' 
+        };
+      }
+      throw error;
+    }
   }
 
   async updateNotification(id, notificationData) {
-    return this.request(`/api/notifications/${id}`, {
+    const result = await this.request(`/api/notifications/${id}`, {
       method: 'PUT',
       body: notificationData,
     });
+    this.invalidateCache('/api/notifications');
+    return result;
   }
 
   async deleteNotification(id) {
-    return this.request(`/api/notifications/${id}`, {
+    const result = await this.request(`/api/notifications/${id}`, {
       method: 'DELETE',
     });
+    this.invalidateCache('/api/notifications');
+    return result;
   }
 
   // ========== LOCATIONS ==========
@@ -181,20 +296,18 @@ class ApiService {
       return null;
     }
   }
+
   // ========== RECOMMENDATIONS ==========
   async getRecommendations() {
     try {
       const response = await this.request('/api/recommendations');
       
-      // Ensure we always return an array
       if (Array.isArray(response)) {
         return response;
       } else if (response && typeof response === 'object') {
-        // If it's wrapped in an object with a recommendations property
         if (Array.isArray(response.recommendations)) {
           return response.recommendations;
         }
-        // If it's a single recommendation, wrap in array
         return [response];
       }
       
@@ -202,7 +315,6 @@ class ApiService {
       return [];
     } catch (error) {
       console.error('❌ Failed to fetch recommendations:', error);
-      // Return empty array on error instead of throwing
       return [];
     }
   }
@@ -216,25 +328,32 @@ class ApiService {
   }
 
   async deleteRecommendation(id) {
-    return this.request(`/api/recommendations/${id}`, {
+    const result = await this.request(`/api/recommendations/${id}`, {
       method: 'DELETE',
     });
+    this.invalidateCache('/api/recommendations');
+    return result;
   }
 
   async createRecommendation(recommendationData) {
-    return this.request('/api/recommendations', {
+    const result = await this.request('/api/recommendations', {
       method: 'POST',
       body: recommendationData,
     });
+    this.invalidateCache('/api/recommendations');
+    return result;
   }
 
   async updateRecommendation(id, recommendationData) {
-    return this.request(`/api/recommendations/${id}`, {
+    const result = await this.request(`/api/recommendations/${id}`, {
       method: 'PUT',
       body: recommendationData,
     });
+    this.invalidateCache('/api/recommendations');
+    return result;
   }
 
+  // ========== USERS ==========
   async getUsers() {
     return this.request('/api/users');
   }
@@ -261,17 +380,21 @@ class ApiService {
   }
 
   async updateUser(id, userData) {
-    return this.request(`/api/users/${id}`, {
+    const result = await this.request(`/api/users/${id}`, {
       method: 'PUT',
       body: userData,
     });
+    this.invalidateCache('/api/users');
+    return result;
   }
 
   async updateProfile(userData) {
-    return this.request('/api/users/profile', {
+    const result = await this.request('/api/users/profile', {
       method: 'PUT',
       body: userData,
     });
+    this.invalidateCache('/api/users');
+    return result;
   }
 
   getMockUserData() {
@@ -306,11 +429,6 @@ class ApiService {
 
   async getSensorById(id) {
     return this.request(`/api/sensors/${id}`);
-  }
-
-  async getSensorData(sensorId, params = {}) {
-    const queryParams = new URLSearchParams(params).toString();
-    return this.request(`/api/sensors/${sensorId}/data?${queryParams}`);
   }
 
   // ========== TREE SEEDLINGS ==========
