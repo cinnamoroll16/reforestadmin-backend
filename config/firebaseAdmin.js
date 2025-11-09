@@ -1,19 +1,27 @@
 // config/firebaseAdmin.js
 const admin = require('firebase-admin');
 
-// Initialize Firebase Admin using environment variables
 let serviceAccount;
 
 try {
-  // Check if we're in production (Vercel) or local development
   if (process.env.FIREBASE_PROJECT_ID) {
     // Production: Use environment variables
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+    
+    // Handle different private key formats
+    const formattedPrivateKey = privateKey
+      ? privateKey.replace(/\\n/g, '\n') // Replace literal \n with actual newlines
+      : null;
+    
     serviceAccount = {
       projectId: process.env.FIREBASE_PROJECT_ID,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      privateKey: formattedPrivateKey,
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
     };
+    
     console.log('🔧 Using Firebase credentials from environment variables');
+    console.log('📝 Private key length:', formattedPrivateKey?.length);
+    console.log('📝 Private key starts with:', formattedPrivateKey?.substring(0, 30));
   } else {
     // Local development: Use JSON file
     serviceAccount = require('../serviceAccountKey.json');
@@ -28,16 +36,13 @@ try {
   console.log('✅ Firebase Admin initialized successfully');
 } catch (error) {
   console.error('❌ Firebase Admin initialization failed:', error.message);
-  console.error('💡 Make sure environment variables are set in Vercel or serviceAccountKey.json exists locally');
-  throw error; // Don't exit in production, let the error handler deal with it
+  throw error;
 }
 
-// Initialize services
 const db = admin.firestore();
 const auth = admin.auth();
 const rtdb = admin.database();
 
-// Firestore settings
 db.settings({ ignoreUndefinedProperties: true });
 
 console.log('✅ Firestore, Auth, and Realtime Database services initialized');
