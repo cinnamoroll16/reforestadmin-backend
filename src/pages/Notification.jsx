@@ -249,7 +249,7 @@ const fetchPlantingRequests = async () => {
   }
 };
 
-// Fetch planting records from API - UPDATED WITH LOCATION RESOLUTION
+// Fetch planting records from API - FIXED VERSION
 const fetchPlantingRecords = async () => {
   try {
     console.log('📊 Fetching planting records via API...');
@@ -257,8 +257,18 @@ const fetchPlantingRecords = async () => {
     
     console.log('🔍 Planting records API response:', response);
     
-    // apiService.getPlantingRecords() already returns an array or empty array
-    const records = Array.isArray(response) ? response : [];
+    // FIX: Handle the nested response structure
+    let records = [];
+    if (response && response.success && Array.isArray(response.data)) {
+      records = response.data;
+      console.log(`✅ Extracted ${records.length} planting records from nested response`);
+    } else if (Array.isArray(response)) {
+      records = response;
+      console.log(`✅ Using ${records.length} planting records directly`);
+    } else {
+      console.warn('⚠️ Unexpected response format for planting records:', response);
+      records = [];
+    }
     
     console.log('✅ Planting records loaded via API:', records.length);
     

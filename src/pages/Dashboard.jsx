@@ -351,13 +351,26 @@ function AdminDashboard() {
         (req.request_status || '').toLowerCase() === 'pending'
       );
       
-      // 3. Fetch Planting Records (completed plantings)
-      const recordsData = await apiService.getPlantingRecords();
+      // 3. Fetch Planting Records (completed plantings) - FIXED VERSION
+      const recordsResponse = await apiService.getPlantingRecords();
+
+      // FIX: Handle nested response structure for planting records
+      let recordsData = [];
+      if (recordsResponse && recordsResponse.success && Array.isArray(recordsResponse.data)) {
+        recordsData = recordsResponse.data;
+        console.log(`✅ Extracted ${recordsData.length} planting records from nested response`);
+      } else if (Array.isArray(recordsResponse)) {
+        recordsData = recordsResponse;
+        console.log(`✅ Using ${recordsData.length} planting records directly`);
+      } else {
+        console.warn('⚠️ Unexpected response format for planting records:', recordsResponse);
+        recordsData = [];
+      }
 
       // Count completed tasks from plantingrecords
       const plantingTasks = {
         active: 0,
-        completed: recordsData.length,
+        completed: recordsData.length, // Use the extracted array
         pending: 0,
         cancelled: 0
       };

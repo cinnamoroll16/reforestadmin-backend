@@ -165,8 +165,30 @@ class ApiService {
   }
 
   // ========== PLANTING RECORDS ==========
+  // In your apiService class - ensure this method exists and works correctly
   async getPlantingRecords() {
-    return this.request('/api/plantingrecords');
+    const response = await this.request('/api/plantingrecords');
+    
+    // Handle nested response structure
+    if (response && response.success && Array.isArray(response.data)) {
+      console.log(`✅ Extracted ${response.data.length} planting records from nested response`);
+      return response.data;
+    } 
+    // Fallback: if response is already an array, return it directly
+    else if (Array.isArray(response)) {
+      console.log(`✅ Returning ${response.length} planting records directly`);
+      return response;
+    }
+    // Fallback: if response has different structure
+    else if (response && Array.isArray(response.records)) {
+      console.log(`✅ Extracted ${response.records.length} planting records from 'records' field`);
+      return response.records;
+    }
+    // If no valid data found, return empty array
+    else {
+      console.warn('⚠️ Unexpected response format for planting records:', response);
+      return [];
+    }
   }
   
   async createPlantingRecord(recordData) {
@@ -185,6 +207,40 @@ class ApiService {
     });
     this.invalidateCache('/api/plantingrecords');
     return result;
+  }
+  // In your getPlantingRecords method, add detailed logging:
+  async getPlantingRecords() {
+    try {
+      console.log('🔍 Fetching planting records from:', `${this.baseURL}/api/plantingrecords`);
+      const response = await this.request('/api/plantingrecords');
+      console.log('📦 Raw API response:', response);
+      console.log('📊 Response type:', typeof response);
+      console.log('🔢 Is array?:', Array.isArray(response));
+      
+      if (Array.isArray(response)) {
+        console.log(`📈 Number of records: ${response.length}`);
+        if (response.length > 0) {
+          console.log('📝 First record sample:', response[0]);
+        }
+      } else if (response && typeof response === 'object') {
+        console.log('📋 Response keys:', Object.keys(response));
+        // Check for common response wrappers
+        if (response.data) {
+          console.log('📦 Nested data found:', response.data);
+        }
+        if (response.records) {
+          console.log('📦 Records found:', response.records);
+        }
+        if (response.plantingRecords) {
+          console.log('📦 Planting records found:', response.plantingRecords);
+        }
+      }
+      
+      return response;
+    } catch (error) {
+      console.error('❌ Failed to fetch planting records:', error);
+      return [];
+    }
   }
 
   // ========== PLANTING TASKS ==========
@@ -545,6 +601,12 @@ class ApiService {
       console.warn('Export audit logs failed:', error.message);
       return { logs: [] };
     }
+  }
+  // Method to clear all cache and force fresh data
+  async clearAllCache() {
+    this.cache.clear();
+    this.pendingRequests.clear();
+    console.log('🧹 Cleared all API cache');
   }
 }
 
