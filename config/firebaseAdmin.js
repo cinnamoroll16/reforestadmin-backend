@@ -4,28 +4,34 @@ const admin = require('firebase-admin');
 let serviceAccount;
 
 try {
-  if (process.env.FIREBASE_PROJECT_ID) {
-    // Production: Use environment variables
-    const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+  // Check if Base64 encoded service account exists (Vercel)
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+    console.log('🔧 Using Firebase credentials from Base64 environment variable');
     
-    // Handle different private key formats
-    const formattedPrivateKey = privateKey
-      ? privateKey.replace(/\\n/g, '\n') // Replace literal \n with actual newlines
-      : null;
+    // Decode Base64 to JSON
+    const serviceAccountJson = Buffer.from(
+      process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, 
+      'base64'
+    ).toString('utf8');
+    
+    serviceAccount = JSON.parse(serviceAccountJson);
+    console.log('✅ Service account decoded successfully');
+    console.log('📝 Project ID:', serviceAccount.project_id);
+  } 
+  // Fallback to individual environment variables
+  else if (process.env.FIREBASE_PROJECT_ID) {
+    console.log('🔧 Using Firebase credentials from individual environment variables');
     
     serviceAccount = {
       projectId: process.env.FIREBASE_PROJECT_ID,
-      privateKey: formattedPrivateKey,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
     };
-    
-    console.log('🔧 Using Firebase credentials from environment variables');
-    console.log('📝 Private key length:', formattedPrivateKey?.length);
-    console.log('📝 Private key starts with:', formattedPrivateKey?.substring(0, 30));
-  } else {
-    // Local development: Use JSON file
-    serviceAccount = require('../serviceAccountKey.json');
+  } 
+  // Local development: Use JSON file
+  else {
     console.log('🔧 Using Firebase credentials from serviceAccountKey.json');
+    serviceAccount = require('../serviceAccountKey.json');
   }
 
   admin.initializeApp({
@@ -36,6 +42,7 @@ try {
   console.log('✅ Firebase Admin initialized successfully');
 } catch (error) {
   console.error('❌ Firebase Admin initialization failed:', error.message);
+  console.error('Full error:', error);
   throw error;
 }
 
