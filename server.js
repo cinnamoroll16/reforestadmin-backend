@@ -1,3 +1,4 @@
+//../server.js
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -76,7 +77,7 @@ const upload = multer({
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5000',
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization']
