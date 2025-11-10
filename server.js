@@ -157,6 +157,15 @@ app.use((req, res, next) => {
   next();
 });
 
+// Handle preflight requests explicitly
+app.options('*', cors());
+
+// Add a simple middleware to log CORS headers for debugging
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  console.log('📨 Request from origin:', origin);
+  next();
+});
 // ============================================================================
 // Routes
 // ============================================================================
