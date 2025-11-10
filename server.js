@@ -84,11 +84,20 @@ const allowedOrigins = [
 ];
 
 // CORS middleware - handle preflight requests
-app.options('*', cors({
-  origin: allowedOrigins,
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://reforestadmin-frontend.vercel.app',
+    'https://reforestadmin-frontend-git-myself-jessas-projects-763c9cbb.vercel.app',
+    /https:\/\/reforestadmin-frontend.*\.vercel\.app$/, // Allow all preview deployments
+    process.env.FRONTEND_URL
+  ].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 600 // Cache preflight for 10 minutes
 }));
 
 // Main CORS configuration
