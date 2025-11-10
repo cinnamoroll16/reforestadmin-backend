@@ -78,7 +78,7 @@ const upload = multer({
 // FIXED CORS CONFIGURATION
 // ============================================================================
 const allowedOrigins = [
-  'https://reforestadmin-frontend-42ox2f0fw-jessas-projects-763c9cbb.vercel.app',
+  'https://reforestadmin-frontend.vercel.app',
   'http://localhost:3000',
   'http://localhost:3001'
 ];
