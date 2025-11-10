@@ -1,4 +1,3 @@
-//../server.js
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -8,10 +7,8 @@ const multer = require('multer');
 const path = require('path');
 require('dotenv').config();
 
-// IMPORTANT: Add this line immediately after creating app
-app.set('trust proxy', 1);
-// Import Firebase Admin first to check connection
-const { db, auth } = require('./config/firebaseAdmin');
+// Import Firebase Admin with new lazy initialization
+const { db, auth, isInitialized, initializationError } = require('./config/firebaseAdmin');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -30,6 +27,7 @@ const MLService = require('./services/MLService');
 const DatasetService = require('./services/DatasetService');
 
 const app = express();
+app.set('trust proxy', 1);
 
 // Initialize ML Services
 const datasetService = new DatasetService();
@@ -38,7 +36,7 @@ const mlService = new MLService(datasetService, db);
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 100, // Increase from 100 to 100 requests per minute
+  max: 100,
   message: {
     error: 'Too many requests from this IP, please try again later.',
     retryAfter: 60
@@ -90,10 +88,13 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static('uploads'));
 
-// Test Firebase connection on startup
+// ============================================================================
+// SOLUTION 2: REMOVE THE BLOCKING FIREBASE TEST MIDDLEWARE
+// ============================================================================
+// COMMENTED OUT - This was causing serverless function crashes
+/*
 app.use(async (req, res, next) => {
   try {
-    // This will verify Firebase connection on first request
     if (!app.get('firebaseTested')) {
       console.log('🔥 Testing Firebase connection...');
       await db.collection('test').doc('connection').set({
@@ -112,8 +113,17 @@ app.use(async (req, res, next) => {
     });
   }
 });
+*/
 
+// REPLACED WITH: Non-blocking middleware that just passes through
+app.use((req, res, next) => {
+  // Let individual routes handle Firebase errors gracefully
+  next();
+});
+
+// ============================================================================
 // Routes
+// ============================================================================
 app.use('/api/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/locations', locationsRoutes);
@@ -129,33 +139,41 @@ app.use('/api/tree-seedlings', treeSeedlingsRoutes);
 // ML BACKEND ROUTES
 // ============================================================================
 
-// Health check with Firebase status
+// UPDATED Health check with graceful Firebase handling
 app.get('/health', async (req, res) => {
-  try {
-    // Test Firebase connection
-    await db.collection('test').doc('health').set({
-      checkedAt: new Date().toISOString()
-    });
-    
-    // Check ML service status
-    const mlStatus = datasetService.isDatasetLoaded() ? 'Ready' : 'No Dataset';
-    
-    res.status(200).json({ 
-      status: 'OK', 
-      message: 'ReForest Backend is running',
-      database: 'Connected',
-      mlService: mlStatus,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(200).json({ 
-      status: 'WARNING', 
-      message: 'Backend running but database connection failed',
-      database: 'Disconnected',
-      error: error.message,
-      timestamp: new Date().toISOString()
-    });
+  let dbStatus = 'Unknown';
+  let dbError = null;
+
+  // Check if Firebase is initialized
+  if (isInitialized()) {
+    try {
+      // Test Firebase connection
+      await db.collection('test').doc('health').set({
+        checkedAt: new Date().toISOString()
+      });
+      dbStatus = 'Connected';
+    } catch (error) {
+      dbStatus = 'Error';
+      dbError = error.message;
+    }
+  } else if (initializationError()) {
+    dbStatus = 'Not Initialized';
+    dbError = initializationError().message;
+  } else {
+    dbStatus = 'Initializing';
   }
+
+  // Check ML service status
+  const mlStatus = datasetService.isDatasetLoaded() ? 'Ready' : 'No Dataset';
+
+  res.status(200).json({
+    status: dbStatus === 'Connected' ? 'OK' : 'WARNING',
+    message: 'ReForest Backend is running',
+    database: dbStatus,
+    databaseError: dbError,
+    mlService: mlStatus,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Upload dataset endpoint
@@ -381,10 +399,12 @@ app.delete('/api/ml/dataset', (req, res) => {
 
 // Root route
 app.get('/', (req, res) => {
+  const firebaseStatus = isInitialized() ? 'Connected' : (initializationError() ? 'Error' : 'Initializing');
+  
   res.json({ 
     message: 'ReForest Backend API',
     version: '1.0.0',
-    database: 'Firestore',
+    database: firebaseStatus,
     mlService: datasetService.isDatasetLoaded() ? 'Ready' : 'Dataset Required',
     endpoints: {
       auth: '/api/auth',
@@ -458,8 +478,7 @@ app.listen(PORT, () => {
   console.log(`🤖 ML Service: http://localhost:${PORT}/api/ml/status`);
   console.log(`📊 Dataset upload: http://localhost:${PORT}/api/ml/upload-dataset`);
   console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔥 Firebase RTDB: Connected`);
-  console.log(`📚 Firestore: Connected`);
+  console.log(`🔥 Firebase: ${isInitialized() ? 'Connected' : 'Initializing...'}`);
   console.log(`🤖 ML Backend: Ready for dataset upload`);
   console.log('='.repeat(60));
   console.log('');
