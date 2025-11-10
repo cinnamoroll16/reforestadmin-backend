@@ -7,7 +7,6 @@ const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const path = require('path');
 require('dotenv').config();
-const app = express();
 
 // IMPORTANT: Add this line immediately after creating app
 app.set('trust proxy', 1);
