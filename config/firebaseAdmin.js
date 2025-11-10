@@ -8,6 +8,13 @@ try {
   if (process.env.FIREBASE_PRIVATE_KEY) {
     console.log('🔧 Using Firebase credentials from individual environment variables');
     
+    // Debug: Check if variables exist
+    console.log('🔍 Checking environment variables:');
+    console.log('  - FIREBASE_PROJECT_ID:', process.env.FIREBASE_PROJECT_ID ? '✅ Set' : '❌ Missing');
+    console.log('  - FIREBASE_PRIVATE_KEY:', process.env.FIREBASE_PRIVATE_KEY ? `✅ Set (${process.env.FIREBASE_PRIVATE_KEY.substring(0, 50)}...)` : '❌ Missing');
+    console.log('  - FIREBASE_CLIENT_EMAIL:', process.env.FIREBASE_CLIENT_EMAIL ? '✅ Set' : '❌ Missing');
+    console.log('  - FIREBASE_CLIENT_ID:', process.env.FIREBASE_CLIENT_ID ? '✅ Set' : '❌ Missing');
+    
     serviceAccount = {
       type: 'service_account',
       project_id: process.env.FIREBASE_PROJECT_ID,
@@ -23,6 +30,7 @@ try {
     console.log('✅ Firebase credentials loaded from environment variables');
     console.log('📝 Project ID:', serviceAccount.project_id);
     console.log('📧 Client Email:', serviceAccount.client_email);
+    console.log('🔑 Private key starts with:', serviceAccount.private_key.substring(0, 30));
   } 
   // Local development: Use JSON file
   else {
@@ -36,12 +44,23 @@ try {
     throw new Error('Missing required Firebase credentials. Check your environment variables.');
   }
 
+  // Validate private key format
+  if (!serviceAccount.private_key.includes('BEGIN PRIVATE KEY')) {
+    throw new Error('Invalid private key format. Must include BEGIN PRIVATE KEY header.');
+  }
+
+  console.log('🔑 Private key validation: ✅ Valid format');
+
   // Initialize Firebase Admin (only if not already initialized)
   if (!admin.apps.length) {
-    admin.initializeApp({
+    const config = {
       credential: admin.credential.cert(serviceAccount),
       databaseURL: process.env.FIREBASE_DATABASE_URL || `https://${serviceAccount.project_id}-default-rtdb.asia-southeast1.firebasedatabase.app`
-    });
+    };
+    
+    console.log('📡 Initializing with database URL:', config.databaseURL);
+    
+    admin.initializeApp(config);
     
     console.log('✅ Firebase Admin initialized successfully');
   } else {
