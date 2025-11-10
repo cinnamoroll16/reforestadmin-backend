@@ -74,13 +74,47 @@ const upload = multer({
   }
 });
 
-// Middleware
-app.use(helmet());
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'https://reforestadmin-frontend.vercel.app/',
+// ============================================================================
+// FIXED CORS CONFIGURATION
+// ============================================================================
+const allowedOrigins = [
+  'https://reforestadmin-frontend-42ox2f0fw-jessas-projects-763c9cbb.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:3001'
+];
+
+// CORS middleware - handle preflight requests
+app.options('*', cors({
+  origin: allowedOrigins,
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
+// Main CORS configuration
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('🚫 CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range']
+}));
+
+// ============================================================================
+// Middleware
+// ============================================================================
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 app.use(morgan('combined'));
 app.use(limiter);
@@ -88,34 +122,27 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static('uploads'));
 
-// ============================================================================
-// SOLUTION 2: REMOVE THE BLOCKING FIREBASE TEST MIDDLEWARE
-// ============================================================================
-// COMMENTED OUT - This was causing serverless function crashes
-/*
-app.use(async (req, res, next) => {
-  try {
-    if (!app.get('firebaseTested')) {
-      console.log('🔥 Testing Firebase connection...');
-      await db.collection('test').doc('connection').set({
-        test: true,
-        timestamp: new Date().toISOString()
-      });
-      app.set('firebaseTested', true);
-      console.log('✅ Firebase connection verified');
-    }
-    next();
-  } catch (error) {
-    console.error('❌ Firebase connection failed:', error.message);
-    res.status(500).json({ 
-      error: 'Database connection failed',
-      details: 'Check Firebase configuration and service account key'
-    });
+// Add CORS headers manually for additional safety
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
   }
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  next();
 });
-*/
 
-// REPLACED WITH: Non-blocking middleware that just passes through
+// ============================================================================
+// Non-blocking middleware
+// ============================================================================
 app.use((req, res, next) => {
   // Let individual routes handle Firebase errors gracefully
   next();
@@ -172,6 +199,11 @@ app.get('/health', async (req, res) => {
     database: dbStatus,
     databaseError: dbError,
     mlService: mlStatus,
+    cors: {
+      enabled: true,
+      allowedOrigins: allowedOrigins,
+      currentOrigin: req.headers.origin || 'No origin header'
+    },
     timestamp: new Date().toISOString()
   });
 });
@@ -285,6 +317,10 @@ app.get('/api/ml/status', (req, res) => {
     datasetLoaded: datasetService.isDatasetLoaded(),
     datasetSize: datasetService.isDatasetLoaded() ? datasetService.getDataset().length : 0,
     lastUpdated: datasetService.getLastUpdateTime(),
+    cors: {
+      enabled: true,
+      currentOrigin: req.headers.origin || 'No origin header'
+    },
     endpoints: {
       uploadDataset: 'POST /api/ml/upload-dataset',
       generateRecommendations: 'POST /api/ml/generate-recommendations',
@@ -406,6 +442,11 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     database: firebaseStatus,
     mlService: datasetService.isDatasetLoaded() ? 'Ready' : 'Dataset Required',
+    cors: {
+      enabled: true,
+      allowedOrigins: allowedOrigins,
+      currentOrigin: req.headers.origin || 'No origin header'
+    },
     endpoints: {
       auth: '/api/auth',
       users: '/api/users',
@@ -431,6 +472,16 @@ app.get('/', (req, res) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('🚨 Server Error:', err.stack);
+  
+  // CORS errors
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({
+      error: 'CORS Error',
+      message: 'Origin not allowed',
+      allowedOrigins: allowedOrigins,
+      yourOrigin: req.headers.origin
+    });
+  }
   
   // Multer file upload errors
   if (err instanceof multer.MulterError) {
@@ -479,6 +530,8 @@ app.listen(PORT, () => {
   console.log(`📊 Dataset upload: http://localhost:${PORT}/api/ml/upload-dataset`);
   console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔥 Firebase: ${isInitialized() ? 'Connected' : 'Initializing...'}`);
+  console.log(`🔒 CORS: Enabled for ${allowedOrigins.length} origins`);
+  console.log(`   - ${allowedOrigins.join('\n   - ')}`);
   console.log(`🤖 ML Backend: Ready for dataset upload`);
   console.log('='.repeat(60));
   console.log('');
