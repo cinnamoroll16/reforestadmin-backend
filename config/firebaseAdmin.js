@@ -4,38 +4,23 @@ const admin = require('firebase-admin');
 let serviceAccount;
 
 try {
-  // Check if Base64 encoded service account exists (Vercel/Production)
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
-    console.log('🔧 Using Firebase credentials from Base64 environment variable');
-    
-    // Decode Base64 to JSON
-    const serviceAccountJson = Buffer.from(
-      process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, 
-      'base64'
-    ).toString('utf8');
-    
-    serviceAccount = JSON.parse(serviceAccountJson);
-    
-    // Validate required fields
-    if (!serviceAccount.project_id || !serviceAccount.private_key || !serviceAccount.client_email) {
-      throw new Error('Invalid service account: missing required fields (project_id, private_key, client_email)');
-    }
-    
-    console.log('✅ Service account decoded successfully');
-    console.log('📝 Project ID:', serviceAccount.project_id);
-    console.log('📧 Client Email:', serviceAccount.client_email);
-  } 
-  // Fallback to individual environment variables
-  else if (process.env.FIREBASE_PROJECT_ID) {
+  // Production: Use individual environment variables (Vercel)
+  if (process.env.FIREBASE_PRIVATE_KEY) {
     console.log('🔧 Using Firebase credentials from individual environment variables');
     
-    // IMPORTANT: Use snake_case property names that Firebase expects
     serviceAccount = {
+      type: 'service_account',
       project_id: process.env.FIREBASE_PROJECT_ID,
-      private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
       client_email: process.env.FIREBASE_CLIENT_EMAIL,
+      client_id: process.env.FIREBASE_CLIENT_ID,
+      auth_uri: 'https://accounts.google.com/o/oauth2/auth',
+      token_uri: 'https://oauth2.googleapis.com/token',
+      auth_provider_x509_cert_url: 'https://www.googleapis.com/oauth2/v1/certs',
+      universe_domain: 'googleapis.com'
     };
     
+    console.log('✅ Firebase credentials loaded from environment variables');
     console.log('📝 Project ID:', serviceAccount.project_id);
     console.log('📧 Client Email:', serviceAccount.client_email);
   } 
@@ -46,11 +31,16 @@ try {
     console.log('📝 Project ID:', serviceAccount.project_id);
   }
 
+  // Validate required fields
+  if (!serviceAccount.project_id || !serviceAccount.private_key || !serviceAccount.client_email) {
+    throw new Error('Missing required Firebase credentials. Check your environment variables.');
+  }
+
   // Initialize Firebase Admin (only if not already initialized)
   if (!admin.apps.length) {
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
-      databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://reforestadmin-default-rtdb.asia-southeast1.firebasedatabase.app'
+      databaseURL: process.env.FIREBASE_DATABASE_URL || `https://${serviceAccount.project_id}-default-rtdb.asia-southeast1.firebasedatabase.app`
     });
     
     console.log('✅ Firebase Admin initialized successfully');
@@ -61,13 +51,6 @@ try {
 } catch (error) {
   console.error('❌ Firebase Admin initialization failed:', error.message);
   console.error('Full error:', error);
-  
-  // Additional debugging info
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
-    console.error('🔍 Base64 length:', process.env.FIREBASE_SERVICE_ACCOUNT_BASE64.length);
-    console.error('🔍 First 50 chars:', process.env.FIREBASE_SERVICE_ACCOUNT_BASE64.substring(0, 50));
-  }
-  
   throw error;
 }
 
