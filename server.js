@@ -50,10 +50,10 @@ const limiter = rateLimit({
 // ============================================================================
 // CRITICAL: Vercel serverless functions don't have persistent disk storage
 // Use memoryStorage instead of diskStorage for Vercel compatibility
-const storage = multer.memoryStorage();
+const storage = multer.memoryStorage(); // ← THIS LINE IS CRITICAL
 
 const upload = multer({ 
-  storage,
+  storage, // ← Using memoryStorage
   fileFilter: (req, file, cb) => {
     const allowedMimes = [
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
