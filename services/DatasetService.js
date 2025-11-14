@@ -57,61 +57,39 @@ class DatasetService {
    * This is the critical method for Vercel deployment
    */
   async loadDatasetFromBuffer(buffer, filename) {
-    try {
-      console.log(`📊 Loading dataset from buffer: ${filename}`);
-      console.log(`📦 Buffer size: ${(buffer.length / 1024).toFixed(2)} KB`);
-      
-      // Read workbook from buffer
-      const workbook = XLSX.read(buffer, { 
-        type: 'buffer',
-        cellDates: true,
-        cellNF: false,
-        cellText: false
-      });
-      
-      console.log(`📄 Found ${workbook.SheetNames.length} sheets: ${workbook.SheetNames.join(', ')}`);
-      
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      
-      // Convert to JSON
-      const rawData = XLSX.utils.sheet_to_json(worksheet, { 
-        defval: null,
-        blankrows: false 
-      });
+  try {
+    console.log(`📊 Loading dataset from buffer: ${filename}`);
+    console.log(`📦 Buffer size: ${(buffer.length / 1024).toFixed(2)} KB`);
+    
+    // Read workbook from buffer
+    const workbook = XLSX.read(buffer, { 
+      type: 'buffer',
+      cellDates: true,
+      cellNF: false,
+      cellText: false
+    });
+    
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    
+    const rawData = XLSX.utils.sheet_to_json(worksheet, { 
+      defval: null,
+      blankrows: false 
+    });
 
-      console.log(`📊 Parsed ${rawData.length} rows from Excel`);
-
-      if (!rawData || rawData.length === 0) {
-        throw new Error('Excel file contains no data rows');
-      }
-
-      // Log first row to help debug column names
-      if (rawData.length > 0) {
-        console.log('📋 First row columns:', Object.keys(rawData[0]));
-      }
-
-      // Parse the dataset
-      this.dataset = this.parseDataset(rawData);
-      this.datasetPath = filename; // Store filename instead of path
-      this.lastUpdateTime = new Date();
-      
-      // Train Random Forest model after loading dataset
-      await this.trainRandomForestModel();
-      
-      console.log(`✅ Successfully loaded ${this.dataset.length} tree species from buffer`);
-      console.log(`🌲 Random Forest model trained with ${this.rfModel.trees.length} decision trees`);
-      
-      return this.dataset;
-    } catch (error) {
-      console.error('❌ Error loading dataset from buffer:', error);
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack
-      });
-      throw new Error(`Dataset processing failed: ${error.message}`);
-    }
+    this.dataset = this.parseDataset(rawData);
+    this.datasetPath = filename;
+    this.lastUpdateTime = new Date();
+    
+    await this.trainRandomForestModel();
+    
+    console.log(`✅ Successfully loaded ${this.dataset.length} tree species from buffer`);
+    return this.dataset;
+  } catch (error) {
+    console.error('❌ Error loading dataset from buffer:', error);
+    throw new Error(`Dataset processing failed: ${error.message}`);
   }
+}
 
   // ==================== DATASET PARSING ====================
 
