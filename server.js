@@ -7,8 +7,8 @@ const multer = require('multer');
 const path = require('path');
 require('dotenv').config();
 
-// Import Firebase Admin with new lazy initialization
-const { db, auth, isInitialized, initializationError } = require('./config/firebaseAdmin');
+// Import Firebase Admin first to check connection
+const { db, auth } = require('./config/firebaseAdmin');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -45,28 +45,26 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 
-// File upload configuration for dataset
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
-  },
-  filename: (req, file, cb) => {
-    cb(null, `dataset-${Date.now()}${path.extname(file.originalname)}`);
-  }
-});
+// ============================================================================
+// FILE UPLOAD CONFIGURATION - VERCEL COMPATIBLE
+// ============================================================================
+// CRITICAL: Vercel serverless functions don't have persistent disk storage
+// Use memoryStorage instead of diskStorage for Vercel compatibility
+const storage = multer.memoryStorage();
 
 const upload = multer({ 
   storage,
   fileFilter: (req, file, cb) => {
     const allowedMimes = [
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-excel'
+      'application/vnd.ms-excel',
+      'text/csv'
     ];
     
-    if (allowedMimes.includes(file.mimetype)) {
+    if (allowedMimes.includes(file.mimetype) || file.originalname.match(/\.(xlsx|xls|csv)$/i)) {
       cb(null, true);
     } else {
-      cb(new Error('Only Excel files (.xlsx, .xls) are allowed!'), false);
+      cb(new Error('Only Excel files (.xlsx, .xls) or CSV files (.csv) are allowed!'), false);
     }
   },
   limits: {
@@ -74,101 +72,40 @@ const upload = multer({
   }
 });
 
-// ============================================================================
-// FIXED CORS CONFIGURATION
-// ============================================================================
-const allowedOrigins = [
-  'https://reforestadmin-frontend.vercel.app',
-  'http://localhost:3000',
-  'http://localhost:3001'
-];
-
-// CORS middleware - handle preflight requests
-app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'https://reforestadmin-frontend.vercel.app',
-    'https://reforestadmin-frontend-git-myself-jessas-projects-763c9cbb.vercel.app',
-    /https:\/\/reforestadmin-frontend.*\.vercel\.app$/, // Allow all preview deployments
-    process.env.FRONTEND_URL
-  ].filter(Boolean),
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  maxAge: 600 // Cache preflight for 10 minutes
-}));
-
-// Main CORS configuration
-app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      console.log('🚫 CORS blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range']
-}));
-
-// ============================================================================
 // Middleware
-// ============================================================================
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+app.use(helmet());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(morgan('combined'));
 app.use(limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use('/uploads', express.static('uploads'));
 
-// Add CORS headers manually for additional safety
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
+// Test Firebase connection on startup
+app.use(async (req, res, next) => {
+  try {
+    if (!app.get('firebaseTested')) {
+      console.log('🔥 Testing Firebase connection...');
+      await db.collection('test').doc('connection').set({
+        test: true,
+        timestamp: new Date().toISOString()
+      });
+      app.set('firebaseTested', true);
+      console.log('✅ Firebase connection verified');
+    }
+    next();
+  } catch (error) {
+    console.error('❌ Firebase connection failed:', error.message);
+    // Don't block requests, just log the error
+    next();
   }
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  
-  next();
 });
 
-// ============================================================================
-// Non-blocking middleware
-// ============================================================================
-app.use((req, res, next) => {
-  // Let individual routes handle Firebase errors gracefully
-  next();
-});
-
-// Handle preflight requests explicitly
-app.options('*', cors());
-
-// Add a simple middleware to log CORS headers for debugging
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  console.log('📨 Request from origin:', origin);
-  next();
-});
-// ============================================================================
 // Routes
-// ============================================================================
 app.use('/api/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/locations', locationsRoutes);
@@ -184,78 +121,80 @@ app.use('/api/tree-seedlings', treeSeedlingsRoutes);
 // ML BACKEND ROUTES
 // ============================================================================
 
-// UPDATED Health check with graceful Firebase handling
+// Health check with Firebase status
 app.get('/health', async (req, res) => {
-  let dbStatus = 'Unknown';
-  let dbError = null;
-
-  // Check if Firebase is initialized
-  if (isInitialized()) {
-    try {
-      // Test Firebase connection
-      await db.collection('test').doc('health').set({
-        checkedAt: new Date().toISOString()
-      });
-      dbStatus = 'Connected';
-    } catch (error) {
-      dbStatus = 'Error';
-      dbError = error.message;
-    }
-  } else if (initializationError()) {
-    dbStatus = 'Not Initialized';
-    dbError = initializationError().message;
-  } else {
-    dbStatus = 'Initializing';
+  try {
+    // Test Firebase connection
+    await db.collection('test').doc('health').set({
+      checkedAt: new Date().toISOString()
+    });
+    
+    // Check ML service status
+    const mlStatus = datasetService.isDatasetLoaded() ? 'Ready' : 'No Dataset';
+    
+    res.status(200).json({ 
+      status: 'OK', 
+      message: 'ReForest Backend is running',
+      database: 'Connected',
+      mlService: mlStatus,
+      platform: process.env.VERCEL ? 'Vercel' : 'Local',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(200).json({ 
+      status: 'WARNING', 
+      message: 'Backend running but database connection failed',
+      database: 'Disconnected',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
   }
-
-  // Check ML service status
-  const mlStatus = datasetService.isDatasetLoaded() ? 'Ready' : 'No Dataset';
-
-  res.status(200).json({
-    status: dbStatus === 'Connected' ? 'OK' : 'WARNING',
-    message: 'ReForest Backend is running',
-    database: dbStatus,
-    databaseError: dbError,
-    mlService: mlStatus,
-    cors: {
-      enabled: true,
-      allowedOrigins: allowedOrigins,
-      currentOrigin: req.headers.origin || 'No origin header'
-    },
-    timestamp: new Date().toISOString()
-  });
 });
 
-// Upload dataset endpoint
+// ============================================================================
+// UPLOAD DATASET ENDPOINT - VERCEL COMPATIBLE VERSION
+// ============================================================================
 app.post('/api/ml/upload-dataset', upload.single('dataset'), async (req, res) => {
   try {
+    console.log('📥 Upload request received');
+    console.log('Headers:', req.headers);
+    console.log('File:', req.file ? {
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size
+    } : 'No file');
+
     if (!req.file) {
+      console.error('❌ No file in request');
       return res.status(400).json({ 
         error: 'No file uploaded',
         message: 'Please select an Excel file to upload'
       });
     }
 
-    console.log(`📤 Processing dataset upload: ${req.file.filename}`);
+    console.log(`📤 Processing dataset upload: ${req.file.originalname}`);
+    console.log(`📦 File size: ${(req.file.size / 1024).toFixed(2)} KB`);
     
-    const filePath = req.file.path;
-    const dataset = await datasetService.loadDatasetFromFile(filePath);
+    // CRITICAL: For Vercel, file is in memory (req.file.buffer)
+    // Pass the buffer directly to DatasetService
+    const dataset = await datasetService.loadDatasetFromBuffer(
+      req.file.buffer,
+      req.file.originalname
+    );
+    
+    console.log(`✅ Dataset processed: ${dataset.length} species loaded`);
     
     res.json({ 
       success: true, 
       message: 'Dataset uploaded and processed successfully',
-      file: req.file.filename,
+      file: req.file.originalname,
       speciesCount: dataset.length,
       timestamp: new Date().toISOString()
     });
     
   } catch (error) {
     console.error('❌ Dataset upload error:', error);
-    
-    // Clean up uploaded file on error
-    if (req.file && require('fs').existsSync(req.file.path)) {
-      require('fs').unlinkSync(req.file.path);
-    }
+    console.error('Error stack:', error.stack);
     
     res.status(500).json({ 
       error: 'Dataset processing failed',
@@ -335,10 +274,7 @@ app.get('/api/ml/status', (req, res) => {
     datasetLoaded: datasetService.isDatasetLoaded(),
     datasetSize: datasetService.isDatasetLoaded() ? datasetService.getDataset().length : 0,
     lastUpdated: datasetService.getLastUpdateTime(),
-    cors: {
-      enabled: true,
-      currentOrigin: req.headers.origin || 'No origin header'
-    },
+    platform: process.env.VERCEL ? 'Vercel Serverless' : 'Local Server',
     endpoints: {
       uploadDataset: 'POST /api/ml/upload-dataset',
       generateRecommendations: 'POST /api/ml/generate-recommendations',
@@ -453,18 +389,12 @@ app.delete('/api/ml/dataset', (req, res) => {
 
 // Root route
 app.get('/', (req, res) => {
-  const firebaseStatus = isInitialized() ? 'Connected' : (initializationError() ? 'Error' : 'Initializing');
-  
   res.json({ 
     message: 'ReForest Backend API',
     version: '1.0.0',
-    database: firebaseStatus,
+    platform: process.env.VERCEL ? 'Vercel Serverless' : 'Local Server',
+    database: 'Firestore',
     mlService: datasetService.isDatasetLoaded() ? 'Ready' : 'Dataset Required',
-    cors: {
-      enabled: true,
-      allowedOrigins: allowedOrigins,
-      currentOrigin: req.headers.origin || 'No origin header'
-    },
     endpoints: {
       auth: '/api/auth',
       users: '/api/users',
@@ -491,16 +421,6 @@ app.get('/', (req, res) => {
 app.use((err, req, res, next) => {
   console.error('🚨 Server Error:', err.stack);
   
-  // CORS errors
-  if (err.message === 'Not allowed by CORS') {
-    return res.status(403).json({
-      error: 'CORS Error',
-      message: 'Origin not allowed',
-      allowedOrigins: allowedOrigins,
-      yourOrigin: req.headers.origin
-    });
-  }
-  
   // Multer file upload errors
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
@@ -509,11 +429,23 @@ app.use((err, req, res, next) => {
         message: 'File size must be less than 10MB'
       });
     }
+    return res.status(400).json({
+      error: 'File upload error',
+      message: err.message
+    });
+  }
+  
+  // Custom error for file type
+  if (err.message.includes('Only Excel files')) {
+    return res.status(400).json({
+      error: 'Invalid file type',
+      message: err.message
+    });
   }
   
   res.status(500).json({ 
     error: 'Something went wrong!',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
+    message: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message
   });
 });
 
@@ -537,23 +469,26 @@ app.use('*', (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log('');
-  console.log('='.repeat(60));
-  console.log('🌳 ReForest Backend Server Started');
-  console.log('='.repeat(60));
-  console.log(`📡 Server running on: http://localhost:${PORT}`);
-  console.log(`🏥 Health check: http://localhost:${PORT}/health`);
-  console.log(`🤖 ML Service: http://localhost:${PORT}/api/ml/status`);
-  console.log(`📊 Dataset upload: http://localhost:${PORT}/api/ml/upload-dataset`);
-  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔥 Firebase: ${isInitialized() ? 'Connected' : 'Initializing...'}`);
-  console.log(`🔒 CORS: Enabled for ${allowedOrigins.length} origins`);
-  console.log(`   - ${allowedOrigins.join('\n   - ')}`);
-  console.log(`🤖 ML Backend: Ready for dataset upload`);
-  console.log('='.repeat(60));
-  console.log('');
-});
+
+// Only start server if not in Vercel (Vercel handles this)
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log('');
+    console.log('='.repeat(60));
+    console.log('🌳 ReForest Backend Server Started');
+    console.log('='.repeat(60));
+    console.log(`📡 Server running on: http://localhost:${PORT}`);
+    console.log(`🏥 Health check: http://localhost:${PORT}/health`);
+    console.log(`🤖 ML Service: http://localhost:${PORT}/api/ml/status`);
+    console.log(`📊 Dataset upload: http://localhost:${PORT}/api/ml/upload-dataset`);
+    console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🔥 Firebase RTDB: Connected`);
+    console.log(`📚 Firestore: Connected`);
+    console.log(`🤖 ML Backend: Ready for dataset upload`);
+    console.log('='.repeat(60));
+    console.log('');
+  });
+}
 
 // Graceful shutdown
 process.on('SIGINT', () => {
