@@ -157,15 +157,8 @@ app.get('/health', async (req, res) => {
 app.post('/api/ml/upload-dataset', upload.single('dataset'), async (req, res) => {
   try {
     console.log('📥 Upload request received');
-    console.log('Headers:', req.headers);
-    console.log('File:', req.file ? {
-      originalname: req.file.originalname,
-      mimetype: req.file.mimetype,
-      size: req.file.size
-    } : 'No file');
-
+    
     if (!req.file) {
-      console.error('❌ No file in request');
       return res.status(400).json({ 
         error: 'No file uploaded',
         message: 'Please select an Excel file to upload'
@@ -173,16 +166,12 @@ app.post('/api/ml/upload-dataset', upload.single('dataset'), async (req, res) =>
     }
 
     console.log(`📤 Processing dataset upload: ${req.file.originalname}`);
-    console.log(`📦 File size: ${(req.file.size / 1024).toFixed(2)} KB`);
     
-    // CRITICAL: For Vercel, file is in memory (req.file.buffer)
-    // Pass the buffer directly to DatasetService
+    // ✅ CRITICAL: Use buffer instead of file path
     const dataset = await datasetService.loadDatasetFromBuffer(
-      req.file.buffer,
+      req.file.buffer,  // ← Using buffer, not file path
       req.file.originalname
     );
-    
-    console.log(`✅ Dataset processed: ${dataset.length} species loaded`);
     
     res.json({ 
       success: true, 
@@ -194,8 +183,6 @@ app.post('/api/ml/upload-dataset', upload.single('dataset'), async (req, res) =>
     
   } catch (error) {
     console.error('❌ Dataset upload error:', error);
-    console.error('Error stack:', error.stack);
-    
     res.status(500).json({ 
       error: 'Dataset processing failed',
       message: error.message,
